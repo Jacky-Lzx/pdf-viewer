@@ -1,5 +1,5 @@
 use crate::{cache::TextureCache, document::RenderKey};
-use eframe::egui::{self, TextureHandle};
+use eframe::egui::{self, TextureId};
 use std::collections::HashSet;
 
 pub const IMAGE_SIZE: [f32; 2] = [144.0, 192.0];
@@ -55,7 +55,7 @@ impl Thumbnails {
         self.wanted.clear();
     }
 
-    pub fn want(&mut self, key: RenderKey) -> Option<TextureHandle> {
+    pub fn want(&mut self, key: RenderKey) -> Option<TextureId> {
         self.wanted.push(key);
         self.cache.get(&key)
     }
@@ -70,15 +70,19 @@ impl Thumbnails {
 
     pub fn requests(&mut self) -> Option<Vec<RenderKey>> {
         self.failed.retain(|key| self.wanted.contains(key));
-        let missing: Vec<_> = self
+        let missing = self
             .wanted
             .iter()
             .filter(|key| !self.cache.contains(key) && !self.failed.contains(key))
-            .copied()
-            .collect();
-        if self.requested.as_ref() == Some(&missing) {
+            .copied();
+        if self
+            .requested
+            .as_ref()
+            .is_some_and(|requested| requested.iter().copied().eq(missing.clone()))
+        {
             return None;
         }
+        let missing: Vec<_> = missing.collect();
         self.requested = Some(missing.clone());
         Some(missing)
     }

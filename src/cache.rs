@@ -1,5 +1,5 @@
 use crate::document::RenderKey;
-use eframe::egui::TextureHandle;
+use eframe::egui::{TextureHandle, TextureId};
 use std::collections::HashMap;
 
 const BUDGET: usize = 96 * 1024 * 1024;
@@ -67,15 +67,16 @@ impl TextureCache {
         self.protected = Some(key);
     }
 
-    pub fn get(&mut self, key: &RenderKey) -> Option<TextureHandle> {
+    /// Drawing needs only the ID; the cache retains ownership until eviction.
+    pub fn get(&mut self, key: &RenderKey) -> Option<TextureId> {
         self.clock += 1;
         let entry = self.entries.get_mut(key)?;
         entry.used = self.clock;
         self.hits += 1;
-        Some(entry.texture.clone())
+        Some(entry.texture.id())
     }
 
-    pub fn fallback(&mut self, key: RenderKey) -> Option<TextureHandle> {
+    pub fn fallback(&mut self, key: RenderKey) -> Option<TextureId> {
         let best = self
             .entries
             .keys()
@@ -142,6 +143,30 @@ mod tests {
             ColorImage::filled([4, 4], Color32::WHITE),
             TextureOptions::LINEAR,
         )
+    }
+
+    #[test]
+    fn drawing_ids_keep_cache_ownership_and_release_on_eviction() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::with_budget(64);
+        let first = texture(&ctx);
+        let id = first.id();
+        assert!(cache.insert(key(0), first));
+        let drawn = cache.get(&key(0)).unwrap();
+        assert_eq!(drawn, id);
+        assert_eq!(
+            cache.fallback(RenderKey {
+                width: 64,
+                ..key(0)
+            }),
+            Some(id)
+        );
+        assert_eq!(ctx.tex_manager().read().meta(id).unwrap().retain_count, 1);
+        assert!(cache.insert(key(1), texture(&ctx)));
+        assert!(ctx.tex_manager().read().meta(id).is_none());
+        let second = cache.get(&key(1)).unwrap();
+        cache.clear();
+        assert!(ctx.tex_manager().read().meta(second).is_none());
     }
 
     #[test]

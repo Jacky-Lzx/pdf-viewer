@@ -1828,7 +1828,7 @@ impl Folio {
                 );
                 if let Some(texture) = texture {
                     painter.image(
-                        texture.id(),
+                        texture,
                         page_rect,
                         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                         Color32::WHITE,
