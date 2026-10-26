@@ -1046,7 +1046,7 @@ impl Folio {
                     } else {
                         1
                     };
-                    picker.motion = picker.motion.saturating_add(delta);
+                    picker.motions.push(delta);
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 }
@@ -1071,7 +1071,7 @@ impl Folio {
                     } else {
                         1
                     };
-                    self.outline.motion = self.outline.motion.saturating_add(delta);
+                    self.outline.motions.push(delta);
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 }

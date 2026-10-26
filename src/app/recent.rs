@@ -53,9 +53,8 @@ impl Folio {
                 if input.changed() {
                     picker.filter();
                 }
-                if !ui.is_sizing_pass() && picker.motion != 0 {
-                    let motion = std::mem::take(&mut picker.motion);
-                    picker.step(motion);
+                if !ui.is_sizing_pass() {
+                    picker.apply_motions();
                 }
                 if !ui.is_sizing_pass() && std::mem::take(&mut picker.confirm) {
                     chosen = picker.selected_path().map(ToOwned::to_owned);

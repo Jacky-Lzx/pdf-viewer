@@ -75,10 +75,7 @@ impl Folio {
                 }
                 keyboard_focus = response.has_focus() || response.lost_focus();
                 if !ui.is_sizing_pass() {
-                    let motion = std::mem::take(&mut self.outline.motion);
-                    if motion != 0 {
-                        self.outline.step(motion);
-                    }
+                    self.outline.apply_motions();
                     if std::mem::take(&mut self.outline.confirm)
                         && let Some(index) = self.outline.selected()
                     {

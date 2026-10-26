@@ -14,7 +14,7 @@ pub struct RecentPicker {
     pub selected: usize,
     pub focus: bool,
     pub reveal: bool,
-    pub motion: isize,
+    pub motions: Vec<isize>,
     pub confirm: bool,
 }
 
@@ -45,7 +45,7 @@ impl RecentPicker {
             selected: 0,
             focus: true,
             reveal: true,
-            motion: 0,
+            motions: Vec::new(),
             confirm: false,
         }
     }
@@ -79,6 +79,15 @@ impl RecentPicker {
             .saturating_add_signed(delta)
             .min(self.len().saturating_sub(1));
         self.reveal = true;
+    }
+
+    pub fn apply_motions(&mut self) {
+        // Clamp each event in order. Summing up/down first loses movement at edges.
+        let mut motions = std::mem::take(&mut self.motions);
+        for delta in motions.drain(..) {
+            self.step(delta);
+        }
+        self.motions = motions;
     }
 
     pub fn label(&self, row: usize) -> &str {

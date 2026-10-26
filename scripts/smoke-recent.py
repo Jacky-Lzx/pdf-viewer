@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,16 @@ def run(binary):
                 for character in query:
                     keyboard.key(character, delay=0 if burst else 0.025)
 
+            def burst_motion(keys):
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    for key in keys:
+                        keyboard.key(key, ctrl=True, delay=0)
+                    keyboard.key(0xFF0D, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                time.sleep(0.4)
+
             def selected_row_visible():
                 for y in range(150, 480, 2):
                     colors = [keyboard.pixel((x, y)) for x in (200, 400, 600)]
@@ -56,6 +67,14 @@ def run(binary):
             try:
                 window = wait_for(lambda: keyboard.focus("alpha.pdf"), "recent picker reader window")
                 expect(paths[0], 0, "initial document")
+                picker("manuals plan")
+                burst_motion(["k", "j"])
+                expect(paths[2], 2, "same-frame up at the top then down reaches the second result")
+                picker("alpha"); keyboard.key(0xFF0D)
+                expect(paths[0], 0, "reopen an unrelated document before the second boundary check")
+                picker("manuals plan")
+                burst_motion(["j", "j", "k"])
+                expect(paths[2], 2, "same-frame down at the bottom then up returns to the first result")
                 # The final distinguishing letter and Enter can arrive in one frame.
                 picker("manuals plan-z", burst=True)
                 keyboard.key(0xFF0D)
@@ -97,7 +116,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, 24-row compact scrolling, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, 24-row compact scrolling, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -106,6 +125,7 @@ def run(binary):
                 raise
             finally:
                 if application.poll() is None:
+                    application.send_signal(signal.SIGCONT)
                     application.terminate(); application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)
 

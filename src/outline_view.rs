@@ -13,7 +13,7 @@ pub struct OutlineView {
     selected: Option<usize>,
     pub query: String,
     pub focus: bool,
-    pub motion: isize,
+    pub motions: Vec<isize>,
     pub confirm: bool,
     pub reveal: bool,
 }
@@ -80,8 +80,17 @@ impl OutlineView {
 
     pub fn cancel_input(&mut self) {
         self.focus = false;
-        self.motion = 0;
+        self.motions.clear();
         self.confirm = false;
+    }
+
+    pub fn apply_motions(&mut self) {
+        // Reuse the input buffer while preserving each boundary clamp.
+        let mut motions = std::mem::take(&mut self.motions);
+        for delta in motions.drain(..) {
+            self.step(delta);
+        }
+        self.motions = motions;
     }
 
     pub fn has_children(&self, index: usize) -> bool {
@@ -292,11 +301,11 @@ mod tests {
         tree.select(2);
         assert_eq!(tree.selected(), Some(0), "hidden rows cannot be selected");
         tree.focus = true;
-        tree.motion = 5;
+        tree.motions.push(5);
         tree.confirm = true;
         tree.cancel_input();
         assert!(!tree.focus && !tree.confirm);
-        assert_eq!(tree.motion, 0);
+        assert!(tree.motions.is_empty());
         assert_eq!(tree.selected(), Some(0));
         tree.set_entries(Vec::new());
         assert_eq!(tree.selected(), None);
