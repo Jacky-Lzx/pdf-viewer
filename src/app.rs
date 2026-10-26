@@ -4,7 +4,7 @@ use crate::{
     links::{LinkHints, LinkTarget, PageLink},
     navigation::{Fit, Navigation},
     render_plan::RenderView,
-    state::{self, Library, ReadingState},
+    state::{self, Library, ReadingMark, ReadingState},
     text::SearchHit,
     worker::{Event, Worker},
 };
@@ -18,6 +18,12 @@ use std::{
 
 const ACCENT: Color32 = Color32::from_rgb(41, 114, 92);
 
+#[derive(Clone, Copy)]
+enum MarkAction {
+    Set,
+    Jump,
+}
+
 pub struct Folio {
     worker: Worker,
     library: Library,
@@ -29,6 +35,8 @@ pub struct Folio {
     links: HashMap<usize, Vec<PageLink>>,
     visible_links: Vec<PageLink>,
     hints: LinkHints,
+    mark_action: Option<MarkAction>,
+    pending_offset: Option<[f32; 2]>,
     cache: TextureCache,
     id: u64,
     loading: bool,
@@ -79,6 +87,8 @@ impl Folio {
             links: HashMap::new(),
             visible_links: Vec::new(),
             hints: LinkHints::default(),
+            mark_action: None,
+            pending_offset: None,
             cache: TextureCache::default(),
             id: 0,
             loading: false,
@@ -138,9 +148,11 @@ impl Folio {
         self.links.clear();
         self.visible_links.clear();
         self.hints.cancel();
+        self.mark_action = None;
         self.cache.clear();
         self.requested = None;
         self.pan = Vec2::ZERO;
+        self.pending_offset = Some(self.reading.offset);
         self.hits.clear();
         self.hit_index = None;
         self.query.clear();
@@ -175,6 +187,43 @@ impl Folio {
         if self.nav.count > 0 {
             self.reading.page = self.nav.page;
             self.library.remember(self.reading.clone());
+        }
+    }
+
+    fn current_offset(&self) -> [f32; 2] {
+        state::normalized_offset([self.pan.x, self.pan.y], [self.overflow.x, self.overflow.y])
+    }
+
+    fn mark(&mut self, name: char, action: MarkAction) {
+        if self.nav.count == 0 {
+            return;
+        }
+        match action {
+            MarkAction::Set => {
+                self.reading.marks.insert(
+                    name,
+                    ReadingMark {
+                        page: self.nav.page,
+                        fit: self.reading.fit,
+                        rotation: self.reading.rotation,
+                        offset: self.current_offset(),
+                    },
+                );
+                self.dirty = true;
+                self.notify(format!("Mark {name} saved · page {}", self.nav.page + 1));
+            }
+            MarkAction::Jump => {
+                if let Some(mark) = self.reading.marks.get(&name).cloned() {
+                    self.jump(mark.page);
+                    self.hints.cancel();
+                    self.reading.fit = mark.fit;
+                    self.reading.rotation = mark.rotation % 4;
+                    self.pending_offset = Some(mark.offset);
+                    self.dirty = true;
+                } else {
+                    self.notify(format!("Mark {name} is not set · use m{name} to save it"));
+                }
+            }
         }
     }
 
@@ -220,6 +269,8 @@ impl Folio {
         self.hints.cancel();
         self.visible_links.clear();
         self.pan = Vec2::ZERO;
+        self.pending_offset = None;
+        self.reading.offset = [0.0; 2];
         self.requested = None;
         self.dirty = true;
     }
@@ -261,6 +312,7 @@ impl Folio {
 
     fn find(&mut self) {
         self.hints.cancel();
+        self.mark_action = None;
         self.search_open = true;
         self.search_focus = true;
     }
@@ -313,6 +365,9 @@ impl Folio {
                     self.reading
                         .bookmarks
                         .retain(|page| *page < dimensions.len());
+                    self.reading.marks.retain(|name, mark| {
+                        name.is_ascii_lowercase() && mark.page < dimensions.len()
+                    });
                     self.dimensions = dimensions;
                     self.outline = outline;
                     self.dirty = true;
@@ -417,6 +472,7 @@ impl Folio {
             };
             if key == Key::Escape {
                 self.hints.cancel();
+                self.mark_action = None;
                 self.help = false;
                 self.goto_open = false;
                 self.search_open = false;
@@ -443,6 +499,17 @@ impl Folio {
             context.input_mut(|input| {
                 input.consume_key(modifiers, key);
             });
+            if let Some(action) = self.mark_action.take() {
+                if !modifiers.ctrl && !modifiers.command && !modifiers.alt {
+                    let name = key.name().to_ascii_lowercase();
+                    if name.len() == 1 && name.as_bytes()[0].is_ascii_lowercase() {
+                        self.mark(name.as_bytes()[0] as char, action);
+                    } else {
+                        self.notify("Use a letter a–z for a mark");
+                    }
+                }
+                continue;
+            }
             if self.hints.active {
                 if modifiers.ctrl || modifiers.command || modifiers.alt {
                     continue;
@@ -576,6 +643,14 @@ impl Folio {
                     }
                 }
                 Key::N | Key::F3 => self.next_hit(modifiers.shift),
+                Key::M => {
+                    self.nav.clear_prefix();
+                    self.mark_action = Some(MarkAction::Set);
+                }
+                Key::Quote | Key::Backtick => {
+                    self.nav.clear_prefix();
+                    self.mark_action = Some(MarkAction::Jump);
+                }
                 Key::B => self.bookmark(),
                 Key::Tab => {
                     self.library.sidebar = !self.library.sidebar;
@@ -850,6 +925,38 @@ impl Folio {
                             self.jump(page);
                         }
                     }
+                    if !self.reading.marks.is_empty() {
+                        ui.add_space(20.0);
+                        ui.label(RichText::new("MARKS").small().strong().color(ACCENT));
+                        let mut target = None;
+                        let mut remove = None;
+                        for (&name, mark) in &self.reading.marks {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .selectable_label(
+                                        mark.page == self.nav.page,
+                                        format!("'{name}   Page {}", mark.page + 1),
+                                    )
+                                    .on_hover_text(
+                                        "Restore page, zoom, rotation and scroll position",
+                                    )
+                                    .clicked()
+                                {
+                                    target = Some(name);
+                                }
+                                if ui.small_button("×").on_hover_text("Delete mark").clicked() {
+                                    remove = Some(name);
+                                }
+                            });
+                        }
+                        if let Some(name) = target {
+                            self.mark(name, MarkAction::Jump);
+                        }
+                        if let Some(name) = remove {
+                            self.reading.marks.remove(&name);
+                            self.dirty = true;
+                        }
+                    }
                     if !self.hits.is_empty() {
                         ui.add_space(20.0);
                         ui.label(
@@ -930,6 +1037,10 @@ impl Folio {
                 self.scale = view.scale(dimensions);
                 let size = Vec2::new(rotated[0], rotated[1]) * self.scale;
                 self.overflow = (size - rect.size()).max(Vec2::ZERO);
+                if let Some(offset) = self.pending_offset.take() {
+                    self.pan = Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0))
+                        * self.overflow;
+                }
                 self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 let response = ui.interact(
                     ui.max_rect(),
@@ -952,6 +1063,11 @@ impl Folio {
                         self.pan = Vec2::ZERO;
                         self.dirty = true;
                     }
+                }
+                let offset = self.current_offset();
+                if self.reading.offset != offset {
+                    self.reading.offset = offset;
+                    self.dirty = true;
                 }
                 let origin = rect.min + (rect.size() - size).max(Vec2::ZERO) * 0.5 - self.pan;
                 let page_rect = egui::Rect::from_min_size(origin, size);
@@ -1180,10 +1296,15 @@ impl Folio {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(12.0);
                     ui.label(
-                        RichText::new(if self.hints.active { "LINKS" } else { "NORMAL" })
-                            .small()
-                            .strong()
-                            .color(ACCENT),
+                        RichText::new(match self.mark_action {
+                            Some(MarkAction::Set) => "SET MARK · a–z",
+                            Some(MarkAction::Jump) => "GO TO MARK · a–z",
+                            None if self.hints.active => "LINKS",
+                            None => "NORMAL",
+                        })
+                        .small()
+                        .strong()
+                        .color(ACCENT),
                     );
                     if self.hints.active {
                         ui.monospace(&self.hints.prefix);
@@ -1292,6 +1413,7 @@ impl Folio {
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
+                        ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }

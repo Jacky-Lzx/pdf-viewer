@@ -1,7 +1,7 @@
 use crate::navigation::Fit;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -13,6 +13,27 @@ pub struct ReadingState {
     pub fit: Fit,
     pub rotation: u8,
     pub bookmarks: BTreeSet<usize>,
+    pub offset: [f32; 2],
+    pub marks: BTreeMap<char, ReadingMark>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReadingMark {
+    pub page: usize,
+    pub fit: Fit,
+    pub rotation: u8,
+    pub offset: [f32; 2],
+}
+
+pub fn normalized_offset(pan: [f32; 2], overflow: [f32; 2]) -> [f32; 2] {
+    std::array::from_fn(|axis| {
+        if overflow[axis] > 0.0 {
+            (pan[axis] / overflow[axis]).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    })
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -68,6 +89,17 @@ mod tests {
             path: "文档.pdf".into(),
             page: 7,
             bookmarks: [1, 7].into(),
+            offset: [0.25, 0.7],
+            marks: [(
+                'a',
+                ReadingMark {
+                    page: 3,
+                    fit: Fit::Custom(2.0),
+                    rotation: 1,
+                    offset: [0.4, 0.8],
+                },
+            )]
+            .into(),
             ..Default::default()
         });
         library.save(&path).unwrap();
@@ -75,6 +107,25 @@ mod tests {
         assert_eq!(restored.recent[0].page, 7);
         assert_eq!(restored.recent[0].bookmarks.len(), 2);
         assert_eq!(restored.recent[0].path, PathBuf::from("文档.pdf"));
+        assert_eq!(restored.recent[0].offset, [0.25, 0.7]);
+        let mark = &restored.recent[0].marks[&'a'];
+        assert_eq!(mark.page, 3);
+        assert_eq!(mark.fit, Fit::Custom(2.0));
+        assert_eq!(mark.rotation, 1);
+        assert_eq!(mark.offset, [0.4, 0.8]);
+    }
+
+    #[test]
+    fn older_settings_without_marks_or_offsets_still_load() {
+        let library: Library = serde_json::from_str(
+            r#"{"recent":[{"path":"a.pdf","page":4,"fit":"Width","bookmarks":[1]}]}"#,
+        )
+        .unwrap();
+        let book = &library.recent[0];
+        assert_eq!(book.page, 4);
+        assert_eq!(book.fit, Fit::Width);
+        assert_eq!(book.offset, [0.0; 2]);
+        assert!(book.marks.is_empty());
     }
 
     #[test]
