@@ -139,7 +139,31 @@ def run(binary):
                 keyboard.key("n")
                 time.sleep(0.3)
                 expect(0, "empty query does not restore stale matches")
-                print("PASS: default/case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and visible/clickable buttons in minimum window")
+                first(); find(toggles="cw")
+                expect(3, "both options enabled before saving keyboard preferences")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                assert json.loads(config_path.read_text())["search_options"] == {"match_case": True, "whole_word": True}
+                application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "reader restored with saved search options")
+                time.sleep(0.4)
+                first(); find()
+                expect(3, "restarted reader actually uses saved case-sensitive whole-word matching")
+                first(); keyboard.key("f", ctrl=True)
+                assert selected((272, 67)) and selected((315, 67)), "saved option buttons must be selected"
+                keyboard.click((285, 77)); keyboard.click((335, 77))
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                assert json.loads(config_path.read_text())["search_options"] == {"match_case": False, "whole_word": False}
+                application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "reader restored after option button changes")
+                time.sleep(0.4)
+                first(); find()
+                expect(0, "mouse option changes restore insensitive substring behavior after restart")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                assert json.loads(config_path.read_text())["recent"][0]["page"] == 0
+                print("PASS: saved keyboard/button preferences and actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -147,7 +171,8 @@ def run(binary):
                     print(config_path.read_text(), file=sys.stderr)
                 raise
             finally:
-                application.terminate(); application.wait(timeout=5)
+                if application.poll() is None:
+                    application.terminate(); application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)
 
 

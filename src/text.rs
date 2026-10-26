@@ -19,7 +19,8 @@ use hayro::{
 use search_index::SearchIndex;
 use std::{ops::Range, sync::OnceLock};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SearchOptions {
     pub match_case: bool,
     pub whole_word: bool,

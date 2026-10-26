@@ -11,7 +11,7 @@ use crate::{
     render_plan::{RenderPlan, RenderView},
     selection::{SelectionUnit, TextSelection},
     state::{self, Library, ReadingMark, ReadingState},
-    text::{SearchHit, SearchOptions},
+    text::SearchHit,
     worker::{Event, Worker},
 };
 use eframe::egui::{self, Color32, Key, RichText, Vec2};
@@ -69,7 +69,6 @@ pub struct Folio {
     search_open: bool,
     search_focus: bool,
     query: String,
-    search_options: SearchOptions,
     search_due: Option<Instant>,
     revision: u64,
     hits: Vec<SearchHit>,
@@ -138,7 +137,6 @@ impl Folio {
             search_open: false,
             search_focus: false,
             query: String::new(),
-            search_options: SearchOptions::default(),
             search_due: None,
             revision: 0,
             hits: Vec::new(),
@@ -300,7 +298,7 @@ impl Folio {
         self.pending_search_jump = None;
         self.restart_search();
         self.worker
-            .search(self.revision, String::new(), self.search_options);
+            .search(self.revision, String::new(), self.library.search_options);
         self.search_due =
             (!self.search_complete).then_some(Instant::now() + Duration::from_millis(180));
     }
@@ -978,10 +976,13 @@ impl Folio {
                 && matches!(key, Key::C | Key::W)
             {
                 if key == Key::C {
-                    self.search_options.match_case = !self.search_options.match_case;
+                    self.library.search_options.match_case =
+                        !self.library.search_options.match_case;
                 } else {
-                    self.search_options.whole_word = !self.search_options.whole_word;
+                    self.library.search_options.whole_word =
+                        !self.library.search_options.whole_word;
                 }
+                self.dirty = true;
                 context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 self.change_search();
                 continue;
@@ -1553,20 +1554,23 @@ impl Folio {
                             .hint_text("Search this document…"),
                     );
                     let case_changed = ui
-                        .selectable_label(self.search_options.match_case, "Aa")
+                        .selectable_label(self.library.search_options.match_case, "Aa")
                         .on_hover_text("Match case · Alt+C")
                         .clicked();
                     let word_changed = ui
-                        .selectable_label(self.search_options.whole_word, "Word")
+                        .selectable_label(self.library.search_options.whole_word, "Word")
                         .on_hover_text("Whole words · Alt+W")
                         .clicked();
                     if case_changed {
-                        self.search_options.match_case = !self.search_options.match_case;
+                        self.library.search_options.match_case =
+                            !self.library.search_options.match_case;
                     }
                     if word_changed {
-                        self.search_options.whole_word = !self.search_options.whole_word;
+                        self.library.search_options.whole_word =
+                            !self.library.search_options.whole_word;
                     }
                     if case_changed || word_changed {
+                        self.dirty = true;
                         response.request_focus();
                     }
                     if response.changed() || case_changed || word_changed {
@@ -2258,8 +2262,11 @@ impl eframe::App for Folio {
         self.canvas(context);
         if let Some(due) = self.search_due {
             if Instant::now() >= due {
-                self.worker
-                    .search(self.revision, self.query.clone(), self.search_options);
+                self.worker.search(
+                    self.revision,
+                    self.query.clone(),
+                    self.library.search_options,
+                );
                 self.search_due = None;
             } else {
                 context.request_repaint_after(due.saturating_duration_since(Instant::now()));

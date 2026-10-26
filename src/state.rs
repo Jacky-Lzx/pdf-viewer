@@ -1,4 +1,4 @@
-use crate::navigation::Fit;
+use crate::{navigation::Fit, text::SearchOptions};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -44,6 +44,7 @@ pub struct Library {
     pub night: bool,
     pub sidebar: bool,
     pub thumbnails: bool,
+    pub search_options: SearchOptions,
 }
 
 impl Library {
@@ -85,7 +86,13 @@ mod tests {
     fn library_roundtrip_preserves_unicode_paths_and_bookmarks() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config/library.json");
-        let mut library = Library::default();
+        let mut library = Library {
+            search_options: SearchOptions {
+                match_case: true,
+                whole_word: true,
+            },
+            ..Default::default()
+        };
         library.remember(ReadingState {
             path: "文档.pdf".into(),
             page: 7,
@@ -106,6 +113,7 @@ mod tests {
         });
         library.save(&path).unwrap();
         let restored = Library::load(&path);
+        assert_eq!(restored.search_options, library.search_options);
         assert_eq!(restored.recent[0].page, 7);
         assert_eq!(restored.recent[0].fit, Fit::Height);
         assert_eq!(restored.recent[0].bookmarks.len(), 2);
@@ -129,6 +137,23 @@ mod tests {
         assert_eq!(book.fit, Fit::Width);
         assert_eq!(book.offset, [0.0; 2]);
         assert!(book.marks.is_empty());
+        assert_eq!(library.search_options, SearchOptions::default());
+    }
+
+    #[test]
+    fn partial_search_preferences_preserve_existing_library_fields() {
+        let library: Library = serde_json::from_str(
+            r#"{"recent":[{"path":"a.pdf","page":4}],"dark":true,"search_options":{"whole_word":true}}"#,
+        ).unwrap();
+        assert_eq!(library.recent[0].page, 4);
+        assert!(library.dark);
+        assert_eq!(
+            library.search_options,
+            SearchOptions {
+                match_case: false,
+                whole_word: true
+            }
+        );
     }
 
     #[test]
