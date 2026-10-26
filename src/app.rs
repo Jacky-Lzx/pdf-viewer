@@ -1,3 +1,4 @@
+mod properties;
 mod recent;
 mod shortcuts;
 mod sidebar;
@@ -37,6 +38,8 @@ pub struct Folio {
     nav: Navigation,
     history: crate::history::ViewHistory,
     dimensions: Vec<[f32; 2]>,
+    info: crate::document_info::DocumentInfo,
+    properties_open: bool,
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
@@ -104,6 +107,8 @@ impl Folio {
             nav: Navigation::default(),
             history: crate::history::ViewHistory::default(),
             dimensions: Vec::new(),
+            info: crate::document_info::DocumentInfo::default(),
+            properties_open: false,
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
@@ -191,6 +196,8 @@ impl Folio {
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
+        self.info = crate::document_info::DocumentInfo::default();
+        self.properties_open = false;
         self.outline.set_entries(Vec::new());
         self.bookmark_pages.clear();
         self.labels = crate::page_labels::PageLabels::default();
@@ -611,6 +618,7 @@ impl Folio {
         self.selection.cancel();
         self.mark_action = None;
         self.help = false;
+        self.properties_open = false;
         self.goto_open = false;
         self.password_open = false;
         self.search_open = true;
@@ -695,6 +703,7 @@ impl Folio {
                 Event::Opened {
                     id,
                     dimensions,
+                    info,
                     outline,
                     labels,
                 } if id == self.id => {
@@ -728,6 +737,7 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
+                    self.info = info;
                     self.reveal_page = Some(self.nav.page);
                     self.outline.set_entries(outline);
                     self.labels = labels;
@@ -824,6 +834,7 @@ impl Folio {
                         self.password_focus = true;
                         self.goto_open = false;
                         self.help = false;
+                        self.properties_open = false;
                         self.recent_picker = None;
                         context.memory_mut(|memory| {
                             if let Some(id) = memory.focused() {
@@ -939,7 +950,7 @@ impl Folio {
             else {
                 continue;
             };
-            if (typing || !self.help)
+            if (typing || !(self.help || self.properties_open))
                 && matches!(
                     key,
                     Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
@@ -951,6 +962,7 @@ impl Folio {
             }
             if self.search_open
                 && !self.help
+                && !self.properties_open
                 && !self.password_open
                 && !self.goto_open
                 && modifiers.alt
@@ -973,6 +985,7 @@ impl Folio {
                 self.selection.cancel();
                 self.mark_action = None;
                 self.help = false;
+                self.properties_open = false;
                 self.recent_picker = None;
                 self.goto_open = false;
                 self.search_open = false;
@@ -1059,6 +1072,12 @@ impl Folio {
                     self.outline.motion = self.outline.motion.saturating_add(delta);
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                }
+                continue;
+            }
+            if self.properties_open {
+                if key == Key::Y && !modifiers.command && !modifiers.alt && !modifiers.ctrl {
+                    self.copy_properties(context);
                 }
                 continue;
             }
@@ -1276,6 +1295,7 @@ impl Folio {
                 Key::R => self.rotate_page(modifiers.shift),
                 Key::Slash => self.find(),
                 Key::C => self.focus_contents(),
+                Key::S => self.show_properties(context),
                 Key::F => {
                     self.hints.start(self.visible_links.len());
                     if !self.hints.active {
@@ -2020,7 +2040,13 @@ impl Folio {
                         ui.label(message);
                         context.request_repaint_after(Duration::from_secs(5) - at.elapsed());
                     } else if self.nav.count > 0 {
-                        ui.label(self.filename());
+                        if ui
+                            .add(egui::Label::new(self.filename()).sense(egui::Sense::click()))
+                            .on_hover_text("Document information · s")
+                            .clicked()
+                        {
+                            self.show_properties(context);
+                        }
                     } else {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
                     }
@@ -2137,6 +2163,7 @@ impl Folio {
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
+                        ("s, then y", "Document information, copy details"),
                         ("Ctrl/Cmd+w", "Close PDF and save reading position"),
                         ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
@@ -2190,6 +2217,7 @@ impl eframe::App for Folio {
         self.search_bar(context);
         self.status(context);
         self.dialogs(context);
+        self.properties_window(context);
         self.sidebar(context);
         self.canvas(context);
         if let Some(due) = self.search_due {

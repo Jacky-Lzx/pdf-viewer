@@ -57,6 +57,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
 | 搜索输入框中的 `Enter` / `Shift+Enter` | 下一个 / 上一个匹配；结果尚未就绪时等待扫描 |
 | `Ctrl/Cmd+p` | 筛选最近文档；方向键或 `Ctrl+j/k` 选择，回车打开 |
+| `s`，然后 `y` | 查看文档信息并复制路径、格式、大小、页数和元数据；也可点击底栏文件名打开 |
 | `c` | 打开目录并筛选章节；方向键或 `Ctrl+j/k` 选择，回车跳转，`Escape` 返回阅读 |
 | `Alt+c` / `Alt+w` | 搜索栏打开时切换区分大小写 / 整词匹配 |
 | `n` / `N`，`3n` / `3N` | 下一个 / 上一个搜索匹配，支持数字计数（`F3` / `Shift+F3` 同样生效） |
@@ -168,6 +169,7 @@ xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-close.py target/release/folio
+xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio

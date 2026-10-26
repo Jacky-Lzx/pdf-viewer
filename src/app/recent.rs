@@ -14,6 +14,7 @@ impl Folio {
         self.selection.cancel();
         self.mark_action = None;
         self.help = false;
+        self.properties_open = false;
         self.goto_open = false;
         self.password_open = false;
         self.search_open = false;

@@ -18,6 +18,7 @@ pub enum Event {
     Opened {
         id: u64,
         dimensions: Vec<[f32; 2]>,
+        info: crate::document_info::DocumentInfo,
         outline: Vec<crate::outline::OutlineEntry>,
         labels: crate::page_labels::PageLabels,
     },
@@ -215,13 +216,14 @@ impl Worker {
                         }
                         let outline = crate::outline::read(&pdf);
                         let labels = crate::page_labels::PageLabels::read(&pdf);
-                        Ok::<_, String>((pdf, dimensions, outline, labels))
+                        let info = crate::document_info::DocumentInfo::read(&pdf);
+                        Ok::<_, String>((pdf, dimensions, outline, labels, info))
                     }))
                     .unwrap_or_else(|_| {
                         Err("The PDF engine could not process this document.".into())
                     });
                     match result {
-                        Ok((pdf, dimensions, outline, labels)) => {
+                        Ok((pdf, dimensions, outline, labels, info)) => {
                             active = Some((pdf, id));
                             emit(
                                 &tx,
@@ -229,6 +231,7 @@ impl Worker {
                                 Event::Opened {
                                     id,
                                     dimensions,
+                                    info,
                                     outline,
                                     labels,
                                 },
