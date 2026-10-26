@@ -1,7 +1,8 @@
 use crate::{
     cache::TextureCache,
     document::RenderKey,
-    links::{LinkHints, LinkTarget, PageLink},
+    link_hints::LinkHints,
+    links::{LinkTarget, PageLink},
     navigation::{Fit, Navigation},
     render_plan::RenderView,
     selection::TextSelection,
@@ -36,7 +37,7 @@ pub struct Folio {
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: HashMap<usize, Vec<PageLink>>,
-    visible_links: Vec<PageLink>,
+    visible_links: Vec<usize>,
     hints: LinkHints,
     mark_action: Option<MarkAction>,
     pending_offset: Option<[f32; 2]>,
@@ -758,7 +759,11 @@ impl Folio {
                 let name = key.name().to_ascii_lowercase();
                 if name.len() == 1
                     && let Some(index) = self.hints.press(name.as_bytes()[0] as char)
-                    && let Some(link) = self.visible_links.get(index)
+                    && let Some(&link_index) = self.visible_links.get(index)
+                    && let Some(link) = self
+                        .links
+                        .get(&self.nav.page)
+                        .and_then(|links| links.get(link_index))
                 {
                     self.follow_link(link.target.clone(), context);
                 }
@@ -922,7 +927,15 @@ impl Folio {
                 }
                 Key::B => self.bookmark(),
                 Key::Tab => {
+                    self.hints.cancel();
                     self.library.sidebar = !self.library.sidebar;
+                    self.dirty = true;
+                }
+                Key::T => {
+                    self.hints.cancel();
+                    self.library.thumbnails = !self.library.thumbnails;
+                    self.library.sidebar = true;
+                    self.thumbnails.reveal = Some(self.nav.page);
                     self.dirty = true;
                 }
                 Key::D => {
@@ -1837,29 +1850,41 @@ impl Folio {
             self.visible_links.clear();
             return;
         }
-        self.visible_links = self
+        let links = self
             .links
             .get(&self.nav.page)
-            .into_iter()
-            .flatten()
-            .filter(|link| {
-                self.link_rect(link.rect, page_rect, dimensions)
-                    .intersects(ui.clip_rect())
-            })
-            .cloned()
-            .collect();
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let mut visible = 0;
+        let mut changed = false;
+        for (index, link) in links.iter().enumerate() {
+            if self
+                .link_rect(link.rect, page_rect, dimensions)
+                .intersects(ui.clip_rect())
+            {
+                if let Some(previous) = self.visible_links.get_mut(visible) {
+                    changed |= *previous != index;
+                    *previous = index;
+                } else {
+                    self.visible_links.push(index);
+                    changed = true;
+                }
+                visible += 1;
+            }
+        }
+        changed |= self.visible_links.len() != visible;
+        self.visible_links.truncate(visible);
+        if changed {
+            self.hints.cancel();
+        }
+        let matching = self.hints.matching_range();
         let mut follow = None;
-        for (index, link) in self.visible_links.iter().enumerate() {
+        for (index, &link_index) in self.visible_links.iter().enumerate() {
+            let link = &links[link_index];
             let rect = self
                 .link_rect(link.rect, page_rect, dimensions)
                 .intersect(page_rect)
                 .intersect(ui.clip_rect());
-            let description = match &link.target {
-                LinkTarget::Destination(destination) => {
-                    format!("Go to page {}", self.page_name(destination.page))
-                }
-                LinkTarget::Url(url) => url.clone(),
-            };
             let response = ui
                 .interact(
                     rect,
@@ -1867,15 +1892,19 @@ impl Folio {
                     egui::Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text(description);
+                .on_hover_ui(|ui| match &link.target {
+                    LinkTarget::Destination(destination) => {
+                        ui.label(format!("Go to page {}", self.page_name(destination.page)));
+                    }
+                    LinkTarget::Url(url) => {
+                        ui.label(url);
+                    }
+                });
             if response.clicked() {
                 follow = Some(link.target.clone());
             }
-            if self.hints.active {
-                let label = crate::links::hint_label(index, self.visible_links.len());
-                if !label.starts_with(&self.hints.prefix) {
-                    continue;
-                }
+            if matching.contains(&index) {
+                let label = crate::link_hints::label(index, self.visible_links.len());
                 let painter = ui.painter();
                 let text =
                     painter.layout_no_wrap(label, egui::FontId::monospace(14.0), Color32::WHITE);
@@ -2077,6 +2106,7 @@ impl Folio {
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
+                        ("t", "Toggle page previews and open sidebar"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),

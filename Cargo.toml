@@ -37,3 +37,7 @@ path = "src/main.rs"
 [[bench]]
 name = "rotation"
 harness = false
+
+[[bench]]
+name = "link_hints"
+harness = false

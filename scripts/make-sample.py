@@ -63,7 +63,7 @@ PAGES = [
 ]
 
 
-def make_pdf(nested_outline=False, destination_views=None):
+def make_pdf(nested_outline=False, destination_views=None, hint_links=0):
     def destination(index):
         view = (destination_views or {}).get(index, "/Fit")
         return f"[{5 + index * 2} 0 R {view}]"
@@ -83,6 +83,13 @@ def make_pdf(nested_outline=False, destination_views=None):
             page = objects[page_id - 1].decode()
             links = f"/Annots [<< /Type /Annot /Subtype /Link /Rect [48 150 275 178] /Border [0 0 0] /Dest {destination(1)} >> << /Type /Annot /Subtype /Link /Rect [330 150 505 178] /Border [0 0 0] /A << /S /URI /URI (https://www.rust-lang.org/) >> >>]"
             objects[page_id - 1] = (page[:-2] + links + " >>").encode()
+            if hint_links:
+                annotations = []
+                for link in range(hint_links):
+                    x, y = 20 + (link % 40) * 14, 120 + (link // 40) * 20
+                    target = (link % (len(PAGES) - 1)) + 1
+                    annotations.append(f"<< /Type /Annot /Subtype /Link /Rect [{x} {y} {x + 12} {y + 16}] /Border [0 0 0] /Dest {destination(target)} >>")
+                objects[page_id - 1] = (page[:-2] + "/Annots [" + " ".join(annotations) + "] >>").encode()
         text(48, 620, 29, title, True)
         for row, line in enumerate(lines):
             text(48, 555 - row * 28, 12, line)

@@ -27,7 +27,7 @@ pub fn read<'a>(page: &Page<'a>, destinations: &DestinationIndex<'a>) -> Vec<Pag
     let transform = page.initial_transform(true).to_kurbo();
     annotations
         .iter::<Dict<'_>>()
-        .take(1000)
+        .take(crate::link_hints::MAX_LINKS)
         .filter_map(|annotation| {
             if annotation.get::<Name<'_>>(b"Subtype")?.as_ref() != b"Link" {
                 return None;
@@ -70,86 +70,10 @@ pub fn read<'a>(page: &Page<'a>, destinations: &DestinationIndex<'a>) -> Vec<Pag
         .collect()
 }
 
-pub fn hint_label(mut index: usize, count: usize) -> String {
-    let digits = if count > 676 {
-        3
-    } else if count > 26 {
-        2
-    } else {
-        1
-    };
-    let mut label = vec![b'a'; digits];
-    for position in (0..digits).rev() {
-        label[position] += (index % 26) as u8;
-        index /= 26;
-    }
-    String::from_utf8(label).expect("ASCII link hint")
-}
-
-#[derive(Default)]
-pub struct LinkHints {
-    pub active: bool,
-    pub prefix: String,
-    count: usize,
-}
-
-impl LinkHints {
-    pub fn start(&mut self, count: usize) {
-        self.active = count > 0;
-        self.prefix.clear();
-        self.count = count;
-    }
-    pub fn cancel(&mut self) {
-        self.active = false;
-        self.prefix.clear();
-    }
-    pub fn press(&mut self, letter: char) -> Option<usize> {
-        if !self.active || !letter.is_ascii_lowercase() {
-            return None;
-        }
-        self.prefix.push(letter);
-        let mut matching = false;
-        for index in 0..self.count {
-            let label = hint_label(index, self.count);
-            if label == self.prefix {
-                self.cancel();
-                return Some(index);
-            }
-            matching |= label.starts_with(&self.prefix);
-        }
-        if !matching {
-            self.cancel();
-        }
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use hayro::hayro_syntax::Pdf;
-
-    #[test]
-    fn hint_labels_are_unique_and_never_prefix_one_another() {
-        for count in [1, 26, 27, 676, 1000] {
-            let labels: std::collections::HashSet<_> =
-                (0..count).map(|i| hint_label(i, count)).collect();
-            assert_eq!(labels.len(), count);
-            assert!(
-                labels
-                    .iter()
-                    .all(|label| label.len() == hint_label(0, count).len())
-            );
-        }
-        let mut hints = LinkHints::default();
-        hints.start(27);
-        assert_eq!(hints.press('b'), None);
-        assert_eq!(hints.press('a'), Some(26));
-        assert!(!hints.active);
-        hints.start(3);
-        assert_eq!(hints.press('z'), None);
-        assert!(!hints.active);
-    }
 
     #[test]
     fn pdf_links_resolve_targets_and_flip_y_coordinates() {

@@ -52,6 +52,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `b` | 添加 / 删除当前页书签 |
 | `ma`，`'a` 或 `` `a `` | 保存 / 返回命名位置，字母可用 `a`–`z`；同时恢复缩放、旋转和页内滚动 |
 | `Tab` | 打开 / 关闭侧栏 |
+| `t` | 切换页码列表 / 缩略图，并打开侧栏 |
 | `d` / `i` | 切换深色界面 / 反转页面颜色 |
 | `y` | 复制当前页文本 |
 | `v`，拖选，`y` 或 `Ctrl/Cmd+C` | 选择并复制部分文本；`v` 或 `Escape` 退出选择模式 |
@@ -67,7 +68,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 大幅面图纸也能适合整页：缩放下限会随页面尺寸降低，低于 5% 后仍可渐进缩放；极端页面会限制最大缩放，保持界面坐标可用。
 
-侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图。点击预览跳页，键盘翻页后预览会跟随当前页；预览支持页面旋转和颜色反转，并记住所选模式。
+侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图，也可按 `t` 切换并打开侧栏。点击预览跳页并保留列表的滚动位置，键盘翻页后预览会跟随当前页；预览支持页面旋转和颜色反转，并记住所选模式。
 
 重新编译或更新 PDF 后，按 `Ctrl/Cmd+r` 可重新加载，保留页码、缩放、旋转、相对滚动位置和有效标记，并重新搜索当前查询。只有解析成功才切换文档；若文件暂时写入不完整，原文档仍可阅读，文件恢复后再次重新加载即可。
 
@@ -83,6 +84,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 - 按物理像素渲染，宽度以 32 像素分档；单页限制为约 1600 万像素。
 - 搜索输入延迟 180 ms 合并请求，复用 Unicode 完整大小写折叠索引，支持 `Straße` / `STRASSE`、`Σ` / `σ` / `ς` 和连字，以二分定位当前页匹配与文本坐标并合并相邻高亮；结果分页面返回，最多保留 10,000 个匹配。侧栏按可见行绘制全部结果，`n` / `N` 同步定位列表；旋转、放大后也会滚到匹配处。
 - 搜索尚未返回时按 `Enter` 会保留跳转请求，等结果就绪后定位；关闭搜索或主动翻页会取消待处理的跳转。
+- 链接提示按字母前缀直接计算匹配索引范围，最多检查三个字符；只为匹配的提示生成标签。可见链接复用索引数组，重绘时不复制链接目标，悬停后才生成说明文字。
 - 渲染器直接移交像素缓冲区；后台结果队列最多容纳 4 条消息，避免 UI 暂停时无限积累图像。
 - 没有输入或后台结果时，界面不持续重绘。
 
@@ -99,12 +101,15 @@ cargo run --release -- --text assets/folio-guide.pdf 1
 cargo run --release -- --benchmark assets/folio-guide.pdf 5
 # 像素旋转专项基准，交替比较原实现与当前实现
 cargo bench --locked --bench rotation -- 9
+# 链接提示匹配基准，比较逐标签扫描与前缀范围计算
+cargo bench --locked --bench link_hints -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
+xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

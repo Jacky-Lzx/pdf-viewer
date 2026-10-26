@@ -57,8 +57,7 @@ def run(binary):
             try:
                 application = launch()
                 expect(0, "initial reading state")
-                keyboard.key(0xFF09)
-                keyboard.click((126, 205))
+                keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"]), "preview preference")
                 wait_for(preview_ready, "actual PDF pixels in first preview")
                 keyboard.click((90, 500))
@@ -78,7 +77,7 @@ def run(binary):
                 keyboard.key("g"); keyboard.key("g")
                 wait_for(preview_ready, "return to cached first preview")
                 keyboard.key("i")
-                wait_for(lambda: sum(keyboard.pixel((23, 330))) < 100, "inverted preview pixels")
+                wait_for(lambda: sum(keyboard.pixel((90, 330))) < 100, "inverted preview pixels")
                 keyboard.key("r")
                 wait_for(lambda: saved(lambda _, book: book["rotation"] == 1), "rotated reading view")
                 # Rotated landscape preview leaves empty space above its image.
@@ -102,8 +101,12 @@ def run(binary):
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"] and state["sidebar"]), "restore preview mode and sidebar")
                 keyboard.key("g"); keyboard.key("g")
                 wait_for(preview_ready, "restored preview mode renders PDF images")
-                keyboard.click((63, 205))
+                keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: not state["thumbnails"]), "switch back to compact page list")
+                keyboard.key(0xFF09)
+                wait_for(lambda: saved(lambda state, _: not state["sidebar"]), "close sidebar")
+                keyboard.key("t")
+                wait_for(lambda: saved(lambda state, _: state["thumbnails"] and state["sidebar"]), "preview key reopens hidden sidebar")
                 print("PASS: 80-page previews, rendered pixels, clicks, Vim tracking, scrolling, inversion, rotation, compact window and persistence")
             except Exception:
                 log.flush(); log.seek(0)
