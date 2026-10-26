@@ -69,7 +69,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 大幅面图纸也能适合整页：缩放下限会随页面尺寸降低，低于 5% 后仍可渐进缩放；极端页面会限制最大缩放，保持界面坐标可用。
 
-侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图，也可按 `t` 切换并打开侧栏。点击预览跳页并保留列表的滚动位置，键盘翻页后预览会跟随当前页；预览支持页面旋转和颜色反转，并记住所选模式。
+侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图，也可按 `t` 切换并打开侧栏。两种模式都会跟随键盘跳页；手动滚动侧栏后再次按 `gg` / `G`，会重新显示目标页所在行。点击跳页时保留列表的滚动位置，便于连续点击相邻页。预览支持页面旋转和颜色反转，并记住所选模式。
 
 `v` 选择模式中双击按 Unicode 词边界选词，三击选中当前文本行；之后拖动会按相同单位扩展，单击恢复按字形选择。双击选择时保留缩放，退出选择模式后双击仍恢复适合整页。组合重音和 emoji 不会在词选择中被拆开；中文按 Unicode 默认词边界处理，整行范围取决于 PDF 提取出的文本换行。
 
@@ -114,6 +114,7 @@ xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
 xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
 xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
+xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

@@ -36,7 +36,6 @@ pub struct Thumbnails {
     wanted: Vec<RenderKey>,
     requested: Option<Vec<RenderKey>>,
     failed: HashSet<RenderKey>,
-    pub reveal: Option<usize>,
 }
 
 impl Default for Thumbnails {
@@ -46,7 +45,6 @@ impl Default for Thumbnails {
             wanted: Vec::new(),
             requested: None,
             failed: HashSet::new(),
-            reveal: None,
         }
     }
 }

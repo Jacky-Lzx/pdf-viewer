@@ -46,6 +46,7 @@ pub struct Folio {
     selection: TextSelection,
     cache: TextureCache,
     thumbnails: crate::thumbnails::Thumbnails,
+    reveal_page: Option<usize>,
     id: u64,
     loading: bool,
     reloading: bool,
@@ -107,6 +108,7 @@ impl Folio {
             selection: TextSelection::default(),
             cache: TextureCache::default(),
             thumbnails: crate::thumbnails::Thumbnails::default(),
+            reveal_page: None,
             id: 0,
             loading: false,
             reloading: false,
@@ -174,6 +176,7 @@ impl Folio {
         self.mark_action = None;
         self.cache.clear();
         self.thumbnails.clear();
+        self.reveal_page = None;
         self.requested = None;
         self.pan = Vec2::ZERO;
         self.pending_offset = Some(self.reading.offset);
@@ -351,6 +354,9 @@ impl Folio {
             self.history.record(current);
             self.page_changed();
         }
+        // Explicit navigation can reveal the current page even when the PDF
+        // page did not change, e.g. gg after scrolling only the sidebar.
+        self.reveal_page = Some(self.nav.page);
     }
     fn step(&mut self, delta: isize) {
         let current = self.current_position();
@@ -361,7 +367,7 @@ impl Folio {
         }
     }
     fn page_changed(&mut self) {
-        self.thumbnails.reveal = Some(self.nav.page);
+        self.reveal_page = Some(self.nav.page);
         self.pending_destination = None;
         self.nav.clear_prefix();
         self.hints.cancel();
@@ -537,7 +543,7 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
-                    self.thumbnails.reveal = Some(self.nav.page);
+                    self.reveal_page = Some(self.nav.page);
                     self.outline.set_entries(outline);
                     self.labels = labels;
                     if reloaded {
@@ -935,7 +941,7 @@ impl Folio {
                     self.hints.cancel();
                     self.library.thumbnails = !self.library.thumbnails;
                     self.library.sidebar = true;
-                    self.thumbnails.reveal = Some(self.nav.page);
+                    self.reveal_page = Some(self.nav.page);
                     self.dirty = true;
                 }
                 Key::D => {
@@ -1218,10 +1224,7 @@ impl Folio {
         }
         let mut target = None;
         let mut toggle = None;
-        let row_height = (ui.text_style_height(&egui::TextStyle::Button)
-            + 2.0 * ui.spacing().button_padding.y)
-            .max(ui.spacing().interact_size.y)
-            .max(20.0);
+        let row_height = Self::sidebar_row_height(ui);
         egui::ScrollArea::vertical()
             .id_salt("contents")
             .max_height(260.0)
@@ -1300,11 +1303,17 @@ impl Folio {
         ui.add_space(20.0);
     }
 
+    fn sidebar_row_height(ui: &egui::Ui) -> f32 {
+        (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y)
+            .max(ui.spacing().interact_size.y)
+            .max(20.0)
+    }
+
     fn page_previews(&mut self, ui: &mut egui::Ui) {
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("page-previews")
             .max_height((ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 400.0));
-        if let Some(page) = self.thumbnails.reveal.take() {
+        if let Some(page) = self.reveal_page.take() {
             scroll = scroll.vertical_scroll_offset(
                 page as f32 * (crate::thumbnails::ROW_HEIGHT + ui.spacing().item_spacing.y),
             );
@@ -1409,7 +1418,7 @@ impl Folio {
             self.jump(page);
             // The clicked row is already visible. Keep the preview scroll stable
             // so adjacent pages remain under the pointer after navigation.
-            self.thumbnails.reveal = None;
+            self.reveal_page = None;
         }
     }
 
@@ -1489,19 +1498,23 @@ impl Folio {
                                 .color(ACCENT),
                         );
                         let mut selected = None;
+                        let row_height = Self::sidebar_row_height(ui);
                         let mut results = egui::ScrollArea::vertical()
                             .id_salt("search-results")
-                            .max_height(280.0);
+                            .max_height(
+                                (ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 280.0),
+                            );
                         if let Some(index) = self.reveal_hit.take() {
                             results = results.vertical_scroll_offset(
-                                index as f32 * (25.0 + ui.spacing().item_spacing.y),
+                                index as f32 * (row_height + ui.spacing().item_spacing.y),
                             );
                         }
-                        results.show_rows(ui, 25.0, self.hits.len(), |ui, range| {
+                        results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
                             for index in range {
                                 let hit = &self.hits[index];
                                 if ui
-                                    .add(
+                                    .add_sized(
+                                        Vec2::new(ui.available_width(), row_height),
                                         egui::Button::selectable(
                                             self.hit_index == Some(index),
                                             format!(
@@ -1533,28 +1546,41 @@ impl Folio {
                                 .changed();
                         if changed {
                             self.dirty = true;
-                            self.thumbnails.reveal = Some(self.nav.page);
+                            self.reveal_page = Some(self.nav.page);
                         }
                     });
                     if self.library.thumbnails {
                         self.page_previews(ui);
                     } else {
-                        egui::ScrollArea::vertical()
+                        let row_height = Self::sidebar_row_height(ui);
+                        let mut scroll = egui::ScrollArea::vertical()
                             .id_salt("page-list")
-                            .max_height(300.0)
-                            .show_rows(ui, 25.0, self.nav.count, |ui, range| {
-                                for page in range {
-                                    if ui
-                                        .selectable_label(
+                            .max_height(
+                                (ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 300.0),
+                            );
+                        if let Some(page) = self.reveal_page.take() {
+                            scroll = scroll.vertical_scroll_offset(
+                                page as f32 * (row_height + ui.spacing().item_spacing.y),
+                            );
+                        }
+                        scroll.show_rows(ui, row_height, self.nav.count, |ui, range| {
+                            for page in range {
+                                if ui
+                                    .add_sized(
+                                        Vec2::new(ui.available_width(), row_height),
+                                        egui::Button::selectable(
                                             page == self.nav.page,
                                             format!("Page {}", self.page_name(page)),
                                         )
-                                        .clicked()
-                                    {
-                                        self.jump(page);
-                                    }
+                                        .truncate(),
+                                    )
+                                    .clicked()
+                                {
+                                    self.jump(page);
+                                    self.reveal_page = None;
                                 }
-                            });
+                            }
+                        });
                     }
                 });
             });
