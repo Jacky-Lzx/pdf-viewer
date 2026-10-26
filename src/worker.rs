@@ -71,11 +71,13 @@ struct OpenRequest {
 }
 struct SearchRequest {
     revision: u64,
-    query: SearchQuery,
+    query: String,
+    options: SearchOptions,
 }
 
 struct SearchProgress {
     request: SearchRequest,
+    query: Option<SearchQuery>,
     page: usize,
     hits: usize,
     cursor: text::SearchCursor,
@@ -86,6 +88,7 @@ impl SearchProgress {
     fn new(request: SearchRequest) -> Self {
         Self {
             request,
+            query: None,
             page: 0,
             hits: 0,
             cursor: text::SearchCursor::default(),
@@ -282,8 +285,13 @@ impl Worker {
         self.update(|pending| pending.replace_thumbnails(keys));
     }
     pub fn search(&self, revision: u64, query: String, options: SearchOptions) {
-        let query = SearchQuery::new(query, options);
-        self.update(|pending| pending.search = Some(SearchRequest { revision, query }));
+        self.update(|pending| {
+            pending.search = Some(SearchRequest {
+                revision,
+                query,
+                options,
+            })
+        });
     }
     pub fn copy(&self, page: usize) {
         self.update(|pending| pending.copy = Some(page));
@@ -359,6 +367,33 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 pending = wake.wait(pending).unwrap();
             }
         };
+        if matches!(job, Job::Search(_)) {
+            let progress = search.as_mut().expect("Search jobs have active progress");
+            if progress.query.is_none() {
+                // Prepare once, after higher-priority jobs, without the task lock.
+                let query = SearchQuery::new(
+                    std::mem::take(&mut progress.request.query),
+                    progress.request.options,
+                );
+                if query.is_empty() {
+                    search = None;
+                    continue;
+                }
+                progress.query = Some(query);
+                // Loading or a newer query may have arrived during normalization.
+                let pending = shared.0.lock().unwrap();
+                if pending.stop
+                    || pending.open.is_some()
+                    || pending.search.is_some()
+                    || pending.copy.is_some()
+                    || pending.inspect.is_some()
+                    || pending.links.is_some()
+                    || !pending.render.is_empty()
+                {
+                    continue;
+                }
+            }
+        }
         match job {
             Job::Links(page) => {
                 if let Some(data) = pdf.pages().get(page) {
@@ -472,7 +507,10 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     let limit = (10_000_usize - progress.hits).min(256);
                     let batch = text.search_batch(
                         page,
-                        &progress.request.query,
+                        progress
+                            .query
+                            .as_ref()
+                            .expect("Search jobs prepare their query"),
                         &mut progress.cursor,
                         limit,
                     );
@@ -688,6 +726,40 @@ mod tests {
         assert!(old_batches <= 5);
     }
 
+    #[test]
+    fn whitespace_query_cancels_dense_search_and_leaves_the_worker_idle() {
+        let file = dense_sample(12000);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.search(1, "dense".into(), SearchOptions::default());
+        assert!(matches!(
+            receive(&worker),
+            Event::Search {
+                revision: 1,
+                complete: false,
+                ..
+            }
+        ));
+        worker.search(2, " \n\t".into(), SearchOptions::default());
+        worker.copy(1);
+        loop {
+            match receive(&worker) {
+                Event::Search {
+                    revision: 1,
+                    complete: false,
+                    ..
+                } => {}
+                Event::Text { page: 1, .. } => break,
+                _ => panic!("Whitespace cancellation must not publish a new scan"),
+            }
+        }
+        assert!(matches!(
+            worker.events.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+    }
+
     fn render_key(page: usize) -> RenderKey {
         RenderKey {
             page,
@@ -746,7 +818,8 @@ mod tests {
             pending.replace_renders(vec![render_key(0)]);
             pending.search = Some(SearchRequest {
                 revision: 1,
-                query: SearchQuery::new("Rust".into(), SearchOptions::default()),
+                query: "Rust".into(),
+                options: SearchOptions::default(),
             });
         });
         assert!(matches!(
