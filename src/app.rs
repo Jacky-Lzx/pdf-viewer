@@ -408,9 +408,10 @@ impl Folio {
     }
 
     fn scroll(&mut self, delta: Vec2, turn_at_edge: bool) {
-        if delta != Vec2::ZERO {
-            self.hints.cancel();
+        if delta == Vec2::ZERO || self.resolve_view().is_none() {
+            return;
         }
+        self.hints.cancel();
         let old = self.pan;
         self.pan = (self.pan + delta).clamp(Vec2::ZERO, self.overflow);
         if turn_at_edge && (self.pan.y - old.y).abs() < 0.1 && delta.y.abs() > 0.0 {
@@ -454,20 +455,15 @@ impl Folio {
     }
 
     fn zoom_at(&mut self, factor: f32, pivot: Vec2) {
-        let Some(&dimensions) = self.dimensions.get(self.nav.page) else {
-            return;
-        };
         if !factor.is_finite() || factor <= 0.0 {
             return;
         }
-        self.hints.cancel();
-        let dimensions = if self.reading.rotation % 2 == 1 {
-            [dimensions[1], dimensions[0]]
-        } else {
-            dimensions
+        let Some(dimensions) = self.resolve_view() else {
+            return;
         };
+        self.hints.cancel();
         let viewport = [self.viewport.x, self.viewport.y];
-        let before = self.reading.fit.scale(dimensions, viewport);
+        let before = self.scale;
         let after = Fit::Custom(before * factor).scale(dimensions, viewport);
         let pan = crate::geometry::zoom_pan(
             [self.pan.x, self.pan.y],
@@ -480,6 +476,50 @@ impl Folio {
         self.pan = Vec2::new(pan[0], pan[1]);
         self.reading.fit = Fit::Custom(after);
         self.dirty = true;
+    }
+
+    /// Resolve this command's current geometry and pending position before the
+    /// next command uses pan/overflow, including commands queued in one frame.
+    fn resolve_view(&mut self) -> Option<[f32; 2]> {
+        let &dimensions = self.dimensions.get(self.nav.page)?;
+        let rotated = if self.reading.rotation % 2 == 1 {
+            [dimensions[1], dimensions[0]]
+        } else {
+            dimensions
+        };
+        self.scale = self
+            .reading
+            .fit
+            .scale(rotated, [self.viewport.x, self.viewport.y]);
+        self.overflow = (Vec2::from(rotated) * self.scale - self.viewport).max(Vec2::ZERO);
+        if let Some(offset) = self.pending_offset.take() {
+            self.pan =
+                Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0)) * self.overflow;
+        }
+        if let Some(focus) = self.pending_focus.take() {
+            let offset = crate::geometry::focus_offset(
+                focus,
+                dimensions,
+                self.reading.rotation,
+                self.scale,
+                [self.viewport.x, self.viewport.y],
+                [self.overflow.x, self.overflow.y],
+            );
+            self.pan = Vec2::from(offset);
+        }
+        if let Some((destination, origin)) = self.pending_destination.take() {
+            let offset = destination.pan(
+                dimensions,
+                self.reading.rotation,
+                self.scale,
+                [self.viewport.x, self.viewport.y],
+                origin,
+                [self.overflow.x, self.overflow.y],
+            );
+            self.pan = Vec2::from(offset);
+        }
+        self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
+        Some(rotated)
     }
 
     fn bookmark(&mut self) {
@@ -1482,10 +1522,8 @@ impl Folio {
                 let rect = ui.max_rect().shrink(24.0);
                 self.viewport = rect.size();
                 let dimensions = self.dimensions[self.nav.page];
-                let rotated = if self.reading.rotation % 2 == 1 {
-                    [dimensions[1], dimensions[0]]
-                } else {
-                    dimensions
+                let Some(rotated) = self.resolve_view() else {
+                    return;
                 };
                 let mut view = RenderView {
                     fit: self.reading.fit,
@@ -1495,36 +1533,7 @@ impl Folio {
                     night: self.library.night,
                     backwards: self.nav.direction < 0,
                 };
-                self.scale = view.scale(dimensions);
                 let mut size = Vec2::new(rotated[0], rotated[1]) * self.scale;
-                self.overflow = (size - rect.size()).max(Vec2::ZERO);
-                if let Some(offset) = self.pending_offset.take() {
-                    self.pan = Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0))
-                        * self.overflow;
-                }
-                if let Some(focus) = self.pending_focus.take() {
-                    let offset = crate::geometry::focus_offset(
-                        focus,
-                        dimensions,
-                        self.reading.rotation,
-                        self.scale,
-                        [self.viewport.x, self.viewport.y],
-                        [self.overflow.x, self.overflow.y],
-                    );
-                    self.pan = Vec2::new(offset[0], offset[1]);
-                }
-                if let Some((destination, origin)) = self.pending_destination.take() {
-                    let offset = destination.pan(
-                        dimensions,
-                        self.reading.rotation,
-                        self.scale,
-                        [self.viewport.x, self.viewport.y],
-                        origin,
-                        [self.overflow.x, self.overflow.y],
-                    );
-                    self.pan = Vec2::new(offset[0], offset[1]);
-                }
-                self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 let response = ui.interact(
                     ui.max_rect(),
                     ui.id().with("canvas"),

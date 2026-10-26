@@ -56,6 +56,37 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "Vim alignment reader window")
                 position(0, 0, "initial fit page", fit="Page")
+                sequence("wj", burst=True)
+                wait_for(lambda: saved(lambda _, book:
+                    book["page"] == 0 and book["fit"] == "Width" and 0 < book["offset"][1] < 1),
+                    "same-frame fit-width then scroll uses the new overflow without turning pages")
+                sequence("zb")
+                position(0, 1, "bottom before sequential zoom", fit="Width")
+                sequence("+")
+                reference = wait_for(lambda: saved(lambda _, book:
+                    book["page"] == 0 and isinstance(book["fit"], dict) and 0 < book["offset"][1] < 1),
+                    "sequential bottom then zoom preserves the viewport center")
+                sequence("wzt")
+                position(0, 0, "reset before batched bottom and zoom", fit="Width")
+                sequence("zb+", burst=True)
+                position(0, reference["offset"][1], "same-frame bottom then zoom matches sequential navigation",
+                         reference["fit"], reference["offset"][0])
+                sequence("wzt")
+                position(0, 0, "reset before batched bottom and upward scroll", fit="Width")
+                sequence("zbk", burst=True)
+                wait_for(lambda: saved(lambda _, book:
+                    book["page"] == 0 and book["fit"] == "Width" and 0 < book["offset"][1] < 0.999),
+                    "same-frame alignment then scroll moves from the pending bottom position")
+                sequence("wzbma")
+                wait_for(lambda: saved(lambda _, book:
+                    book["marks"].get("a", {}).get("offset", [0, 0])[1] == 1), "save the bottom position")
+                sequence("J")
+                position(1, 0, "leave the saved page", fit="Width")
+                sequence("'a+", burst=True)
+                position(0, reference["offset"][1], "same-frame restore and zoom use the saved position",
+                         reference["fit"], reference["offset"][0])
+                sequence("p")
+                position(0, 0, "reset before alignment regression", fit="Page")
                 sequence("wzb", burst=True)
                 position(0, 1, "same-frame fit-width and zb reach the bottom", fit="Width")
                 sequence("zz")
@@ -98,7 +129,7 @@ def run(binary):
                 position(3, 0, "restored zoom and horizontal position remain navigable", fit, horizontal, rotation=1)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: zt/zz/zb, same-frame fit changes, invalid/cancelled prefixes, consumed counts, preserved zoom/horizontal pan, rotated axes and restart")
+                print("PASS: same-frame fit/scroll/alignment/zoom/restore, zt/zz/zb, invalid/cancelled prefixes, counts, preserved zoom/pan, rotated axes and restart")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
