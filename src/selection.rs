@@ -1,7 +1,6 @@
 use crate::text::PageText;
 use hayro::kurbo::{Point, Rect};
 use std::{ops::Range, sync::Arc};
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum SelectionUnit {
@@ -9,25 +8,6 @@ pub enum SelectionUnit {
     Glyph,
     Word,
     Line,
-}
-
-fn line_range(text: &str, offset: usize) -> Range<usize> {
-    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let end = text[offset..]
-        .find('\n')
-        .map_or(text.len(), |index| offset + index);
-    start..end
-}
-
-fn word_range(text: &str, offset: usize) -> Range<usize> {
-    let line = line_range(text, offset);
-    text[line.clone()]
-        .split_word_bound_indices()
-        .find_map(|(start, word)| {
-            let range = line.start + start..line.start + start + word.len();
-            range.contains(&offset).then_some(range)
-        })
-        .unwrap_or(offset..offset)
 }
 
 #[derive(Default)]
@@ -105,12 +85,11 @@ impl TextSelection {
         if self.unit != SelectionUnit::Glyph
             && let Some((end, _)) = text.text[..range.end].char_indices().next_back()
         {
-            let bounds = if self.unit == SelectionUnit::Word {
-                word_range
+            range = if self.unit == SelectionUnit::Word {
+                text.word_range(range.start).start..text.word_range(end).end
             } else {
-                line_range
+                text.line_range(range.start).start..text.line_range(end).end
             };
-            range = bounds(&text.text, range.start).start..bounds(&text.text, end).end;
             // Keep CRLF's carriage return out of copied full lines.
             if self.unit == SelectionUnit::Line && text.text[..range.end].ends_with('\r') {
                 range.end -= 1;
@@ -226,6 +205,8 @@ mod tests {
     #[test]
     fn unicode_words_keep_combining_marks_emoji_apostrophes_and_punctuation_boundaries() {
         let text = "cafe\u{301}, can't 中文 👩‍💻\nnext";
+        let mut page = PageText::default();
+        page.text = text.into();
         for (needle, expected) in [
             ("e", "cafe\u{301}"),
             ("\u{301}", "cafe\u{301}"),
@@ -236,13 +217,13 @@ mod tests {
             ("ext", "next"),
         ] {
             let index = text.find(needle).unwrap();
-            assert_eq!(&text[word_range(text, index)], expected);
+            assert_eq!(&text[page.word_range(index)], expected);
         }
         assert_eq!(
-            line_range(text, text.len()),
+            page.line_range(text.len()),
             text.rfind('\n').unwrap() + 1..text.len()
         );
-        assert_eq!(line_range("", 0), 0..0);
+        assert_eq!(PageText::default().line_range(0), 0..0);
     }
 
     #[test]

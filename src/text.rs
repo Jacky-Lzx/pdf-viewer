@@ -145,9 +145,26 @@ pub fn advance_match(
 impl PageText {
     pub fn prepare_selection(&self) {
         if self.spans.len() >= 256 {
+            self.word_boundaries
+                .get_or_init(|| WordBoundaries::new(&self.text))
+                .prepare_lines(&self.text);
             self.selection_index
                 .get_or_init(|| crate::selection_index::SelectionIndex::new(&self.spans));
         }
+    }
+
+    pub fn word_range(&self, offset: usize) -> Range<usize> {
+        self.word_boundaries.get().map_or_else(
+            || boundaries::word_range(&self.text, offset),
+            |boundaries| boundaries.word_range(&self.text, offset),
+        )
+    }
+
+    pub fn line_range(&self, offset: usize) -> Range<usize> {
+        self.word_boundaries.get().map_or_else(
+            || boundaries::line_range(&self.text, offset),
+            |boundaries| boundaries.line_range(&self.text, offset),
+        )
     }
 
     pub fn nearest_span(&self, point: Point) -> Option<usize> {
