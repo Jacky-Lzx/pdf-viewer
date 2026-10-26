@@ -760,7 +760,21 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        for event in context.input(|input| input.events.clone()) {
+        // Snapshot only reader actions. Text, paste, IME and pointer events
+        // stay in egui without cloning their payloads or checking input focus.
+        for event in context.input(|input| {
+            input
+                .events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Copy | egui::Event::Key { pressed: true, .. }
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        }) {
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
