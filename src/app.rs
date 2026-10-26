@@ -100,6 +100,10 @@ impl Folio {
         let config = state::config_path();
         let library = Library::load(&config);
         set_theme(&cc.egui_ctx, library.dark);
+        // Reader zoom shortcuts must not fall through to egui's whole-UI zoom
+        // when text inputs or dialogs intentionally ignore document commands.
+        cc.egui_ctx
+            .options_mut(|options| options.zoom_with_keyboard = false);
         crate::fonts::install(cc.egui_ctx.clone());
         let mut app = Self {
             worker: Worker::new(cc.egui_ctx.clone()),
@@ -1107,6 +1111,16 @@ impl Folio {
             context.input_mut(|input| {
                 shortcuts::consume_text_shortcut(input, key, modifiers);
             });
+            if let Some(action) = shortcuts::zoom_action(key, modifiers) {
+                self.nav.clear_prefix();
+                self.mark_action = None;
+                match action {
+                    shortcuts::ZoomAction::In => self.zoom(1.2),
+                    shortcuts::ZoomAction::Out => self.zoom(1.0 / 1.2),
+                    shortcuts::ZoomAction::ActualSize => self.actual_size(),
+                }
+                continue;
+            }
             if let Some(action) = self.mark_action.take() {
                 if !modifiers.ctrl && !modifiers.command && !modifiers.alt {
                     let name = key.name().to_ascii_lowercase();
@@ -1513,7 +1527,11 @@ impl Folio {
                             self.step(1);
                         }
                         ui.separator();
-                        if ui.button("−").clicked() {
+                        if ui
+                            .button("−")
+                            .on_hover_text("Zoom out · − / Ctrl/Cmd+−")
+                            .clicked()
+                        {
                             self.zoom(1.0 / 1.2);
                         }
                         let percent = self.scale * 100.0;
@@ -1524,7 +1542,11 @@ impl Folio {
                         } else {
                             format!("{percent:.0}%")
                         });
-                        if ui.button("+").clicked() {
+                        if ui
+                            .button("+")
+                            .on_hover_text("Zoom in · + / Ctrl/Cmd++")
+                            .clicked()
+                        {
                             self.zoom(1.2);
                         }
                         if ui.button("Fit").on_hover_text("Fit page · p").clicked() {
@@ -2279,10 +2301,10 @@ impl Folio {
                         ("z0 / z$", "Current page left / right edge; keep vertical position"),
                         ("3r / 3R", "Rotate clockwise / counterclockwise three quarter turns"),
                         ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
-                        ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
+                        ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −  ·  Ctrl/Cmd++ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Mouse back / forward", "Restore the previous / next reading view"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
-                        ("a", "100% zoom, keeping the viewport center"),
+                        ("a / Ctrl/Cmd+0", "100% zoom, keeping the viewport center"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),

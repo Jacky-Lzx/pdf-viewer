@@ -1,5 +1,24 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ZoomAction {
+    In,
+    Out,
+    ActualSize,
+}
+
+pub(super) fn zoom_action(key: Key, modifiers: Modifiers) -> Option<ZoomAction> {
+    if !modifiers.command || modifiers.alt {
+        return None;
+    }
+    match key {
+        Key::Plus | Key::Equals => Some(ZoomAction::In),
+        Key::Minus => Some(ZoomAction::Out),
+        Key::Num0 if !modifiers.shift => Some(ZoomAction::ActualSize),
+        _ => None,
+    }
+}
+
 pub(super) fn reader_actions(
     input: &InputState,
 ) -> impl Iterator<Item = (Event, Option<char>)> + '_ {
@@ -165,6 +184,62 @@ pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_shortcuts_use_platform_command_and_preserve_altgr_and_shifted_zero() {
+        for platform in [
+            Modifiers {
+                ctrl: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+            Modifiers {
+                mac_cmd: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+        ] {
+            assert_eq!(zoom_action(Key::Equals, platform), Some(ZoomAction::In));
+            assert_eq!(zoom_action(Key::Plus, platform), Some(ZoomAction::In));
+            assert_eq!(zoom_action(Key::Minus, platform), Some(ZoomAction::Out));
+            assert_eq!(
+                zoom_action(Key::Num0, platform),
+                Some(ZoomAction::ActualSize)
+            );
+            assert_eq!(
+                zoom_action(
+                    Key::Plus,
+                    Modifiers {
+                        shift: true,
+                        ..platform
+                    }
+                ),
+                Some(ZoomAction::In)
+            );
+            assert_eq!(
+                zoom_action(
+                    Key::Num0,
+                    Modifiers {
+                        shift: true,
+                        ..platform
+                    }
+                ),
+                None
+            );
+            assert_eq!(
+                zoom_action(
+                    Key::Equals,
+                    Modifiers {
+                        alt: true,
+                        ..platform
+                    }
+                ),
+                None
+            );
+        }
+        assert_eq!(zoom_action(Key::Plus, Modifiers::NONE), None);
+        assert_eq!(zoom_action(Key::Plus, Modifiers::CTRL), None);
+    }
 
     fn key(key: Key, modifiers: Modifiers, pressed: bool) -> Event {
         Event::Key {
