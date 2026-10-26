@@ -70,7 +70,7 @@ pub struct Folio {
     hits: Vec<SearchHit>,
     hit_index: Option<usize>,
     reveal_hit: Option<usize>,
-    pending_search_jump: Option<bool>,
+    pending_search_jump: Option<(bool, usize)>,
     scanned: usize,
     scan_total: usize,
     search_complete: bool,
@@ -465,14 +465,18 @@ impl Folio {
     }
 
     fn next_hit(&mut self, reverse: bool) {
+        self.next_hits(reverse, 1);
+    }
+
+    fn next_hits(&mut self, reverse: bool, count: usize) {
+        let count = count.max(1);
         if self.hits.is_empty() {
             self.pending_search_jump =
-                (!self.search_complete || self.search_due.is_some()).then_some(reverse);
+                (!self.search_complete || self.search_due.is_some()).then_some((reverse, count));
             return;
         }
-        let index = match self.hit_index {
-            Some(index) if reverse => (index + self.hits.len() - 1) % self.hits.len(),
-            Some(index) => (index + 1) % self.hits.len(),
+        let (start, steps) = match self.hit_index {
+            Some(index) => (index, count),
             None => match crate::text::initial_match(
                 &self.hits,
                 self.nav.page,
@@ -480,12 +484,22 @@ impl Folio {
                 self.scanned,
                 self.search_complete,
             ) {
-                Some(index) => index,
+                Some(index) => (index, count - 1),
                 None => {
-                    self.pending_search_jump = (!self.search_complete).then_some(reverse);
+                    self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
                     return;
                 }
             },
+        };
+        let Some(index) = crate::text::advance_match(
+            start,
+            self.hits.len(),
+            reverse,
+            steps,
+            self.search_complete,
+        ) else {
+            self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
+            return;
         };
         self.pending_search_jump = None;
         self.select_hit(index);
@@ -621,8 +635,8 @@ impl Folio {
                     self.scan_total = total;
                     self.search_complete = complete;
                     self.search_limited = limited;
-                    if let Some(reverse) = self.pending_search_jump.take() {
-                        self.next_hit(reverse);
+                    if let Some((reverse, count)) = self.pending_search_jump.take() {
+                        self.next_hits(reverse, count);
                     }
                 }
                 Event::Text { id, page, text } if id == self.id => {
@@ -961,7 +975,10 @@ impl Folio {
                         self.notify("No links visible on this page");
                     }
                 }
-                Key::N | Key::F3 => self.next_hit(modifiers.shift),
+                Key::N | Key::F3 => {
+                    let count = self.nav.take_count();
+                    self.next_hits(modifiers.shift, count);
+                }
                 Key::M => {
                     self.nav.clear_prefix();
                     self.mark_action = Some(MarkAction::Set);
@@ -1771,7 +1788,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
-                        ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
+                        ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),

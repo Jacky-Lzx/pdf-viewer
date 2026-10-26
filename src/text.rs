@@ -98,6 +98,39 @@ pub fn initial_match(
     }
 }
 
+/// Resolve a counted jump without walking intermediate hits or wrapping before
+/// all pages have been searched. Arithmetic also handles arbitrarily large counts.
+pub fn advance_match(
+    index: usize,
+    total: usize,
+    reverse: bool,
+    steps: usize,
+    complete: bool,
+) -> Option<usize> {
+    if index >= total {
+        return None;
+    }
+    if !complete {
+        return if reverse {
+            index.checked_sub(steps)
+        } else {
+            index.checked_add(steps).filter(|&index| index < total)
+        };
+    }
+    let delta = steps % total;
+    Some(if reverse {
+        if delta <= index {
+            index - delta
+        } else {
+            total - (delta - index)
+        }
+    } else if delta < total - index {
+        index + delta
+    } else {
+        delta - (total - index)
+    })
+}
+
 impl PageText {
     pub fn prepare_selection(&self) {
         if self.spans.len() >= 256 {
@@ -347,6 +380,45 @@ impl<'a> Device<'a> for TextDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counted_jumps_wrap_only_after_scan_completion_and_handle_large_counts() {
+        assert_eq!(advance_match(0, 0, false, 1, true), None);
+        assert_eq!(advance_match(3, 3, false, 1, true), None);
+        assert_eq!(advance_match(1, 4, false, 2, false), Some(3));
+        assert_eq!(advance_match(1, 4, false, 3, false), None);
+        assert_eq!(advance_match(1, 4, false, 3, true), Some(0));
+        assert_eq!(advance_match(2, 4, true, 2, false), Some(0));
+        assert_eq!(advance_match(2, 4, true, 3, false), None);
+        assert_eq!(advance_match(2, 4, true, 3, true), Some(3));
+        for total in 1..20 {
+            for index in 0..total {
+                for steps in 0..100 {
+                    assert_eq!(
+                        advance_match(index, total, false, steps, true),
+                        Some((index + steps) % total)
+                    );
+                    assert_eq!(
+                        advance_match(index, total, true, steps, true),
+                        Some((index + total - steps % total) % total)
+                    );
+                }
+            }
+        }
+        assert_eq!(advance_match(0, 1, false, usize::MAX, true), Some(0));
+        assert_eq!(
+            advance_match(usize::MAX - 1, usize::MAX, false, usize::MAX - 1, true),
+            Some(usize::MAX - 2)
+        );
+        assert_eq!(
+            advance_match(0, usize::MAX, true, usize::MAX - 1, true),
+            Some(1)
+        );
+        assert_eq!(
+            advance_match(usize::MAX - 1, usize::MAX, false, usize::MAX, false),
+            None
+        );
+    }
 
     #[test]
     fn match_case_uses_original_unicode_and_does_not_build_a_folded_index() {
