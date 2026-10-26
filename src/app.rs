@@ -1099,7 +1099,7 @@ impl Folio {
                 self.mark_action = None;
                 self.selection.select_all();
                 if !self.selection.ready() {
-                    self.worker.inspect(self.nav.page);
+                    self.worker.inspect_all(self.nav.page);
                 }
                 continue;
             }
@@ -1719,6 +1719,9 @@ impl Folio {
                         if let Some(position) =
                             pressed.filter(|position| page_rect.contains(*position))
                         {
+                            if self.selection.is_all() {
+                                self.worker.inspect(self.nav.page);
+                            }
                             if clicked {
                                 let unit = if response.triple_clicked() {
                                     SelectionUnit::Line

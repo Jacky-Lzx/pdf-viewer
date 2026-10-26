@@ -109,8 +109,13 @@ struct Pending {
     search: Option<SearchRequest>,
     copy: Option<usize>,
     links: Option<usize>,
-    inspect: Option<usize>,
+    inspect: Option<Inspection>,
     stop: bool,
+}
+
+struct Inspection {
+    page: usize,
+    interactive: bool,
 }
 
 impl Pending {
@@ -332,7 +337,15 @@ impl Worker {
         self.update(|pending| pending.links = Some(page));
     }
     pub fn inspect(&self, page: usize) {
-        self.update(|pending| pending.inspect = Some(page));
+        self.request_inspection(page, true);
+    }
+
+    pub fn inspect_all(&self, page: usize) {
+        self.request_inspection(page, false);
+    }
+
+    fn request_inspection(&self, page: usize, interactive: bool) {
+        self.update(|pending| pending.inspect = Some(Inspection { page, interactive }));
     }
 }
 
@@ -354,7 +367,7 @@ enum Job {
     Search(usize),
     Copy(usize),
     Links(usize),
-    Inspect(usize),
+    Inspect(Inspection),
 }
 
 fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context: &egui::Context) {
@@ -378,8 +391,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         Some(SearchProgress::new(request))
                     };
                 }
-                if let Some(page) = pending.inspect.take() {
-                    break Job::Inspect(page);
+                if let Some(request) = pending.inspect.take() {
+                    break Job::Inspect(request);
                 }
                 if let Some(page) = pending.copy.take() {
                     break Job::Copy(page);
@@ -515,7 +528,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     }
                 }
             }
-            Job::Search(page) | Job::Copy(page) | Job::Inspect(page) => {
+            Job::Search(page) | Job::Copy(page) | Job::Inspect(Inspection { page, .. }) => {
                 if page >= pdf.pages().len() {
                     search = None;
                     continue;
@@ -535,9 +548,11 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     texts.insert(page, Arc::clone(&text));
                     text
                 };
-                if matches!(job, Job::Inspect(_)) {
-                    text.prepare_selection();
-                    texts.refresh(page, &text);
+                if let Job::Inspect(Inspection { interactive, .. }) = job {
+                    if interactive {
+                        text.prepare_selection();
+                        texts.refresh(page, &text);
+                    }
                     emit(
                         tx,
                         context,
@@ -1154,6 +1169,44 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn all_text_inspection_defers_interactive_indexes_and_reuses_the_cached_page() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.inspect_all(0);
+        let all = match receive(&worker) {
+            Event::PageText { page: 0, text, .. } => text,
+            _ => panic!("Expected whole-page text"),
+        };
+        assert!(
+            all.spans.len() >= 256,
+            "fixture must exercise indexed selection"
+        );
+        let bytes = all.memory_bytes();
+        let rects = all.rects_for_range(0..all.text.len());
+        worker.inspect(0);
+        let interactive = match receive(&worker) {
+            Event::PageText { page: 0, text, .. } => text,
+            _ => panic!("Expected interactive text"),
+        };
+        assert!(Arc::ptr_eq(&all, &interactive));
+        assert!(interactive.memory_bytes() > bytes);
+        assert_eq!(
+            interactive.rects_for_range(0..interactive.text.len()),
+            rects
+        );
+        let indexed_bytes = interactive.memory_bytes();
+        worker.inspect_all(0);
+        match receive(&worker) {
+            Event::PageText { page: 0, text, .. } => {
+                assert!(Arc::ptr_eq(&all, &text));
+                assert_eq!(text.memory_bytes(), indexed_bytes);
+            }
+            _ => panic!("Expected the same indexed cached page"),
+        }
     }
 
     #[test]
