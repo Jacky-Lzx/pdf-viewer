@@ -22,6 +22,9 @@ use std::{
 };
 
 const ACCENT: Color32 = Color32::from_rgb(41, 114, 92);
+const SELECTION_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(74, 145, 230, 95);
+const SEARCH_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 215, 40, 85);
+const CURRENT_SEARCH_COLOR: Color32 = Color32::from_rgba_unmultiplied_const(255, 143, 36, 120);
 
 #[derive(Clone, Copy)]
 enum MarkAction {
@@ -1836,13 +1839,8 @@ impl Folio {
                         let rect = self
                             .link_rect(*rect, page_rect, dimensions)
                             .intersect(page_rect);
-                        (rect.is_positive() && clip.intersects(rect)).then(|| {
-                            egui::Shape::rect_filled(
-                                rect,
-                                1.0,
-                                Color32::from_rgba_unmultiplied(74, 145, 230, 95),
-                            )
-                        })
+                        (rect.is_positive() && clip.intersects(rect))
+                            .then(|| egui::Shape::rect_filled(rect, 1.0, SELECTION_COLOR))
                     }));
                     self.link_overlays(ui, page_rect, dimensions);
                 } else {
@@ -1866,9 +1864,9 @@ impl Folio {
             crate::text::page_hits(&self.hits, self.nav.page).flat_map(|index| {
                 let hit = &self.hits[index];
                 let color = if self.hit_index == Some(index) {
-                    Color32::from_rgba_unmultiplied(255, 143, 36, 120)
+                    CURRENT_SEARCH_COLOR
                 } else {
-                    Color32::from_rgba_unmultiplied(255, 215, 40, 85)
+                    SEARCH_COLOR
                 };
                 hit.rects.iter().filter_map(move |rect| {
                     let rect = self
