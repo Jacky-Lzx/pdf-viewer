@@ -1,0 +1,33 @@
+[package]
+name = "folio"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "A fast, keyboard-driven PDF reader for Linux and macOS"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence"] }
+hayro = "0.8.0"
+rfd = "0.17.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "6"
+png = "0.18"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev.package.hayro]
+opt-level = 2
+
+[profile.dev.package.vello_cpu]
+opt-level = 2
+
+[[bin]]
+name = "folio"
+path = "src/main.rs"
