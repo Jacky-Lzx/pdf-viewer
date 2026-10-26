@@ -22,6 +22,7 @@ pub struct Folio {
     reading: ReadingState,
     nav: Navigation,
     dimensions: Vec<[f32; 2]>,
+    outline: Vec<crate::outline::OutlineEntry>,
     cache: TextureCache,
     id: u64,
     loading: bool,
@@ -43,6 +44,8 @@ pub struct Folio {
     hit_index: Option<usize>,
     scanned: usize,
     scan_total: usize,
+    search_complete: bool,
+    search_limited: bool,
     goto: String,
     goto_open: bool,
     goto_focus: bool,
@@ -65,6 +68,7 @@ impl Folio {
             reading: ReadingState::default(),
             nav: Navigation::default(),
             dimensions: Vec::new(),
+            outline: Vec::new(),
             cache: TextureCache::default(),
             id: 0,
             loading: false,
@@ -86,6 +90,8 @@ impl Folio {
             hit_index: None,
             scanned: 0,
             scan_total: 0,
+            search_complete: true,
+            search_limited: false,
             goto: String::new(),
             goto_open: false,
             goto_focus: false,
@@ -118,6 +124,7 @@ impl Folio {
         self.id += 1;
         self.nav = Navigation::default();
         self.dimensions.clear();
+        self.outline.clear();
         self.cache.clear();
         self.requested = None;
         self.pan = Vec2::ZERO;
@@ -128,6 +135,8 @@ impl Folio {
         self.search_open = false;
         self.scanned = 0;
         self.scan_total = 0;
+        self.search_complete = true;
+        self.search_limited = false;
         self.revision += 1;
         self.loading = true;
         self.error = None;
@@ -204,8 +213,9 @@ impl Folio {
         let old = self.pan;
         self.pan = (self.pan + delta).clamp(Vec2::ZERO, self.overflow);
         if turn_at_edge && (self.pan.y - old.y).abs() < 0.1 && delta.y.abs() > 0.0 {
+            let previous_page = self.nav.page;
             self.step(if delta.y > 0.0 { 1 } else { -1 });
-            if delta.y < 0.0 {
+            if delta.y < 0.0 && self.nav.page != previous_page {
                 self.pan.y = f32::MAX;
             }
         }
@@ -267,13 +277,18 @@ impl Folio {
     fn events(&mut self, context: &egui::Context) {
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
-                Event::Opened { id, dimensions } if id == self.id => {
+                Event::Opened {
+                    id,
+                    dimensions,
+                    outline,
+                } if id == self.id => {
                     self.loading = false;
                     self.nav = Navigation::new(dimensions.len(), self.reading.page);
                     self.reading
                         .bookmarks
                         .retain(|page| *page < dimensions.len());
                     self.dimensions = dimensions;
+                    self.outline = outline;
                     self.dirty = true;
                 }
                 Event::Rendered {
@@ -300,10 +315,14 @@ impl Folio {
                     hits,
                     scanned,
                     total,
+                    complete,
+                    limited,
                 } if id == self.id && revision == self.revision => {
                     self.hits.extend(hits);
                     self.scanned = scanned;
                     self.scan_total = total;
+                    self.search_complete = complete;
+                    self.search_limited = limited;
                 }
                 Event::Text { id, page, text } if id == self.id => {
                     if text.trim().is_empty() {
@@ -657,21 +676,27 @@ impl Folio {
                         self.hit_index = None;
                         self.scanned = 0;
                         self.scan_total = self.nav.count;
+                        self.search_complete = self.query.trim().is_empty();
+                        self.search_limited = false;
                         self.worker.search(self.revision, String::new());
                         self.search_due = Some(Instant::now() + Duration::from_millis(180));
                     }
                     if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                         self.next_hit(ui.input(|input| input.modifiers.shift));
                     }
-                    if ui.button("↑").clicked() {
+                    if ui.button("Prev").clicked() {
                         self.next_hit(true);
                     }
-                    if ui.button("↓").clicked() {
+                    if ui.button("Next").clicked() {
                         self.next_hit(false);
                     }
                     let index = self.hit_index.map(|i| i + 1).unwrap_or(0);
-                    ui.label(format!("{index} / {} matches", self.hits.len()));
-                    if self.scanned < self.scan_total && !self.query.trim().is_empty() {
+                    ui.label(format!(
+                        "{index} / {}{} matches",
+                        self.hits.len(),
+                        if self.search_limited { "+" } else { "" }
+                    ));
+                    if !self.search_complete && !self.query.trim().is_empty() {
                         ui.spinner();
                         ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
                     }
@@ -699,6 +724,41 @@ impl Folio {
                 ui.weak(format!("{} pages", self.nav.count));
                 ui.add_space(16.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    if !self.outline.is_empty() {
+                        ui.label(RichText::new("CONTENTS").small().strong().color(ACCENT));
+                        let mut target = None;
+                        egui::ScrollArea::vertical()
+                            .id_salt("contents")
+                            .max_height(260.0)
+                            .show_rows(ui, 25.0, self.outline.len(), |ui, range| {
+                                for index in range {
+                                    let entry = &self.outline[index];
+                                    ui.push_id(index, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(entry.depth.min(8) as f32 * 12.0);
+                                            if let Some(page) = entry.page {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.nav.page == page,
+                                                        &entry.title,
+                                                    )
+                                                    .on_hover_text(format!("Page {}", page + 1))
+                                                    .clicked()
+                                                {
+                                                    target = Some(page);
+                                                }
+                                            } else {
+                                                ui.weak(&entry.title);
+                                            }
+                                        });
+                                    });
+                                }
+                            });
+                        if let Some(page) = target {
+                            self.jump(page);
+                        }
+                        ui.add_space(20.0);
+                    }
                     ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
                     if self.reading.bookmarks.is_empty() {
                         ui.weak("Press b to bookmark a page.");
@@ -822,6 +882,7 @@ impl Folio {
                     rotation: self.reading.rotation,
                     night: self.library.night,
                 };
+                self.cache.protect(key);
                 if self.requested != Some(key) {
                     self.requested = Some(key);
                     let mut keys = Vec::new();

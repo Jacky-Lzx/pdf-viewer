@@ -9,7 +9,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex,
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, SyncSender},
     },
     time::Instant,
 };
@@ -18,6 +18,7 @@ pub enum Event {
     Opened {
         id: u64,
         dimensions: Vec<[f32; 2]>,
+        outline: Vec<crate::outline::OutlineEntry>,
     },
     Rendered {
         id: u64,
@@ -31,6 +32,8 @@ pub enum Event {
         hits: Vec<SearchHit>,
         scanned: usize,
         total: usize,
+        complete: bool,
+        limited: bool,
     },
     Text {
         id: u64,
@@ -72,7 +75,7 @@ pub struct Worker {
 impl Worker {
     pub fn new(context: egui::Context) -> Self {
         let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
-        let (tx, events) = mpsc::channel();
+        let (tx, events) = mpsc::sync_channel(4);
         let state = shared.clone();
         std::thread::Builder::new()
             .name("folio-render".into())
@@ -92,7 +95,7 @@ impl Worker {
                     let id = request.id;
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let pdf = document::load(&request.path, &request.password)?;
-                        let dimensions = pdf
+                        let dimensions: Vec<_> = pdf
                             .pages()
                             .iter()
                             .map(|page| {
@@ -100,7 +103,22 @@ impl Worker {
                                 [w, h]
                             })
                             .collect();
-                        emit(&tx, &context, Event::Opened { id, dimensions });
+                        if dimensions.iter().any(|size| {
+                            size.iter()
+                                .any(|dimension| !dimension.is_finite() || *dimension <= 0.0)
+                        }) {
+                            return Err("This PDF contains invalid page dimensions.".into());
+                        }
+                        let outline = crate::outline::read(&pdf);
+                        emit(
+                            &tx,
+                            &context,
+                            Event::Opened {
+                                id,
+                                dimensions,
+                                outline,
+                            },
+                        );
                         session(&pdf, id, &state, &tx, &context);
                         Ok::<_, String>(())
                     }))
@@ -148,7 +166,7 @@ impl Drop for Worker {
     }
 }
 
-fn emit(tx: &Sender<Event>, context: &egui::Context, event: Event) {
+fn emit(tx: &SyncSender<Event>, context: &egui::Context, event: Event) {
     if tx.send(event).is_ok() {
         context.request_repaint();
     }
@@ -160,7 +178,7 @@ enum Job {
     Copy(usize),
 }
 
-fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &Sender<Event>, context: &egui::Context) {
+fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context: &egui::Context) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
     let mut texts: HashMap<usize, PageText> = HashMap::new();
@@ -223,20 +241,25 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &Sender<Event>, context: &eg
                     search = None;
                     continue;
                 }
+                let mut uncached = None;
                 if !texts.contains_key(&page) {
                     let text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         text::extract(&pdf.pages()[page], &interpreter_cache)
                     }))
                     .unwrap_or_default();
-                    let bytes =
-                        text.text.len() + text.spans.len() * std::mem::size_of::<text::TextSpan>();
-                    if text_bytes + bytes > 32 * 1024 * 1024 {
-                        texts.clear();
-                        text_bytes = 0;
+                    let bytes = text.memory_bytes();
+                    if bytes > 32 * 1024 * 1024 {
+                        uncached = Some(text);
+                    } else {
+                        if text_bytes + bytes > 32 * 1024 * 1024 {
+                            texts.clear();
+                            text_bytes = 0;
+                        }
+                        text_bytes += bytes;
+                        texts.insert(page, text);
                     }
-                    text_bytes += bytes;
-                    texts.insert(page, text);
                 }
+                let text = uncached.as_ref().unwrap_or_else(|| &texts[&page]);
                 if matches!(job, Job::Copy(_)) {
                     emit(
                         tx,
@@ -244,11 +267,11 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &Sender<Event>, context: &eg
                         Event::Text {
                             id,
                             page,
-                            text: texts[&page].text.clone(),
+                            text: text.text.clone(),
                         },
                     );
                 } else if let Some((request, next, hit_count)) = &mut search {
-                    let mut hits = texts[&page].search(page, &request.query);
+                    let mut hits = text.search(page, &request.query);
                     hits.truncate(10_000_usize.saturating_sub(*hit_count));
                     *hit_count += hits.len();
                     *next += 1;
@@ -261,6 +284,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &Sender<Event>, context: &eg
                             hits,
                             scanned: *next,
                             total: pdf.pages().len(),
+                            complete: *next >= pdf.pages().len() || *hit_count >= 10_000,
+                            limited: *hit_count >= 10_000,
                         },
                     );
                     if *next >= pdf.pages().len() || *hit_count >= 10_000 {
@@ -269,5 +294,94 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &Sender<Event>, context: &eg
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn receive(worker: &Worker) -> Event {
+        worker
+            .events
+            .recv_timeout(Duration::from_secs(5))
+            .expect("Worker did not finish in time")
+    }
+
+    fn sample() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/folio-guide.pdf")
+    }
+
+    #[test]
+    fn worker_recovers_from_load_failure_and_publishes_outline() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, sample().with_extension("missing"), String::new());
+        assert!(matches!(receive(&worker), Event::Error { id: 1, .. }));
+        worker.open(2, sample(), String::new());
+        match receive(&worker) {
+            Event::Opened {
+                id,
+                dimensions,
+                outline,
+            } => {
+                assert_eq!(id, 2);
+                assert_eq!(dimensions.len(), 6);
+                assert_eq!(outline.len(), 6);
+            }
+            _ => panic!("Expected the second document to open"),
+        }
+    }
+
+    #[test]
+    fn rendering_copy_and_incremental_search_complete_together() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(7, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 7, .. }));
+        worker.search(12, "rust".into());
+        worker.copy(0);
+        worker.render(vec![RenderKey {
+            page: 2,
+            width: 300,
+            rotation: 1,
+            night: false,
+        }]);
+        let (mut rendered, mut copied, mut complete, mut count) = (false, false, false, 0);
+        while !(rendered && copied && complete) {
+            match receive(&worker) {
+                Event::Rendered {
+                    id, key, bitmap, ..
+                } => {
+                    assert_eq!(id, 7);
+                    assert_eq!(key.page, 2);
+                    assert_eq!(bitmap.size, [400, 300]);
+                    rendered = true;
+                }
+                Event::Text { id, page, text } => {
+                    assert_eq!((id, page), (7, 0));
+                    assert!(text.contains("Rust"));
+                    copied = true;
+                }
+                Event::Search {
+                    id,
+                    revision,
+                    hits,
+                    scanned,
+                    total,
+                    complete: done,
+                    limited,
+                } => {
+                    assert_eq!((id, revision, total), (7, 12, 6));
+                    assert!(!limited);
+                    count += hits.len();
+                    if done {
+                        assert_eq!(scanned, total);
+                        complete = true;
+                    }
+                }
+                _ => panic!("Unexpected worker event"),
+            }
+        }
+        assert_eq!(count, 4);
     }
 }

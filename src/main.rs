@@ -2,6 +2,7 @@ mod app;
 mod cache;
 mod document;
 mod navigation;
+mod outline;
 mod state;
 mod text;
 mod worker;

@@ -81,6 +81,21 @@ def make_pdf():
         stream = "\n".join(ops).encode()
         objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
     objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode()
+    outline_id = len(objects) + 1
+    first_id = outline_id + 1
+    objects[0] = f"<< /Type /Catalog /Pages 2 0 R /Outlines {outline_id} 0 R /Dests << /reading [9 0 R /Fit] >> /Names << /Dests << /Names [(search) [11 0 R /Fit]] >> >> >>".encode()
+    objects.append(f"<< /Type /Outlines /First {first_id} 0 R /Last {first_id + len(PAGES) - 1} 0 R /Count {len(PAGES)} >>".encode())
+    for index, (title, _, _) in enumerate(PAGES):
+        previous = f"/Prev {first_id + index - 1} 0 R" if index else ""
+        following = f"/Next {first_id + index + 1} 0 R" if index + 1 < len(PAGES) else ""
+        dest = f"/Dest [{5 + index * 2} 0 R /Fit]"
+        if index == 1:
+            dest = "/A << /S /GoTo /D [7 0 R /Fit] >>"
+        if index == 2:
+            dest = "/Dest /reading"
+        if index == 3:
+            dest = "/Dest (search)"
+        objects.append(f"<< /Title ({pdf_string(title)}) /Parent {outline_id} 0 R {previous} {following} {dest} >>".encode())
     output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
     for number, obj in enumerate(objects, 1):

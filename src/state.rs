@@ -36,7 +36,7 @@ impl Library {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let tmp = path.with_extension("tmp");
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
         let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(&tmp, bytes)?;
         std::fs::rename(tmp, path)

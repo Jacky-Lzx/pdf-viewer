@@ -9,7 +9,7 @@ use hayro::{
     hayro_syntax::page::Page,
     kurbo::{BezPath, Point, Rect},
 };
-use std::ops::Range;
+use std::{ops::Range, sync::OnceLock};
 
 #[derive(Clone, Debug)]
 pub struct TextSpan {
@@ -21,6 +21,13 @@ pub struct TextSpan {
 pub struct PageText {
     pub text: String,
     pub spans: Vec<TextSpan>,
+    index: OnceLock<SearchIndex>,
+}
+
+#[derive(Clone, Debug)]
+struct SearchIndex {
+    folded: String,
+    source: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,35 +38,57 @@ pub struct SearchHit {
 }
 
 impl PageText {
+    pub fn memory_bytes(&self) -> usize {
+        // Reserve for Unicode lowercase expansion before the lazy index is built.
+        self.text.capacity()
+            + self.spans.capacity() * std::mem::size_of::<TextSpan>()
+            + self.text.len() * 3 * (1 + std::mem::size_of::<(usize, usize)>())
+    }
+
     pub fn search(&self, page: usize, query: &str) -> Vec<SearchHit> {
         if query.trim().is_empty() {
             return Vec::new();
         }
         // Keep an explicit byte mapping: Unicode lowercasing can change byte length.
-        let mut folded = String::new();
-        let mut source = Vec::new();
-        for (offset, ch) in self.text.char_indices() {
-            for lower in ch.to_lowercase() {
-                folded.push(lower);
-                source.extend(std::iter::repeat_n(
-                    (offset, offset + ch.len_utf8()),
-                    lower.len_utf8(),
-                ));
+        let index = self.index.get_or_init(|| {
+            let mut folded = String::with_capacity(self.text.len());
+            let mut source = Vec::with_capacity(self.text.len());
+            for (offset, ch) in self.text.char_indices() {
+                for lower in ch.to_lowercase() {
+                    folded.push(lower);
+                    source.extend(std::iter::repeat_n(
+                        (offset, offset + ch.len_utf8()),
+                        lower.len_utf8(),
+                    ));
+                }
             }
-        }
+            SearchIndex { folded, source }
+        });
         let needle = query.to_lowercase();
-        folded
+        index
+            .folded
             .match_indices(&needle)
             .take(1000)
             .map(|(offset, matched)| {
-                let start = source[offset].0;
-                let end = source[offset + matched.len() - 1].1;
-                let rects = self
-                    .spans
+                let start = index.source[offset].0;
+                let end = index.source[offset + matched.len() - 1].1;
+                let first = self.spans.partition_point(|span| span.range.end <= start);
+                let mut rects: Vec<Rect> = Vec::new();
+                for rect in self.spans[first..]
                     .iter()
-                    .filter(|span| span.range.start < end && span.range.end > start)
+                    .take_while(|span| span.range.start < end)
                     .map(|span| span.rect)
-                    .collect();
+                {
+                    if let Some(last) = rects.last_mut()
+                        && (last.y0 - rect.y0).abs() < rect.height() * 0.2
+                        && rect.x0 >= last.x0
+                        && rect.x0 - last.x1 < rect.height() * 0.3
+                    {
+                        *last = last.union(rect);
+                    } else {
+                        rects.push(rect);
+                    }
+                }
                 let before: String = self.text[..start]
                     .chars()
                     .rev()
@@ -112,10 +141,6 @@ impl<'a> Device<'a> for TextDevice {
             let Some(unicode) = glyph.as_unicode() else {
                 continue;
             };
-            let text = match unicode {
-                BfString::Char(ch) => ch.to_string(),
-                BfString::String(text) => text,
-            };
             let width = match &**glyph {
                 Glyph::Outline(g) => g.advance_width().unwrap_or(500.0) as f64,
                 Glyph::Type3(_) => 500.0,
@@ -137,7 +162,10 @@ impl<'a> Device<'a> for TextDevice {
                 }
             }
             let start = self.output.text.len();
-            self.output.text.push_str(&text);
+            match unicode {
+                BfString::Char(ch) => self.output.text.push(ch),
+                BfString::String(text) => self.output.text.push_str(&text),
+            }
             self.output.spans.push(TextSpan {
                 range: start..self.output.text.len(),
                 rect,
@@ -155,11 +183,34 @@ mod tests {
         let text = PageText {
             text: "İstanbul 中文 RUST rust".into(),
             spans: Vec::new(),
+            ..Default::default()
         };
         assert_eq!(text.search(0, "RUST").len(), 2);
         assert_eq!(text.search(0, "中文").len(), 1);
         assert_eq!(text.search(0, "i\u{307}stanbul").len(), 1);
         assert!(text.search(0, " ").is_empty());
         assert!(text.search(0, "missing").is_empty());
+    }
+
+    #[test]
+    fn dense_matches_use_correct_ranges_and_merge_adjacent_glyphs() {
+        let text = "rust ".repeat(2000);
+        let spans = text
+            .char_indices()
+            .map(|(i, _)| TextSpan {
+                range: i..i + 1,
+                rect: Rect::new(i as f64, 0.0, i as f64 + 1.0, 10.0),
+            })
+            .collect();
+        let page = PageText {
+            text,
+            spans,
+            ..Default::default()
+        };
+        let hits = page.search(3, "rust");
+        assert_eq!(hits.len(), 1000);
+        assert!(hits.iter().all(|hit| hit.rects.len() == 1 && hit.page == 3));
+        assert_eq!(hits[10].rects[0], Rect::new(50.0, 0.0, 54.0, 10.0));
+        assert_eq!(page.search(3, "RUST").len(), 1000);
     }
 }

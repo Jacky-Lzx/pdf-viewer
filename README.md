@@ -53,16 +53,17 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `F11` | 全屏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
 
-鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。支持 PDF 文件拖入、加密文档密码输入、搜索结果高亮、书签、最近文档和阅读位置恢复。
+鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。侧栏的目录支持层级条目、GoTo 动作和命名目标。
 
 ## 性能设计
 
 - PDF 加载、渲染、文本提取和搜索均放在后台线程，UI 通过事件唤醒。
 - 优先渲染当前页，再预取前后相邻页；视图变化会替换尚未执行的渲染请求。
-- GPU 页面纹理使用 **96 MiB LRU 缓存**；文本索引缓存预算 32 MiB。
+- GPU 页面纹理使用 **96 MiB LRU 缓存**，预取不会淘汰当前页；文本索引缓存预算 32 MiB。
 - 复用文档的解释器和字形缓存；缩放时可先复用同页已有纹理。
 - 按物理像素渲染，宽度以 32 像素分档；单页限制为约 1600 万像素。
-- 搜索输入延迟 180 ms 合并请求，结果分页面返回；最多保留 10,000 个匹配。
+- 搜索输入延迟 180 ms 合并请求，复用 Unicode 大小写索引，以二分定位文本坐标并合并相邻高亮；结果分页面返回，最多保留 10,000 个匹配。
+- 渲染器直接移交像素缓冲区；后台结果队列最多容纳 4 条消息，避免 UI 暂停时无限积累图像。
 - 没有输入或后台结果时，界面不持续重绘。
 
 阅读状态保存在系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/folio/library.json`（默认 `~/.config/folio/library.json`），macOS 为 `~/Library/Application Support/dev.folio.Folio/library.json`。密码不持久化。
@@ -76,9 +77,11 @@ cargo test --locked
 cargo run --release -- --render assets/folio-guide.pdf /tmp/page.png 1 1200
 cargo run --release -- --text assets/folio-guide.pdf 1
 cargo run --release -- --benchmark assets/folio-guide.pdf 5
+# Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
+xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 ```
 
-`--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染。
+`--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。
 
 扫描件可以阅读；搜索和复制依赖 PDF 文本层，目前不包含 OCR。复杂 PDF 的显示兼容性取决于 hayro。
 

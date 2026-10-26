@@ -60,7 +60,7 @@ pub fn rasterize<'a>(
     );
     let mut bitmap = Bitmap {
         size: [pixmap.width() as usize, pixmap.height() as usize],
-        rgba: pixmap.data_as_u8_slice().to_vec(),
+        rgba: pixmap.take_rgba8(hayro::vello_cpu::peniko::ImageAlphaType::AlphaPremultiplied),
     };
     if key.night {
         for pixel in bitmap.rgba.as_chunks_mut::<4>().0 {
