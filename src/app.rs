@@ -190,6 +190,7 @@ impl Folio {
     }
 
     fn clear_document(&mut self, context: &egui::Context) {
+        egui::Popup::close_all(context);
         self.id += 1;
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();
@@ -929,15 +930,17 @@ impl Folio {
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
                 });
+            let popup_open = egui::Popup::is_any_open(context);
             if let egui::Event::PointerButton { button, .. } = event {
-                if !typing && !self.help && !self.properties_open {
+                if !typing && !self.help && !self.properties_open && !popup_open {
                     self.nav.clear_prefix();
                     self.mark_action = None;
                     self.history(button == egui::PointerButton::Extra2);
                 }
                 continue;
             }
-            if matches!(event, egui::Event::Copy) && !typing && self.selection.active {
+            if matches!(event, egui::Event::Copy) && !typing && !popup_open && self.selection.active
+            {
                 self.copy_selection(context);
                 context.input_mut(|input| {
                     input
@@ -955,6 +958,17 @@ impl Folio {
             else {
                 continue;
             };
+            if popup_open && key == Key::Escape {
+                egui::Popup::close_all(context);
+                context.input_mut(|input| input.consume_key(modifiers, key));
+                continue;
+            }
+            if popup_open
+                && modifiers.command
+                && matches!(key, Key::O | Key::F | Key::P | Key::R | Key::W | Key::Q)
+            {
+                egui::Popup::close_all(context);
+            }
             if (typing || !(self.help || self.properties_open))
                 && matches!(
                     key,
@@ -963,9 +977,11 @@ impl Folio {
             {
                 // egui scheduled directional focus before dispatch. Arrow
                 // keys belong to text editing or reader navigation here.
+                // The link menu has one item; keep its focus inside the menu.
                 context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
             }
             if self.search_open
+                && !popup_open
                 && !self.help
                 && !self.properties_open
                 && !self.password_open
@@ -1038,6 +1054,9 @@ impl Folio {
                     input.consume_key(modifiers, key);
                 });
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
+                continue;
+            }
+            if popup_open {
                 continue;
             }
             if let Some(picker) = &mut self.recent_picker {
@@ -1933,6 +1952,7 @@ impl Folio {
         }
         let matching = self.hints.matching_range();
         let mut follow = None;
+        let mut copied = false;
         for (index, &link_index) in self.visible_links.iter().enumerate() {
             let link = &links[link_index];
             let rect = self
@@ -1954,6 +1974,24 @@ impl Folio {
                         ui.label(url);
                     }
                 });
+            if let LinkTarget::Url(url) = &link.target {
+                if response.secondary_clicked() {
+                    self.nav.clear_prefix();
+                    self.hints.cancel();
+                    self.mark_action = None;
+                }
+                response.context_menu(|ui| {
+                    let copy = ui.button("Copy link address");
+                    if response.secondary_clicked() {
+                        copy.request_focus();
+                    }
+                    if copy.clicked() {
+                        ui.ctx().copy_text(url.clone());
+                        copied = true;
+                        ui.close();
+                    }
+                });
+            }
             if response.clicked() {
                 follow = Some(link.target.clone());
             }
@@ -1975,6 +2013,9 @@ impl Folio {
         }
         if let Some(target) = follow {
             self.follow_link(target, ui.ctx());
+        }
+        if copied {
+            self.notify("Copied link address");
         }
     }
 
@@ -2246,6 +2287,14 @@ impl Folio {
 
 impl eframe::App for Folio {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
+        let popup_view = (
+            self.id,
+            self.nav.page,
+            self.reading.rotation,
+            self.reading.fit,
+            self.pan,
+            self.viewport,
+        );
         if !self.deferred_input.is_empty() {
             let mut events = std::mem::take(&mut self.deferred_input);
             context.input_mut(|input| {
@@ -2263,6 +2312,18 @@ impl eframe::App for Folio {
         self.properties_window(context);
         self.sidebar(context);
         self.canvas(context);
+        if popup_view
+            != (
+                self.id,
+                self.nav.page,
+                self.reading.rotation,
+                self.reading.fit,
+                self.pan,
+                self.viewport,
+            )
+        {
+            egui::Popup::close_all(context);
+        }
         if let Some(due) = self.search_due {
             if Instant::now() >= due {
                 self.worker.search(
