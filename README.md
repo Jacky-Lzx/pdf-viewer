@@ -17,6 +17,9 @@ cargo run --release
 # 安装命令行程序
 cargo install --path . --locked
 folio /path/to/book.pdf
+# 文件名以 - 开头时，用 -- 结束选项解析
+folio -- '-notes.pdf'
+folio --version
 ```
 
 Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcommon。Ubuntu / Debian 可安装：
@@ -28,6 +31,8 @@ sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev libg
 NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Folio.app`。
 
 中文文件名、目录和搜索框会自动使用系统中文字体。Linux 可安装 `fonts-noto-cjk`；macOS 使用系统字体。也可以设置 `FOLIO_FONT=/path/to/font.otf` 指定回退字体，字体在后台加载。
+
+命令行一次打开一份文档。文本导出和图像导出的页码从 1 开始，图像宽度为 1–16384 像素，基准轮数为 1–1000；缺少参数、数值越界或参数过多时，会在读取 PDF 前报告错误。Linux 和 macOS 的非 UTF-8 文件路径按原始路径保留。
 
 ## 键盘操作
 
@@ -136,6 +141,7 @@ cargo bench --locked --bench search_index -- 9
 cargo bench --locked --bench search_snippet -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
+xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
 xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio

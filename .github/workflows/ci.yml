@@ -28,6 +28,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
           xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
           xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
           xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio

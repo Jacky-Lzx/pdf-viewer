@@ -2,7 +2,7 @@
 Type=Application
 Name=Folio
 Comment=A keyboard-driven PDF reader
-Exec=folio %f
+Exec=folio -- %f
 Icon=folio
 Terminal=false
 Categories=Office;Viewer;
