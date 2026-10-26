@@ -162,9 +162,8 @@ impl Folio {
     }
 
     fn open(&mut self, path: PathBuf, context: &egui::Context) {
-        context.memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-recent-input")));
-        self.recent_picker = None;
         self.remember();
+        self.clear_document(context);
         let path = std::fs::canonicalize(&path).unwrap_or(path);
         self.reading = self
             .library
@@ -177,6 +176,17 @@ impl Folio {
                 ..Default::default()
             });
         self.reading.rotation %= 4;
+        self.pending_offset = Some(self.reading.offset);
+        self.loading = true;
+        self.worker
+            .open(self.id, self.reading.path.clone(), String::new());
+        context.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+            "{} — Folio",
+            self.filename()
+        )));
+    }
+
+    fn clear_document(&mut self, context: &egui::Context) {
         self.id += 1;
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();
@@ -194,7 +204,7 @@ impl Folio {
         self.reveal_page = None;
         self.requested = None;
         self.pan = Vec2::ZERO;
-        self.pending_offset = Some(self.reading.offset);
+        self.pending_offset = None;
         self.pending_focus = None;
         self.pending_destination = None;
         self.hits.clear();
@@ -204,23 +214,43 @@ impl Folio {
         self.query.clear();
         self.search_due = None;
         self.search_open = false;
+        self.search_focus = false;
         self.scanned = 0;
         self.scan_total = 0;
         self.search_complete = true;
         self.search_limited = false;
         self.revision += 1;
-        self.loading = true;
+        self.reading = ReadingState::default();
+        self.overflow = Vec2::ZERO;
+        self.scale = 1.0;
+        self.render_ms = 0.0;
+        self.loading = false;
         self.reloading = false;
         self.error = None;
+        self.message = None;
+        self.goto.clear();
+        self.goto_open = false;
+        self.goto_focus = false;
         self.password.clear();
         self.password_open = false;
         self.password_focus = false;
-        self.worker
-            .open(self.id, self.reading.path.clone(), String::new());
-        context.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{} — Folio",
-            self.filename()
-        )));
+        self.help = false;
+        self.recent_picker = None;
+        self.deferred_input.clear();
+        context.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+            memory.move_focus(egui::FocusDirection::None);
+        });
+    }
+
+    fn close_document(&mut self, context: &egui::Context) {
+        self.save();
+        self.clear_document(context);
+        self.dialog = None;
+        self.worker.close();
+        context.send_viewport_cmd(egui::ViewportCommand::Title("Folio".into()));
     }
 
     fn filename(&self) -> String {
@@ -969,6 +999,11 @@ impl Folio {
                 self.reload();
                 continue;
             }
+            if modifiers.command && key == Key::W {
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                self.close_document(context);
+                continue;
+            }
             if modifiers.command && key == Key::Q {
                 context.input_mut(|input| {
                     input.consume_key(modifiers, key);
@@ -1324,6 +1359,14 @@ impl Folio {
                         .clicked()
                     {
                         self.choose_file();
+                    }
+                    if !self.reading.path.as_os_str().is_empty()
+                        && ui
+                            .button("Close")
+                            .on_hover_text("Close PDF · Ctrl/Cmd+W")
+                            .clicked()
+                    {
+                        self.close_document(context);
                     }
                     if self.nav.count > 0 {
                         if ui.button("Sidebar").on_hover_text("Tab").clicked() {
@@ -2085,6 +2128,7 @@ impl Folio {
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
+                        ("Ctrl/Cmd+w", "Close PDF and save reading position"),
                         ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),

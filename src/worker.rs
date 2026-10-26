@@ -100,6 +100,7 @@ impl SearchProgress {
 #[derive(Default)]
 struct Pending {
     open: Option<OpenRequest>,
+    close: bool,
     render: VecDeque<RenderKey>,
     render_revision: u64,
     thumbnails: VecDeque<RenderKey>,
@@ -112,13 +113,22 @@ struct Pending {
 }
 
 impl Pending {
+    fn clear_jobs(&mut self) {
+        self.render.clear();
+        self.thumbnails.clear();
+        self.search = None;
+        self.copy = None;
+        self.links = None;
+        self.inspect = None;
+    }
+
     fn replace_renders(&mut self, keys: Vec<RenderKey>) {
         self.render_revision = self.render_revision.wrapping_add(1);
         self.render = keys.into();
     }
 
     fn finish_render(&mut self, key: RenderKey, revision: u64) -> bool {
-        if self.stop || self.open.is_some() {
+        if self.stop || self.close || self.open.is_some() {
             return false;
         }
         if revision != self.render_revision && !self.render.contains(&key) {
@@ -136,6 +146,7 @@ impl Pending {
 
     fn finish_thumbnail(&mut self, key: RenderKey, revision: u64) -> bool {
         if self.stop
+            || self.close
             || self.open.is_some()
             || (revision != self.thumbnail_revision && !self.thumbnails.contains(&key))
         {
@@ -163,16 +174,24 @@ impl Worker {
             .spawn(move || {
                 let mut active: Option<(Pdf, u64)> = None;
                 loop {
-                    let request = {
+                    let (close, request) = {
                         let (lock, wake) = &*state;
                         let mut pending = lock.lock().unwrap();
-                        while pending.open.is_none() && !pending.stop {
+                        while pending.open.is_none() && !pending.close && !pending.stop {
                             pending = wake.wait(pending).unwrap();
                         }
                         if pending.stop {
                             return;
                         }
-                        pending.open.take().unwrap()
+                        (std::mem::take(&mut pending.close), pending.open.take())
+                    };
+                    if close {
+                        // Drop the PDF outside the task lock, after session caches
+                        // have been released. The same worker can open another file.
+                        active = None;
+                    }
+                    let Some(request) = request else {
+                        continue;
                     };
                     let id = request.id;
                     if !request.keep_on_error {
@@ -269,12 +288,15 @@ impl Worker {
                 password,
                 keep_on_error,
             });
-            pending.render.clear();
-            pending.thumbnails.clear();
-            pending.search = None;
-            pending.copy = None;
-            pending.links = None;
-            pending.inspect = None;
+            pending.clear_jobs();
+        });
+    }
+
+    pub fn close(&self) {
+        self.update(|pending| {
+            pending.open = None;
+            pending.close = true;
+            pending.clear_jobs();
         });
     }
 
@@ -336,7 +358,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
             let (lock, wake) = &**shared;
             let mut pending = lock.lock().unwrap();
             loop {
-                if pending.stop || pending.open.is_some() {
+                if pending.stop || pending.close || pending.open.is_some() {
                     return;
                 }
                 if let Some(request) = pending.search.take() {
@@ -383,6 +405,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 // Loading or a newer query may have arrived during normalization.
                 let pending = shared.0.lock().unwrap();
                 if pending.stop
+                    || pending.close
                     || pending.open.is_some()
                     || pending.search.is_some()
                     || pending.copy.is_some()
@@ -937,6 +960,55 @@ mod tests {
         pending.open = None;
         pending.stop = true;
         assert!(!pending.finish_render(render_key(0), revision));
+    }
+
+    #[test]
+    fn closing_discards_jobs_and_a_failed_reopen_cannot_restore_the_old_pdf() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 1, .. }));
+        // Coalesce close and reload exactly as rapidly arriving commands can do.
+        worker.update(|pending| {
+            pending.close = true;
+            assert!(!pending.finish_render(render_key(0), pending.render_revision));
+            assert!(!pending.finish_thumbnail(render_key(0), pending.thumbnail_revision));
+            pending.open = Some(OpenRequest {
+                id: 2,
+                path: sample().with_extension("missing"),
+                password: String::new(),
+                keep_on_error: true,
+            });
+        });
+        assert!(matches!(
+            receive(&worker),
+            Event::Error {
+                id: 2,
+                opening: true,
+                ..
+            }
+        ));
+        worker.copy(0);
+        assert!(
+            worker
+                .events
+                .recv_timeout(Duration::from_millis(100))
+                .is_err()
+        );
+
+        worker.open(3, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 3, .. }));
+        worker.close();
+        worker.copy(0);
+        assert!(
+            worker
+                .events
+                .recv_timeout(Duration::from_millis(100))
+                .is_err()
+        );
+        worker.open(4, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 4, .. }));
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { id: 4, .. }));
     }
 
     #[test]

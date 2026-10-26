@@ -71,6 +71,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | 选择模式中双击 / 三击 | 选中整个词 / 整行；之后拖动按词 / 行扩展，单击恢复按字形选择 |
 | `o`，`Ctrl/Cmd+o` | 打开文档 |
 | `Ctrl/Cmd+r` | 重新加载当前 PDF，保留阅读位置和标记 |
+| `Ctrl/Cmd+w` | 关闭当前文档，保存位置并返回欢迎页 |
 | `Ctrl/Cmd+q` | 正常退出并保存最新阅读状态 |
 | `:` | 页码跳转对话框 |
 | `F11` | 全屏 |
@@ -89,6 +90,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 重新编译或更新 PDF 后，按 `Ctrl/Cmd+r` 可重新加载，保留页码、缩放、旋转、相对滚动位置和有效标记，并重新搜索当前查询。只有解析成功才切换文档；若文件暂时写入不完整，原文档仍可阅读，文件恢复后再次重新加载即可。
 
 加密文档的密码框会自动聚焦，直接键入并按回车解锁；密码错误后可继续键入重试。重新加载时若需要密码，解锁后保留当前阅读位置；按 `Escape` 取消可继续阅读已打开的文档。密码不写入阅读状态。
+
+`Ctrl/Cmd+w` 或工具栏 Close 可在阅读、搜索、密码和打开失败的界面中关闭文档。关闭前立即提交阅读进度到后台状态写入器；界面返回欢迎页，页面和文本缓存释放，后台结束当前 PDF 会话。从最近文档重新打开会恢复位置、缩放、旋转、书签与标记。关闭空白欢迎页会保留窗口。
 
 `Ctrl/Cmd+p` 从最近 24 份文档中按文件名或完整路径筛选，支持 Unicode 大小写折叠与空格分隔的多个关键词。方向键或 `Ctrl+j/k` 选择，回车、双击或 Open 按钮打开并恢复该文档的阅读位置。再次按快捷键、`Escape` 或 Cancel 关闭；筛选时输入不会触发页面导航。欢迎界面也提供入口。
 
@@ -156,6 +159,7 @@ xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
+xvfb-run -a python3 scripts/smoke-close.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
