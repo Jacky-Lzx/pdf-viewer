@@ -805,6 +805,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "ttf-parser",
+ "unicode-segmentation",
 ]
 
 [[package]]

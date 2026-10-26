@@ -5,7 +5,7 @@ use crate::{
     links::{LinkTarget, PageLink},
     navigation::{Fit, Navigation},
     render_plan::RenderView,
-    selection::TextSelection,
+    selection::{SelectionUnit, TextSelection},
     state::{self, Library, ReadingMark, ReadingState},
     text::SearchHit,
     worker::{Event, Worker},
@@ -955,7 +955,7 @@ impl Folio {
                         self.selection.start();
                         self.worker.inspect(self.nav.page);
                         self.notify(
-                            "Drag to select text · y or Ctrl/Cmd+C to copy · Escape to exit",
+                            "Drag to select · double-click word / triple-click line · y to copy · Escape to exit",
                         );
                     }
                 }
@@ -1645,7 +1645,7 @@ impl Folio {
                     } else {
                         self.scroll(-scroll, false);
                     }
-                    if response.double_clicked() {
+                    if response.double_clicked() && !self.selection.active {
                         self.reading.fit = Fit::Page;
                         self.pan = Vec2::ZERO;
                         self.dirty = true;
@@ -1684,16 +1684,26 @@ impl Folio {
                             self.reading.rotation,
                         )
                     };
-                    if response.drag_started_by(egui::PointerButton::Primary)
-                        || response.clicked_by(egui::PointerButton::Primary)
-                    {
+                    let clicked = response.clicked_by(egui::PointerButton::Primary);
+                    if response.drag_started_by(egui::PointerButton::Primary) || clicked {
                         let pressed = ui
                             .input(|input| input.pointer.press_origin())
                             .or(response.interact_pointer_pos());
                         if let Some(position) =
                             pressed.filter(|position| page_rect.contains(*position))
                         {
-                            self.selection.begin(point(position));
+                            if clicked {
+                                let unit = if response.triple_clicked() {
+                                    SelectionUnit::Line
+                                } else if response.double_clicked() {
+                                    SelectionUnit::Word
+                                } else {
+                                    SelectionUnit::Glyph
+                                };
+                                self.selection.select(point(position), unit);
+                            } else {
+                                self.selection.begin(point(position));
+                            }
                         }
                     }
                     if (response.dragged_by(egui::PointerButton::Primary)
@@ -2108,6 +2118,7 @@ impl Folio {
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
+                        ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),

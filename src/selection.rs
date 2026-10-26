@@ -1,6 +1,34 @@
 use crate::text::PageText;
 use hayro::kurbo::{Point, Rect};
 use std::{ops::Range, sync::Arc};
+use unicode_segmentation::UnicodeSegmentation;
+
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum SelectionUnit {
+    #[default]
+    Glyph,
+    Word,
+    Line,
+}
+
+fn line_range(text: &str, offset: usize) -> Range<usize> {
+    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let end = text[offset..]
+        .find('\n')
+        .map_or(text.len(), |index| offset + index);
+    start..end
+}
+
+fn word_range(text: &str, offset: usize) -> Range<usize> {
+    let line = line_range(text, offset);
+    text[line.clone()]
+        .split_word_bound_indices()
+        .find_map(|(start, word)| {
+            let range = line.start + start..line.start + start + word.len();
+            range.contains(&offset).then_some(range)
+        })
+        .unwrap_or(offset..offset)
+}
 
 #[derive(Default)]
 pub struct TextSelection {
@@ -11,6 +39,7 @@ pub struct TextSelection {
     anchor_span: Option<usize>,
     head: Option<Point>,
     range: Option<Range<usize>>,
+    unit: SelectionUnit,
 }
 
 impl TextSelection {
@@ -44,6 +73,11 @@ impl TextSelection {
         self.update();
     }
 
+    pub fn select(&mut self, point: Point, unit: SelectionUnit) {
+        self.unit = unit;
+        self.begin(point);
+    }
+
     pub fn extend(&mut self, point: Point) {
         if self.head == Some(point) {
             return;
@@ -66,7 +100,22 @@ impl TextSelection {
         let (Some(first), Some(last)) = (first, text.nearest_span(head)) else {
             return;
         };
-        let range = text.spans[first.min(last)].range.start..text.spans[first.max(last)].range.end;
+        let mut range =
+            text.spans[first.min(last)].range.start..text.spans[first.max(last)].range.end;
+        if self.unit != SelectionUnit::Glyph
+            && let Some((end, _)) = text.text[..range.end].char_indices().next_back()
+        {
+            let bounds = if self.unit == SelectionUnit::Word {
+                word_range
+            } else {
+                line_range
+            };
+            range = bounds(&text.text, range.start).start..bounds(&text.text, end).end;
+            // Keep CRLF's carriage return out of copied full lines.
+            if self.unit == SelectionUnit::Line && text.text[..range.end].ends_with('\r') {
+                range.end -= 1;
+            }
+        }
         if self.range.as_ref() != Some(&range) {
             self.rects = text.rects_for_range(range.clone());
             self.range = Some(range);
@@ -150,5 +199,76 @@ mod tests {
         assert_eq!(selection.selected_text(), Some("A"));
         selection.extend(Point::new(105.0, 25.0));
         assert_eq!(selection.selected_text(), Some("A\nB"));
+    }
+
+    #[test]
+    fn word_and_line_drags_expand_both_ends_in_either_direction() {
+        let mut selection = TextSelection::default();
+        selection.start();
+        selection.set_text(text());
+        selection.select(Point::new(15.0, 5.0), SelectionUnit::Word);
+        assert_eq!(selection.selected_text(), Some("Rust"));
+        selection.extend(Point::new(15.0, 25.0));
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        selection.select(Point::new(15.0, 25.0), SelectionUnit::Word);
+        selection.extend(Point::new(15.0, 5.0));
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        selection.select(Point::new(45.0, 5.0), SelectionUnit::Word);
+        assert_eq!(selection.selected_text(), Some("中"));
+        selection.select(Point::new(15.0, 25.0), SelectionUnit::Line);
+        assert_eq!(selection.selected_text(), Some("reader"));
+        selection.extend(Point::new(15.0, 5.0));
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        selection.select(Point::new(15.0, 5.0), SelectionUnit::Glyph);
+        assert_eq!(selection.selected_text(), Some("u"));
+    }
+
+    #[test]
+    fn unicode_words_keep_combining_marks_emoji_apostrophes_and_punctuation_boundaries() {
+        let text = "cafe\u{301}, can't 中文 👩‍💻\nnext";
+        for (needle, expected) in [
+            ("e", "cafe\u{301}"),
+            ("\u{301}", "cafe\u{301}"),
+            (",", ","),
+            ("n'", "can't"),
+            ("中", "中"),
+            ("💻", "👩‍💻"),
+            ("ext", "next"),
+        ] {
+            let index = text.find(needle).unwrap();
+            assert_eq!(&text[word_range(text, index)], expected);
+        }
+        assert_eq!(
+            line_range(text, text.len()),
+            text.rfind('\n').unwrap() + 1..text.len()
+        );
+        assert_eq!(line_range("", 0), 0..0);
+    }
+
+    #[test]
+    fn delayed_text_retains_word_selection_and_full_line_copy_omits_crlf() {
+        let mut selection = TextSelection::default();
+        selection.start();
+        selection.select(Point::new(15.0, 5.0), SelectionUnit::Word);
+        selection.extend(Point::new(15.0, 25.0));
+        selection.set_text(text());
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        let mut page = PageText::default();
+        page.text = "first\r\nsecond".into();
+        page.spans = vec![
+            TextSpan {
+                range: 0..5,
+                rect: Rect::new(0.0, 0.0, 40.0, 10.0),
+            },
+            TextSpan {
+                range: 7..13,
+                rect: Rect::new(0.0, 20.0, 40.0, 30.0),
+            },
+        ];
+        selection.set_text(Arc::new(page));
+        selection.select(Point::new(5.0, 5.0), SelectionUnit::Line);
+        assert_eq!(selection.selected_text(), Some("first"));
+        selection.extend(Point::new(5.0, 25.0));
+        assert_eq!(selection.selected_text(), Some("first\r\nsecond"));
     }
 }
