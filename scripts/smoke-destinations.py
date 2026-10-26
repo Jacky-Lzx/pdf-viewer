@@ -42,7 +42,7 @@ def run(binary):
                 application.send_signal(signal.SIGSTOP)
                 try:
                     for letter in value:
-                        keyboard.key(letter.lower(), shift=letter.isupper(), delay=0)
+                        keyboard.key(letter.lower(), shift=letter.isupper() or letter == "$", delay=0)
                 finally:
                     application.send_signal(signal.SIGCONT)
 
@@ -136,6 +136,14 @@ def run(binary):
                 expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "alignment preserves the existing history entry")
                 keyboard.key(0xFF53, alt=True)
                 expect(lambda book: book["page"] == 1 and book["offset"] == [1, 1], "history restores the aligned PDF target")
+                for command, horizontal in [("z0", 0), ("z$", 1)]:
+                    burst("ggp")
+                    expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "prepare horizontal destination alignment")
+                    time.sleep(0.2)
+                    burst("fa" + command)
+                    expect(lambda book: book["page"] == 1 and custom(book) == 2
+                           and book["offset"][0] == horizontal and 0.65 < book["offset"][1] < 0.67,
+                           "same-frame horizontal alignment preserves PDF target vertical position")
                 print("PASS: PDF destinations, same-frame link/mark/history and vertical alignment, same/cross-page view history, zoom/rotation/scroll restoration, counts and reload pruning")
             except Exception:
                 log.flush(); log.seek(0)

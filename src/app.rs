@@ -471,7 +471,7 @@ impl Folio {
         self.zoom_at(factor, self.viewport * 0.5);
     }
 
-    fn align_page(&mut self, vertical: f32) {
+    fn align_axis(&mut self, axis: usize, fraction: f32) {
         // Apply any saved/search/PDF position before changing only one axis.
         if self.resolve_view().is_none() {
             return;
@@ -479,7 +479,7 @@ impl Folio {
         self.hints.cancel();
         self.pending_search_jump = None;
         let mut offset = self.current_offset();
-        offset[1] = vertical;
+        offset[axis] = fraction;
         // Apply after this frame's zoom/rotation has established its overflow.
         self.pending_offset = Some(offset);
         self.dirty = true;
@@ -882,7 +882,7 @@ impl Folio {
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
-        for (event, percentage) in
+        for (event, symbol) in
             context.input(|input| shortcuts::reader_actions(input).collect::<Vec<_>>())
         {
             // Opening/closing an input changes how later keys in this same
@@ -1204,7 +1204,11 @@ impl Folio {
             }
             if self.nav.pending_z {
                 let count = self.nav.take_count() as f32;
-                if modifiers.shift && matches!(key, Key::H | Key::L) {
+                if symbol == Some('$') {
+                    self.align_axis(0, 1.0);
+                } else if key == Key::Num0 && !modifiers.shift {
+                    self.align_axis(0, 0.0);
+                } else if modifiers.shift && matches!(key, Key::H | Key::L) {
                     let direction = if key == Key::H { -1.0 } else { 1.0 };
                     self.scroll(
                         Vec2::new(self.viewport.x * 0.5 * count * direction, 0.0),
@@ -1212,15 +1216,15 @@ impl Folio {
                     );
                 } else if !modifiers.shift {
                     match key {
-                        Key::T => self.align_page(0.0),
-                        Key::Z => self.align_page(0.5),
-                        Key::B => self.align_page(1.0),
+                        Key::T => self.align_axis(1, 0.0),
+                        Key::Z => self.align_axis(1, 0.5),
+                        Key::B => self.align_axis(1, 1.0),
                         _ => {}
                     }
                 }
                 continue;
             }
-            if percentage {
+            if symbol == Some('%') {
                 let percentage = self.nav.prefix.parse::<usize>().ok();
                 self.nav.clear_prefix();
                 if let Some(percentage) = percentage {
@@ -1231,6 +1235,10 @@ impl Folio {
                 } else {
                     self.notify("Type a percentage first, e.g. 50%");
                 }
+                continue;
+            }
+            if symbol == Some('$') {
+                self.nav.clear_prefix();
                 continue;
             }
             if let Some(digit) = match key {
@@ -2270,6 +2278,7 @@ impl Folio {
                         ("50%", "Jump to a percentage of the document's pages"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("zH / zL", "Scroll left / right half a screen; counts supported"),
+                        ("z0 / z$", "Current page left / right edge; keep vertical position"),
                         ("3r / 3R", "Rotate clockwise / counterclockwise three quarter turns"),
                         ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),

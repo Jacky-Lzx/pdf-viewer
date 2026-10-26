@@ -42,7 +42,7 @@ def run(binary):
                     application.send_signal(signal.SIGSTOP)
                 try:
                     for character in value:
-                        keyboard.key(character.lower(), shift=character.isupper() or character in "%+?:", delay=0 if burst else 0.025)
+                        keyboard.key(character.lower(), shift=character.isupper() or character in "%+?:$", delay=0 if burst else 0.025)
                 finally:
                     if burst:
                         application.send_signal(signal.SIGCONT)
@@ -78,9 +78,9 @@ def run(binary):
                 sequence("rp75%", burst=True)
                 wait_for(lambda: book().get("page") == 4 and book().get("rotation") == 1, "rotated percentage jump")
                 keyboard.key("f", ctrl=True)
-                sequence("50%j")
+                sequence("50%jz$")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
-                assert keyboard.clipboard() == "50%j", "percentage remains literal text in search"
+                assert keyboard.clipboard() == "50%jz$", "percentage and dollar remain literal text in search"
                 keyboard.key(0xFF1B)
                 sequence(":25%")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)

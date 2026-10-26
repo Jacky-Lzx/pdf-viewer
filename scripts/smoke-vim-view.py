@@ -48,7 +48,7 @@ def run(binary):
                     application.send_signal(signal.SIGSTOP)
                 try:
                     for character in value:
-                        keyboard.key(character.lower(), shift=character.isupper() or character == "+", delay=0 if burst else 0.025)
+                        keyboard.key(character.lower(), shift=character.isupper() or character in "+$", delay=0 if burst else 0.025)
                 finally:
                     if burst:
                         application.send_signal(signal.SIGCONT)
@@ -58,7 +58,11 @@ def run(binary):
                 position(0, 0, "initial fit page", fit="Page")
                 sequence("999zLJ")
                 position(1, 0, "horizontal half-screen stops on a fitted page and consumes its count", fit="Page", horizontal=0)
-                sequence("K")
+                sequence("K999z$J", burst=True)
+                position(1, 0, "horizontal edge alignment stops on a fitted page and consumes its count", fit="Page", horizontal=0)
+                sequence("$J", burst=True)
+                position(2, 0, "a bare dollar cannot become a hidden numeric prefix", fit="Page", horizontal=0)
+                sequence("2K")
                 sequence("w++++++999hzz", burst=True)
                 zoomed = position(0, 0.5, "prepare zoomed horizontal scrolling", horizontal=0)
                 horizontal_step = 0.5 / (1.2 ** 6 - 1)
@@ -76,11 +80,26 @@ def run(binary):
                 position(0, 0.5, "large horizontal count clamps at the right edge", zoomed["fit"], 1)
                 sequence("zH")
                 position(0, 0.5, "zH reverses half a screen from the right edge", zoomed["fit"], 1 - horizontal_step)
+                sequence("z$")
+                position(0, 0.5, "z$ aligns to the right edge without changing vertical position", zoomed["fit"], 1)
+                sequence("z0")
+                position(0, 0.5, "z0 aligns to the left edge without changing vertical position", zoomed["fit"], 0)
+                sequence("4z$J", burst=True)
+                position(1, 0, "horizontal alignment consumes counts before subsequent page navigation", zoomed["fit"], 0)
+                sequence("'az$", burst=True)
+                position(0, 0.5, "same-frame saved view and right alignment preserve the saved vertical position", zoomed["fit"], 1)
+                sequence("z$ztz0", burst=True)
+                position(0, 0, "same-frame horizontal and vertical alignment compose", zoomed["fit"], 0)
+                sequence("zz")
                 sequence("rzz999h")
                 position(0, 0.5, "prepare rotated horizontal scrolling", zoomed["fit"], 0, rotation=1)
                 sequence("zL")
                 position(0, 0.5, "zL follows the rotated horizontal axis", zoomed["fit"],
                          0.5 / (800 / 600 * 1.2 ** 6 - 1), rotation=1)
+                sequence("z$")
+                position(0, 0.5, "right alignment follows the rotated page axis", zoomed["fit"], 1, rotation=1)
+                sequence("z0")
+                position(0, 0.5, "left alignment follows the rotated page axis", zoomed["fit"], 0, rotation=1)
                 keyboard.key("r", shift=True)
                 sequence("p")
                 position(0, 0, "reset after horizontal half-screen navigation", fit="Page", horizontal=0)
@@ -239,7 +258,7 @@ def run(binary):
                 position(3, 0, "restored zoom and horizontal position remain navigable", fit, horizontal, rotation=1)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: counted clockwise/counterclockwise and full-turn rotations, large counts and toolbar cleanup, counted zH/zL half-screen distance, edge clamping, restored/rotated horizontal scrolling, toolbar/keyboard and same-frame restored rotation, counted Ctrl+e/y with no edge page turns, same-frame fit/scroll/alignment/zoom/restore, zt/zz/zb, invalid/cancelled prefixes, preserved zoom/pan and restart")
+                print("PASS: counted clockwise/counterclockwise and full-turn rotations, large counts and toolbar cleanup, counted zH/zL half-screen distance, z0/z$ edges and same-frame restored alignment, edge clamping, restored/rotated horizontal scrolling, toolbar/keyboard and same-frame restored rotation, counted Ctrl+e/y with no edge page turns, same-frame fit/scroll/alignment/zoom/restore, zt/zz/zb, invalid/cancelled prefixes, preserved zoom/pan and restart")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

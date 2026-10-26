@@ -1,6 +1,8 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
-pub(super) fn reader_actions(input: &InputState) -> impl Iterator<Item = (Event, bool)> + '_ {
+pub(super) fn reader_actions(
+    input: &InputState,
+) -> impl Iterator<Item = (Event, Option<char>)> + '_ {
     input
         .events
         .iter()
@@ -20,11 +22,18 @@ pub(super) fn reader_actions(input: &InputState) -> impl Iterator<Item = (Event,
             if !action {
                 return None;
             }
-            // egui has no Percent key. Match the actual text paired with this
-            // press, since its fallback key varies with the keyboard layout.
-            let percentage = matches!(event, Event::Key { .. })
-                && matches!(input.events.get(index + 1), Some(Event::Text(text)) if text == "%");
-            Some((event.clone(), percentage))
+            // egui has no Percent/Dollar keys. Match text paired with this
+            // press, since their fallback keys vary with the keyboard layout.
+            let symbol = if matches!(event, Event::Key { .. }) {
+                match input.events.get(index + 1) {
+                    Some(Event::Text(text)) if text == "%" => Some('%'),
+                    Some(Event::Text(text)) if text == "$" => Some('$'),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            Some((event.clone(), symbol))
         })
 }
 
@@ -168,32 +177,34 @@ mod tests {
     }
 
     #[test]
-    fn percentage_key_text_preserves_action_order_without_treating_paste_as_navigation() {
-        for symbol_key in [Key::Num5, Key::Quote, Key::D] {
-            let mut input = InputState::default();
-            input.events = vec![
-                key(Key::Num5, Modifiers::NONE, true),
-                Event::Text("5".into()),
-                key(Key::Num5, Modifiers::NONE, false),
-                key(Key::Num0, Modifiers::NONE, true),
-                Event::Text("0".into()),
-                key(symbol_key, Modifiers::SHIFT, true),
-                Event::Text("%".into()),
-                key(symbol_key, Modifiers::SHIFT, false),
-                Event::Paste("25%".into()),
-                Event::Text("%".into()),
-                key(Key::J, Modifiers::SHIFT, true),
-            ];
-            let actions: Vec<_> = reader_actions(&input).collect();
-            assert_eq!(actions.len(), 4);
-            assert_eq!(
-                actions
-                    .iter()
-                    .map(|(_, percent)| *percent)
-                    .collect::<Vec<_>>(),
-                [false, false, true, false]
-            );
-            assert!(matches!(&actions[2].0, Event::Key { key, .. } if *key == symbol_key));
+    fn punctuation_key_text_preserves_action_order_without_treating_paste_as_navigation() {
+        for symbol in ['%', '$'] {
+            for symbol_key in [Key::Num5, Key::Quote, Key::D] {
+                let mut input = InputState::default();
+                input.events = vec![
+                    key(Key::Num5, Modifiers::NONE, true),
+                    Event::Text("5".into()),
+                    key(Key::Num5, Modifiers::NONE, false),
+                    key(Key::Num0, Modifiers::NONE, true),
+                    Event::Text("0".into()),
+                    key(symbol_key, Modifiers::SHIFT, true),
+                    Event::Text(symbol.to_string()),
+                    key(symbol_key, Modifiers::SHIFT, false),
+                    Event::Paste(format!("25{symbol}")),
+                    Event::Text(symbol.to_string()),
+                    key(Key::J, Modifiers::SHIFT, true),
+                ];
+                let actions: Vec<_> = reader_actions(&input).collect();
+                assert_eq!(actions.len(), 4);
+                assert_eq!(
+                    actions
+                        .iter()
+                        .map(|(_, symbol)| *symbol)
+                        .collect::<Vec<_>>(),
+                    [None, None, Some(symbol), None]
+                );
+                assert!(matches!(&actions[2].0, Event::Key { key, .. } if *key == symbol_key));
+            }
         }
     }
 
