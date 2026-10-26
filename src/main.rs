@@ -2,6 +2,7 @@ mod app;
 mod cache;
 mod document;
 mod fonts;
+mod geometry;
 mod links;
 mod navigation;
 mod outline;

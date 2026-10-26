@@ -37,6 +37,7 @@ pub struct Folio {
     hints: LinkHints,
     mark_action: Option<MarkAction>,
     pending_offset: Option<[f32; 2]>,
+    pending_focus: Option<hayro::kurbo::Rect>,
     cache: TextureCache,
     id: u64,
     loading: bool,
@@ -56,6 +57,7 @@ pub struct Folio {
     revision: u64,
     hits: Vec<SearchHit>,
     hit_index: Option<usize>,
+    reveal_hit: Option<usize>,
     scanned: usize,
     scan_total: usize,
     search_complete: bool,
@@ -89,6 +91,7 @@ impl Folio {
             hints: LinkHints::default(),
             mark_action: None,
             pending_offset: None,
+            pending_focus: None,
             cache: TextureCache::default(),
             id: 0,
             loading: false,
@@ -108,6 +111,7 @@ impl Folio {
             revision: 0,
             hits: Vec::new(),
             hit_index: None,
+            reveal_hit: None,
             scanned: 0,
             scan_total: 0,
             search_complete: true,
@@ -153,8 +157,10 @@ impl Folio {
         self.requested = None;
         self.pan = Vec2::ZERO;
         self.pending_offset = Some(self.reading.offset);
+        self.pending_focus = None;
         self.hits.clear();
         self.hit_index = None;
+        self.reveal_hit = None;
         self.query.clear();
         self.search_due = None;
         self.search_open = false;
@@ -219,6 +225,7 @@ impl Folio {
                     self.reading.fit = mark.fit;
                     self.reading.rotation = mark.rotation % 4;
                     self.pending_offset = Some(mark.offset);
+                    self.pending_focus = None;
                     self.dirty = true;
                 } else {
                     self.notify(format!("Mark {name} is not set · use m{name} to save it"));
@@ -270,6 +277,7 @@ impl Folio {
         self.visible_links.clear();
         self.pan = Vec2::ZERO;
         self.pending_offset = None;
+        self.pending_focus = None;
         self.reading.offset = [0.0; 2];
         self.requested = None;
         self.dirty = true;
@@ -324,26 +332,26 @@ impl Folio {
         let index = match self.hit_index {
             Some(index) if reverse => (index + self.hits.len() - 1) % self.hits.len(),
             Some(index) => (index + 1) % self.hits.len(),
-            None if reverse => self.hits.len() - 1,
-            None => self
+            None if reverse => self
                 .hits
-                .iter()
-                .position(|hit| hit.page >= self.nav.page)
-                .unwrap_or(0),
+                .partition_point(|hit| hit.page <= self.nav.page)
+                .checked_sub(1)
+                .unwrap_or(self.hits.len() - 1),
+            None => {
+                let index = self.hits.partition_point(|hit| hit.page < self.nav.page);
+                if index < self.hits.len() { index } else { 0 }
+            }
         };
         self.select_hit(index);
     }
 
     fn select_hit(&mut self, index: usize) {
         self.hit_index = Some(index);
+        self.reveal_hit = Some(index);
         let page = self.hits[index].page;
-        let top = self.hits[index].rects.first().map(|rect| rect.y0 as f32);
+        let rect = self.hits[index].rects.first().copied();
         self.jump(page);
-        if self.reading.rotation == 0
-            && let Some(top) = top
-        {
-            self.pan.y = (top * self.scale - self.viewport.y * 0.3).max(0.0);
-        }
+        self.pending_focus = rect;
     }
 
     fn events(&mut self, context: &egui::Context) {
@@ -816,6 +824,7 @@ impl Folio {
                         self.revision += 1;
                         self.hits.clear();
                         self.hit_index = None;
+                        self.reveal_hit = None;
                         self.scanned = 0;
                         self.scan_total = self.nav.count;
                         self.search_complete = self.query.trim().is_empty();
@@ -966,22 +975,34 @@ impl Folio {
                                 .color(ACCENT),
                         );
                         let mut selected = None;
-                        for (index, hit) in self.hits.iter().enumerate().take(300) {
-                            if ui
-                                .selectable_label(
-                                    self.hit_index == Some(index),
-                                    format!("{}   {}", hit.page + 1, hit.snippet),
-                                )
-                                .clicked()
-                            {
-                                selected = Some(index);
-                            }
+                        let mut results = egui::ScrollArea::vertical()
+                            .id_salt("search-results")
+                            .max_height(280.0);
+                        if let Some(index) = self.reveal_hit.take() {
+                            results = results.vertical_scroll_offset(
+                                index as f32 * (25.0 + ui.spacing().item_spacing.y),
+                            );
                         }
+                        results.show_rows(ui, 25.0, self.hits.len(), |ui, range| {
+                            for index in range {
+                                let hit = &self.hits[index];
+                                if ui
+                                    .add(
+                                        egui::Button::selectable(
+                                            self.hit_index == Some(index),
+                                            format!("{}   {}", hit.page + 1, hit.snippet),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(&hit.snippet)
+                                    .clicked()
+                                {
+                                    selected = Some(index);
+                                }
+                            }
+                        });
                         if let Some(index) = selected {
                             self.select_hit(index);
-                        }
-                        if self.hits.len() > 300 {
-                            ui.weak("Use n / N to navigate all results.");
                         }
                     }
                     ui.add_space(20.0);
@@ -1040,6 +1061,17 @@ impl Folio {
                 if let Some(offset) = self.pending_offset.take() {
                     self.pan = Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0))
                         * self.overflow;
+                }
+                if let Some(focus) = self.pending_focus.take() {
+                    let offset = crate::geometry::focus_offset(
+                        focus,
+                        dimensions,
+                        self.reading.rotation,
+                        self.scale,
+                        [self.viewport.x, self.viewport.y],
+                        [self.overflow.x, self.overflow.y],
+                    );
+                    self.pan = Vec2::new(offset[0], offset[1]);
                 }
                 self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 let response = ui.interact(
@@ -1124,30 +1156,17 @@ impl Folio {
     }
 
     fn highlights(&self, painter: &egui::Painter, page_rect: egui::Rect, dimensions: [f32; 2]) {
-        for (index, hit) in self
-            .hits
-            .iter()
-            .enumerate()
-            .filter(|(_, hit)| hit.page == self.nav.page)
-        {
+        for index in crate::text::page_hits(&self.hits, self.nav.page) {
+            let hit = &self.hits[index];
             let color = if self.hit_index == Some(index) {
                 Color32::from_rgba_unmultiplied(255, 143, 36, 120)
             } else {
                 Color32::from_rgba_unmultiplied(255, 215, 40, 85)
             };
             for rect in &hit.rects {
-                let points = [(rect.x0, rect.y0), (rect.x1, rect.y1)].map(|(x, y)| {
-                    let (x, y) = (x as f32, y as f32);
-                    let (x, y) = match self.reading.rotation {
-                        1 => (dimensions[1] - y, x),
-                        2 => (dimensions[0] - x, dimensions[1] - y),
-                        3 => (y, dimensions[0] - x),
-                        _ => (x, y),
-                    };
-                    page_rect.min + Vec2::new(x, y) * self.scale
-                });
                 painter.rect_filled(
-                    egui::Rect::from_two_pos(points[0], points[1]).intersect(page_rect),
+                    self.link_rect(*rect, page_rect, dimensions)
+                        .intersect(page_rect),
                     1.0,
                     color,
                 );
@@ -1170,17 +1189,11 @@ impl Folio {
         page_rect: egui::Rect,
         dimensions: [f32; 2],
     ) -> egui::Rect {
-        let points = [(rect.x0, rect.y0), (rect.x1, rect.y1)].map(|(x, y)| {
-            let (x, y) = (x as f32, y as f32);
-            let (x, y) = match self.reading.rotation {
-                1 => (dimensions[1] - y, x),
-                2 => (dimensions[0] - x, dimensions[1] - y),
-                3 => (y, dimensions[0] - x),
-                _ => (x, y),
-            };
-            page_rect.min + Vec2::new(x, y) * self.scale
-        });
-        egui::Rect::from_two_pos(points[0], points[1])
+        let rect = crate::geometry::rotate_rect(rect, dimensions, self.reading.rotation);
+        egui::Rect::from_min_max(
+            page_rect.min + Vec2::new(rect.x0 as f32, rect.y0 as f32) * self.scale,
+            page_rect.min + Vec2::new(rect.x1 as f32, rect.y1 as f32) * self.scale,
+        )
     }
 
     fn link_overlays(&mut self, ui: &mut egui::Ui, page_rect: egui::Rect, dimensions: [f32; 2]) {

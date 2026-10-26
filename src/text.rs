@@ -37,6 +37,13 @@ pub struct SearchHit {
     pub snippet: String,
 }
 
+/// Search batches arrive in page order, so only the visible page needs to be visited.
+pub fn page_hits(hits: &[SearchHit], page: usize) -> Range<usize> {
+    let first = hits.partition_point(|hit| hit.page < page);
+    let count = hits[first..].partition_point(|hit| hit.page == page);
+    first..first + count
+}
+
 impl PageText {
     pub fn memory_bytes(&self) -> usize {
         // Reserve for Unicode lowercase expansion before the lazy index is built.
@@ -178,6 +185,24 @@ impl<'a> Device<'a> for TextDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_hit_ranges_preserve_global_selection_indices() {
+        let hits: Vec<_> = [0, 0, 2, 2, 2, 7]
+            .into_iter()
+            .map(|page| SearchHit {
+                page,
+                rects: Vec::new(),
+                snippet: String::new(),
+            })
+            .collect();
+        assert_eq!(page_hits(&hits, 0), 0..2);
+        assert_eq!(page_hits(&hits, 1), 2..2);
+        assert_eq!(page_hits(&hits, 2), 2..5);
+        assert_eq!(page_hits(&hits, 7), 5..6);
+        assert_eq!(page_hits(&hits, 8), 6..6);
+        assert_eq!(page_hits(&[], 0), 0..0);
+    }
     #[test]
     fn search_handles_unicode_case_expansion_and_empty_queries() {
         let text = PageText {
