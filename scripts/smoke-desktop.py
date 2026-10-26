@@ -81,7 +81,7 @@ def run(binary):
     with tempfile.TemporaryDirectory(prefix="folio-smoke-") as directory:
         root = Path(directory)
         fixture = Path(__file__).resolve().parent.parent / "assets/folio-guide.pdf"
-        document = root / "folio-smoke.pdf"
+        document = root / "阅读指南-folio-smoke.pdf"
         shutil.copyfile(fixture, document)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
@@ -107,6 +107,10 @@ def run(binary):
         try:
             application = launch()
             expect(lambda _, book: book["page"] == 0, "initial page")
+            keyboard.key("f"); keyboard.key("a")
+            expect(lambda _, book: book["page"] == 1, "keyboard link hints")
+            keyboard.key("g"); keyboard.key("g")
+            expect(lambda _, book: book["page"] == 0, "return from internal link")
             keyboard.key("3"); keyboard.key("g", shift=True)
             expect(lambda _, book: book["page"] == 2, "3G navigation")
             keyboard.key("b")
@@ -130,12 +134,16 @@ def run(binary):
             expect(lambda _, book: book["page"] == 3, "go to page dialog")
             keyboard.key(0xFF09)
             expect(lambda config, _: config["sidebar"], "document outline sidebar")
+            keyboard.key("j", shift=True)
+            expect(lambda _, book: book["page"] == 4, "Vim navigation after sidebar focus")
+            keyboard.key("k", shift=True)
+            expect(lambda _, book: book["page"] == 3, "return before session restore")
             application.terminate(); application.wait(timeout=5)
             application = launch()
             time.sleep(0.5)
             keyboard.key("j", shift=True)
             expect(lambda _, book: book["page"] == 4 and 2 in book["bookmarks"] and book["rotation"] == 1, "reading progress restored on restart")
-            print("PASS: native Vim navigation, bookmarks, rotation, themes, search, page dialog, sidebar and session restore")
+            print("PASS: native Vim navigation, keyboard links, bookmarks, rotation, themes, search, page dialog, sidebar and session restore")
         except Exception:
             log.flush(); log.seek(0)
             print(log.read(), file=sys.stderr)

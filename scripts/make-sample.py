@@ -72,6 +72,12 @@ def make_pdf():
         def text(x, y, size, text, bold=False, color="0.16 0.18 0.18"):
             ops.append(f"{color} rg BT /{'F2' if bold else 'F1'} {size} Tf {x} {y} Td ({pdf_string(text)}) Tj ET")
         text(48, 675, 11, eyebrow, True, "0.16 0.45 0.36")
+        if index == 0:
+            text(48, 160, 12, "Read the navigation guide", color="0.16 0.45 0.36")
+            text(330, 160, 12, "Language website", color="0.16 0.45 0.36")
+            page = objects[page_id - 1].decode()
+            links = "/Annots [<< /Type /Annot /Subtype /Link /Rect [48 150 275 178] /Border [0 0 0] /Dest [7 0 R /Fit] >> << /Type /Annot /Subtype /Link /Rect [330 150 505 178] /Border [0 0 0] /A << /S /URI /URI (https://www.rust-lang.org/) >> >>]"
+            objects[page_id - 1] = (page[:-2] + links + " >>").encode()
         text(48, 620, 29, title, True)
         for row, line in enumerate(lines):
             text(48, 555 - row * 28, 12, line)

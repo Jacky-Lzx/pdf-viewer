@@ -4,6 +4,8 @@
 
 用 Rust 编写的原生 PDF 阅读器，支持 Linux（Wayland / X11）和 macOS。使用 eframe / egui 构建界面，hayro 在后台进行纯 Rust PDF 渲染，无需安装 PDFium 或 Poppler。
 
+<img src="assets/screenshot.png" width="1000" alt="Folio：文档目录、中文文件名和键盘链接提示">
+
 ## 运行
 
 需要 Rust **1.92 或更新版本**。
@@ -25,6 +27,8 @@ sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev libg
 
 NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Folio.app`。
 
+中文文件名、目录和搜索框会自动使用系统中文字体。Linux 可安装 `fonts-noto-cjk`；macOS 使用系统字体。也可以设置 `FOLIO_FONT=/path/to/font.otf` 指定回退字体，字体在后台加载。
+
 ## 键盘操作
 
 快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
@@ -44,6 +48,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `r` / `Shift+r` | 顺时针 / 逆时针旋转 |
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
 | `n` / `N` | 下一个 / 上一个搜索匹配 |
+| `f`，然后输入标签 | 跟随当前可见的 PDF 链接；`Escape` 取消 |
 | `b` | 添加 / 删除当前页书签 |
 | `Tab` | 打开 / 关闭侧栏 |
 | `d` / `i` | 切换深色界面 / 反转页面颜色 |
@@ -53,7 +58,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `F11` | 全屏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
 
-鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。侧栏的目录支持层级条目、GoTo 动作和命名目标。
+鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。侧栏的目录支持层级条目、GoTo 动作和命名目标；内部链接可以跳转到对应页，网页链接在系统浏览器中打开。
 
 ## 性能设计
 

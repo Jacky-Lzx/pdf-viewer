@@ -11,6 +11,32 @@ pub struct OutlineEntry {
     pub depth: usize,
 }
 
+pub struct DestinationIndex<'a> {
+    pages: HashMap<ObjectIdentifier, usize>,
+    named: HashMap<Vec<u8>, Object<'a>>,
+}
+
+impl<'a> DestinationIndex<'a> {
+    pub fn new(pdf: &'a Pdf) -> Self {
+        let pages = pdf
+            .pages()
+            .iter()
+            .enumerate()
+            .filter_map(|(page, data)| data.raw().obj_id().map(|id| (id, page)))
+            .collect();
+        let named = pdf
+            .xref()
+            .get::<Dict<'a>>(pdf.xref().root_id())
+            .map(|catalog| named_destinations(&catalog))
+            .unwrap_or_default();
+        Self { pages, named }
+    }
+
+    pub fn resolve(&self, object: Object<'a>) -> Option<usize> {
+        destination(object, &self.pages, &self.named, 0)
+    }
+}
+
 pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
     let Some(catalog) = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()) else {
         return Vec::new();
@@ -21,13 +47,7 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
     else {
         return Vec::new();
     };
-    let pages: HashMap<_, _> = pdf
-        .pages()
-        .iter()
-        .enumerate()
-        .filter_map(|(page, data)| data.raw().obj_id().map(|id| (id, page)))
-        .collect();
-    let named = named_destinations(&catalog);
+    let destinations = DestinationIndex::new(pdf);
     let mut stack = vec![(first, 0)];
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
@@ -46,7 +66,7 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
                 .then(|| action.get::<Object<'_>>(b"D"))
                 .flatten()
         });
-        let page = dest.and_then(|dest| destination(dest, &pages, &named, 0));
+        let page = dest.and_then(|dest| destinations.resolve(dest));
         entries.push(OutlineEntry { title, page, depth });
         if let Some(next) = item.get::<Dict<'_>>(b"Next") {
             stack.push((next, depth));

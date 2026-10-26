@@ -40,6 +40,11 @@ pub enum Event {
         page: usize,
         text: String,
     },
+    Links {
+        id: u64,
+        page: usize,
+        links: Vec<crate::links::PageLink>,
+    },
     Error {
         id: u64,
         message: String,
@@ -62,6 +67,7 @@ struct Pending {
     render: VecDeque<RenderKey>,
     search: Option<SearchRequest>,
     copy: Option<usize>,
+    links: Option<usize>,
     stop: bool,
 }
 
@@ -146,6 +152,7 @@ impl Worker {
             pending.render.clear();
             pending.search = None;
             pending.copy = None;
+            pending.links = None;
         });
     }
 
@@ -157,6 +164,9 @@ impl Worker {
     }
     pub fn copy(&self, page: usize) {
         self.update(|pending| pending.copy = Some(page));
+    }
+    pub fn links(&self, page: usize) {
+        self.update(|pending| pending.links = Some(page));
     }
 }
 
@@ -176,11 +186,13 @@ enum Job {
     Render(RenderKey),
     Search(usize),
     Copy(usize),
+    Links(usize),
 }
 
 fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context: &egui::Context) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
+    let destinations = crate::outline::DestinationIndex::new(pdf);
     let mut texts: HashMap<usize, PageText> = HashMap::new();
     let mut text_bytes = 0;
     let mut search: Option<(SearchRequest, usize, usize)> = None;
@@ -205,6 +217,9 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if let Some(page) = pending.copy.take() {
                     break Job::Copy(page);
                 }
+                if let Some(page) = pending.links.take() {
+                    break Job::Links(page);
+                }
                 if let Some((_, page, _)) = &search {
                     break Job::Search(*page);
                 }
@@ -212,6 +227,15 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
             }
         };
         match job {
+            Job::Links(page) => {
+                if let Some(data) = pdf.pages().get(page) {
+                    let links = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::links::read(data, &destinations)
+                    }))
+                    .unwrap_or_default();
+                    emit(tx, context, Event::Links { id, page, links });
+                }
+            }
             Job::Render(key) => {
                 let start = Instant::now();
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

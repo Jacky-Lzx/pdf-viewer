@@ -13,14 +13,16 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 5 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R /Annots [<< /Type /Annot /Subtype /Link /Rect [48 150 275 178] /Border [0 0 0] /Dest [7 0 R /Fit] >> << /Type /Annot /Subtype /Link /Rect [330 150 505 178] /Border [0 0 0] /A << /S /URI /URI (https://www.rust-lang.org/) >> >>] >>
 endobj
 6 0 obj
-<< /Length 1067 >>
+<< /Length 1209 >>
 stream
 0.984 0.980 0.965 rg 0 0 600 800 re f
 0.16 0.45 0.36 rg 48 708 48 5 re f
 0.16 0.45 0.36 rg BT /F2 11 Tf 48 675 Td (WELCOME TO FOLIO) Tj ET
+0.16 0.45 0.36 rg BT /F1 12 Tf 48 160 Td (Read the navigation guide) Tj ET
+0.16 0.45 0.36 rg BT /F1 12 Tf 330 160 Td (Language website) Tj ET
 0.16 0.18 0.18 rg BT /F2 29 Tf 48 620 Td (A little room to read.) Tj ET
 0.16 0.18 0.18 rg BT /F1 12 Tf 48 555 Td (A native PDF reader, written in Rust.) Tj ET
 0.16 0.18 0.18 rg BT /F1 12 Tf 48 527 Td (Designed for Linux and macOS. Made for your keyboard.) Tj ET
@@ -177,26 +179,26 @@ xref
 0000000264 00000 n 
 0000000334 00000 n 
 0000000409 00000 n 
-0000000545 00000 n 
-0000001664 00000 n 
-0000001800 00000 n 
-0000002906 00000 n 
-0000003043 00000 n 
-0000004181 00000 n 
-0000004319 00000 n 
-0000005492 00000 n 
-0000005630 00000 n 
-0000006708 00000 n 
-0000006846 00000 n 
-0000007852 00000 n 
-0000007926 00000 n 
-0000008028 00000 n 
-0000008149 00000 n 
-0000008259 00000 n 
-0000008371 00000 n 
-0000008478 00000 n 
+0000000772 00000 n 
+0000002033 00000 n 
+0000002169 00000 n 
+0000003275 00000 n 
+0000003412 00000 n 
+0000004550 00000 n 
+0000004688 00000 n 
+0000005861 00000 n 
+0000005999 00000 n 
+0000007077 00000 n 
+0000007215 00000 n 
+0000008221 00000 n 
+0000008295 00000 n 
+0000008397 00000 n 
+0000008518 00000 n 
+0000008628 00000 n 
+0000008740 00000 n 
+0000008847 00000 n 
 trailer
 << /Size 24 /Root 1 0 R >>
 startxref
-8579
+8948
 %%EOF

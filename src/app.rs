@@ -1,6 +1,7 @@
 use crate::{
     cache::TextureCache,
     document::RenderKey,
+    links::{LinkHints, LinkTarget, PageLink},
     navigation::{Fit, Navigation},
     state::{self, Library, ReadingState},
     text::SearchHit,
@@ -8,6 +9,7 @@ use crate::{
 };
 use eframe::egui::{self, Color32, Key, RichText, Vec2};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant},
@@ -23,6 +25,9 @@ pub struct Folio {
     nav: Navigation,
     dimensions: Vec<[f32; 2]>,
     outline: Vec<crate::outline::OutlineEntry>,
+    links: HashMap<usize, Vec<PageLink>>,
+    visible_links: Vec<PageLink>,
+    hints: LinkHints,
     cache: TextureCache,
     id: u64,
     loading: bool,
@@ -61,6 +66,7 @@ impl Folio {
         let config = state::config_path();
         let library = Library::load(&config);
         set_theme(&cc.egui_ctx, library.dark);
+        crate::fonts::install(cc.egui_ctx.clone());
         let mut app = Self {
             worker: Worker::new(cc.egui_ctx.clone()),
             library,
@@ -69,6 +75,9 @@ impl Folio {
             nav: Navigation::default(),
             dimensions: Vec::new(),
             outline: Vec::new(),
+            links: HashMap::new(),
+            visible_links: Vec::new(),
+            hints: LinkHints::default(),
             cache: TextureCache::default(),
             id: 0,
             loading: false,
@@ -125,6 +134,9 @@ impl Folio {
         self.nav = Navigation::default();
         self.dimensions.clear();
         self.outline.clear();
+        self.links.clear();
+        self.visible_links.clear();
+        self.hints.cancel();
         self.cache.clear();
         self.requested = None;
         self.pan = Vec2::ZERO;
@@ -204,12 +216,17 @@ impl Folio {
         }
     }
     fn page_changed(&mut self) {
+        self.hints.cancel();
+        self.visible_links.clear();
         self.pan = Vec2::ZERO;
         self.requested = None;
         self.dirty = true;
     }
 
     fn scroll(&mut self, delta: Vec2, turn_at_edge: bool) {
+        if delta != Vec2::ZERO {
+            self.hints.cancel();
+        }
         let old = self.pan;
         self.pan = (self.pan + delta).clamp(Vec2::ZERO, self.overflow);
         if turn_at_edge && (self.pan.y - old.y).abs() < 0.1 && delta.y.abs() > 0.0 {
@@ -222,6 +239,7 @@ impl Folio {
     }
 
     fn zoom(&mut self, factor: f32) {
+        self.hints.cancel();
         self.reading.fit = Fit::Custom((self.scale * factor).clamp(0.1, 8.0));
         self.pan *= factor;
         self.dirty = true;
@@ -241,6 +259,7 @@ impl Folio {
     }
 
     fn find(&mut self) {
+        self.hints.cancel();
         self.search_open = true;
         self.search_focus = true;
     }
@@ -277,6 +296,12 @@ impl Folio {
     fn events(&mut self, context: &egui::Context) {
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
+                Event::Links { id, page, links } if id == self.id => {
+                    if self.links.len() >= 64 {
+                        self.links.retain(|page, _| *page == self.nav.page);
+                    }
+                    self.links.insert(page, links);
+                }
                 Event::Opened {
                     id,
                     dimensions,
@@ -370,7 +395,15 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        let typing = context.wants_keyboard_input();
+        let typing = context.memory(|memory| {
+            [
+                "folio-search-input",
+                "folio-page-input",
+                "folio-password-input",
+            ]
+            .iter()
+            .any(|name| memory.has_focus(egui::Id::new(name)))
+        });
         for event in context.input(|input| input.events.clone()) {
             let egui::Event::Key {
                 key,
@@ -382,6 +415,7 @@ impl Folio {
                 continue;
             };
             if key == Key::Escape {
+                self.hints.cancel();
                 self.help = false;
                 self.goto_open = false;
                 self.search_open = false;
@@ -402,7 +436,27 @@ impl Folio {
                 self.find();
                 continue;
             }
-            if typing || self.help || self.password_open {
+            if typing || self.help || self.password_open || self.goto_open {
+                continue;
+            }
+            context.input_mut(|input| {
+                input.consume_key(modifiers, key);
+            });
+            if self.hints.active {
+                if modifiers.ctrl || modifiers.command || modifiers.alt {
+                    continue;
+                }
+                if key == Key::Backspace {
+                    self.hints.prefix.pop();
+                    continue;
+                }
+                let name = key.name().to_ascii_lowercase();
+                if name.len() == 1
+                    && let Some(index) = self.hints.press(name.as_bytes()[0] as char)
+                    && let Some(link) = self.visible_links.get(index)
+                {
+                    self.follow_link(link.target.clone(), context);
+                }
                 continue;
             }
             if modifiers.ctrl {
@@ -514,6 +568,12 @@ impl Folio {
                     self.dirty = true;
                 }
                 Key::Slash => self.find(),
+                Key::F => {
+                    self.hints.start(self.visible_links.len());
+                    if !self.hints.active {
+                        self.notify("No links visible on this page");
+                    }
+                }
                 Key::N | Key::F3 => self.next_hit(modifiers.shift),
                 Key::B => self.bookmark(),
                 Key::Tab => {
@@ -551,10 +611,13 @@ impl Folio {
         egui::TopBottomPanel::top("toolbar")
             .exact_height(56.0)
             .show(context, |ui| {
+                let compact = ui.available_width() < 1100.0;
                 ui.horizontal_centered(|ui| {
                     ui.add_space(12.0);
                     ui.label(RichText::new("F").size(28.0).strong().color(ACCENT));
-                    ui.label(RichText::new("folio").size(21.0).strong());
+                    if !compact {
+                        ui.label(RichText::new("folio").size(21.0).strong());
+                    }
                     ui.add_space(16.0);
                     if ui
                         .button("Open")
@@ -601,14 +664,16 @@ impl Folio {
                             self.pan = Vec2::ZERO;
                             self.dirty = true;
                         }
-                        if ui.button("Width").on_hover_text("Fit width · w").clicked() {
+                        if !compact && ui.button("Width").on_hover_text("Fit width · w").clicked()
+                        {
                             self.reading.fit = Fit::Width;
                             self.dirty = true;
                         }
-                        if ui
-                            .button("Rotate")
-                            .on_hover_text("Rotate · r / Shift+R")
-                            .clicked()
+                        if !compact
+                            && ui
+                                .button("Rotate")
+                                .on_hover_text("Rotate · r / Shift+R")
+                                .clicked()
                         {
                             self.reading.rotation = (self.reading.rotation + 1) % 4;
                             self.dirty = true;
@@ -663,6 +728,7 @@ impl Folio {
                     ui.label("Find");
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
+                            .id(egui::Id::new("folio-search-input"))
                             .desired_width(280.0)
                             .hint_text("Search this document…"),
                     );
@@ -738,17 +804,29 @@ impl Folio {
                                             ui.add_space(entry.depth.min(8) as f32 * 12.0);
                                             if let Some(page) = entry.page {
                                                 if ui
-                                                    .selectable_label(
-                                                        self.nav.page == page,
-                                                        &entry.title,
+                                                    .add(
+                                                        egui::Button::selectable(
+                                                            self.nav.page == page,
+                                                            &entry.title,
+                                                        )
+                                                        .truncate(),
                                                     )
-                                                    .on_hover_text(format!("Page {}", page + 1))
+                                                    .on_hover_text(format!(
+                                                        "{}\nPage {}",
+                                                        entry.title,
+                                                        page + 1
+                                                    ))
                                                     .clicked()
                                                 {
                                                     target = Some(page);
                                                 }
                                             } else {
-                                                ui.weak(&entry.title);
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&entry.title).weak(),
+                                                    )
+                                                    .truncate(),
+                                                );
                                             }
                                         });
                                     });
@@ -884,6 +962,9 @@ impl Folio {
                 };
                 self.cache.protect(key);
                 if self.requested != Some(key) {
+                    if !self.links.contains_key(&self.nav.page) {
+                        self.worker.links(self.nav.page);
+                    }
                     self.requested = Some(key);
                     let mut keys = Vec::new();
                     for page in [
@@ -928,6 +1009,7 @@ impl Folio {
                         Color32::WHITE,
                     );
                     self.highlights(&painter, page_rect, dimensions);
+                    self.link_overlays(ui, page_rect, dimensions);
                 } else {
                     painter.text(
                         page_rect.center(),
@@ -969,6 +1051,91 @@ impl Folio {
                     color,
                 );
             }
+        }
+    }
+
+    fn follow_link(&mut self, target: LinkTarget, context: &egui::Context) {
+        self.hints.cancel();
+        match target {
+            LinkTarget::Page(page) => self.jump(page),
+            LinkTarget::Url(url) => context.open_url(egui::OpenUrl::new_tab(url)),
+        }
+        context.request_repaint();
+    }
+
+    fn link_rect(
+        &self,
+        rect: hayro::kurbo::Rect,
+        page_rect: egui::Rect,
+        dimensions: [f32; 2],
+    ) -> egui::Rect {
+        let points = [(rect.x0, rect.y0), (rect.x1, rect.y1)].map(|(x, y)| {
+            let (x, y) = (x as f32, y as f32);
+            let (x, y) = match self.reading.rotation {
+                1 => (dimensions[1] - y, x),
+                2 => (dimensions[0] - x, dimensions[1] - y),
+                3 => (y, dimensions[0] - x),
+                _ => (x, y),
+            };
+            page_rect.min + Vec2::new(x, y) * self.scale
+        });
+        egui::Rect::from_two_pos(points[0], points[1])
+    }
+
+    fn link_overlays(&mut self, ui: &mut egui::Ui, page_rect: egui::Rect, dimensions: [f32; 2]) {
+        self.visible_links = self
+            .links
+            .get(&self.nav.page)
+            .into_iter()
+            .flatten()
+            .filter(|link| {
+                self.link_rect(link.rect, page_rect, dimensions)
+                    .intersects(ui.clip_rect())
+            })
+            .cloned()
+            .collect();
+        let mut follow = None;
+        for (index, link) in self.visible_links.iter().enumerate() {
+            let rect = self
+                .link_rect(link.rect, page_rect, dimensions)
+                .intersect(page_rect)
+                .intersect(ui.clip_rect());
+            let description = match &link.target {
+                LinkTarget::Page(page) => format!("Go to page {}", page + 1),
+                LinkTarget::Url(url) => url.clone(),
+            };
+            let response = ui
+                .interact(
+                    rect,
+                    ui.id().with(("link", self.nav.page, index)),
+                    egui::Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(description);
+            if response.clicked() {
+                follow = Some(link.target.clone());
+            }
+            if self.hints.active {
+                let label = crate::links::hint_label(index, self.visible_links.len());
+                if !label.starts_with(&self.hints.prefix) {
+                    continue;
+                }
+                let painter = ui.painter();
+                let text =
+                    painter.layout_no_wrap(label, egui::FontId::monospace(14.0), Color32::WHITE);
+                let badge = egui::Rect::from_min_size(rect.min, text.size() + Vec2::new(8.0, 4.0));
+                painter.rect_stroke(
+                    rect,
+                    1.0,
+                    egui::Stroke::new(1.0_f32, ACCENT),
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_filled(badge, 3.0, ACCENT);
+                painter.galley(badge.min + Vec2::new(4.0, 2.0), text, Color32::WHITE);
+            }
+        }
+        if let Some(target) = follow {
+            self.follow_link(target, ui.ctx());
         }
     }
 
@@ -1027,7 +1194,15 @@ impl Folio {
             .show(context, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("NORMAL").small().strong().color(ACCENT));
+                    ui.label(
+                        RichText::new(if self.hints.active { "LINKS" } else { "NORMAL" })
+                            .small()
+                            .strong()
+                            .color(ACCENT),
+                    );
+                    if self.hints.active {
+                        ui.monospace(&self.hints.prefix);
+                    }
                     if !self.nav.prefix.is_empty() || self.nav.pending_g {
                         ui.monospace(format!(
                             "{}{}",
@@ -1075,7 +1250,10 @@ impl Folio {
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
                     ui.label(format!("Page 1–{}", self.nav.count));
-                    let response = ui.text_edit_singleline(&mut self.goto);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.goto)
+                            .id(egui::Id::new("folio-page-input")),
+                    );
                     if self.goto_focus {
                         response.request_focus();
                         self.goto_focus = false;
@@ -1100,8 +1278,11 @@ impl Folio {
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
                     ui.label("This document is encrypted.");
-                    let response =
-                        ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.password)
+                            .id(egui::Id::new("folio-password-input"))
+                            .password(true),
+                    );
                     if ui.button("Unlock").clicked()
                         || (response.lost_focus()
                             && ui.input(|input| input.key_pressed(Key::Enter)))
@@ -1118,7 +1299,7 @@ impl Folio {
                 });
         }
         if self.help {
-            egui::Window::new("Keyboard shortcuts").open(&mut self.help).collapsible(false).resizable(false).default_width(480.0).show(context, |ui| {
+            egui::Window::new("Keyboard shortcuts").open(&mut self.help).collapsible(false).resizable(false).default_width(480.0).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).max_height((context.content_rect().height() - 60.0).max(200.0)).vscroll(true).show(context, |ui| {
                 ui.label(RichText::new("Stay in the flow.").size(23.0).strong().color(ACCENT)); ui.add_space(12.0);
                 egui::Grid::new("keys").num_columns(2).spacing([35.0, 8.0]).show(ui, |ui| {
                     for (keys, action) in [
@@ -1127,7 +1308,7 @@ impl Folio {
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
-                        ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
+                        ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }
                 });
                 ui.add_space(12.0); ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan. Double-click to fit.");
