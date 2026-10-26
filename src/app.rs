@@ -458,6 +458,14 @@ impl Folio {
         }
     }
 
+    fn rotate_page(&mut self, backwards: bool) {
+        // Consume saved/search/PDF positions before the explicit pan reset.
+        self.resolve_view();
+        self.reading.rotation = (self.reading.rotation + if backwards { 3 } else { 1 }) % 4;
+        self.pan = Vec2::ZERO;
+        self.dirty = true;
+    }
+
     fn zoom(&mut self, factor: f32) {
         self.zoom_at(factor, self.viewport * 0.5);
     }
@@ -1265,12 +1273,7 @@ impl Folio {
                     self.pan = Vec2::ZERO;
                     self.dirty = true;
                 }
-                Key::R => {
-                    self.reading.rotation =
-                        (self.reading.rotation + if modifiers.shift { 3 } else { 1 }) % 4;
-                    self.pan = Vec2::ZERO;
-                    self.dirty = true;
-                }
+                Key::R => self.rotate_page(modifiers.shift),
                 Key::Slash => self.find(),
                 Key::C => self.focus_contents(),
                 Key::F => {
@@ -1440,8 +1443,7 @@ impl Folio {
                                 .on_hover_text("Rotate · r / Shift+R")
                                 .clicked()
                         {
-                            self.reading.rotation = (self.reading.rotation + 1) % 4;
-                            self.dirty = true;
+                            self.rotate_page(false);
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
