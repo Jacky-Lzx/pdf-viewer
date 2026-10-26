@@ -772,8 +772,32 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        // Snapshot only reader actions. Text, paste, IME and pointer events
-        // stay in egui without cloning their payloads or checking input focus.
+        if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
+            for (visible, name) in [
+                (self.search_open, "folio-search-input"),
+                (self.recent_picker.is_some(), "folio-recent-input"),
+                (self.goto_open, "folio-page-input"),
+                (self.password_open, "folio-password-input"),
+                (
+                    self.library.sidebar && self.nav.count > 0 && !self.outline.is_empty(),
+                    "folio-outline-input",
+                ),
+            ] {
+                if visible && shortcuts::focus_clicked_input(context, egui::Id::new(name)) {
+                    // These dialogs also need to recognize Enter when focus
+                    // was gained and released within this very same frame.
+                    match name {
+                        "folio-search-input" => self.search_focus = true,
+                        "folio-page-input" => self.goto_focus = true,
+                        "folio-password-input" => self.password_focus = true,
+                        _ => {}
+                    }
+                    break;
+                }
+            }
+        }
+        // Snapshot only reader actions. Text, paste, IME and pointer payloads
+        // stay in egui; pointer presses use the hit-tested responses above.
         for event in context.input(|input| {
             input
                 .events
@@ -823,6 +847,16 @@ impl Folio {
             else {
                 continue;
             };
+            if (typing || !self.help)
+                && matches!(
+                    key,
+                    Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
+                )
+            {
+                // egui scheduled directional focus before dispatch. Arrow
+                // keys belong to text editing or reader navigation here.
+                context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+            }
             if self.search_open
                 && !self.help
                 && !self.password_open
@@ -901,7 +935,6 @@ impl Folio {
                         1
                     };
                     picker.motion = picker.motion.saturating_add(delta);
-                    context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 }
@@ -927,7 +960,6 @@ impl Folio {
                         1
                     };
                     self.outline.motion = self.outline.motion.saturating_add(delta);
-                    context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 }

@@ -38,6 +38,23 @@ pub(super) fn focus_text_input(
     true
 }
 
+pub(super) fn focus_clicked_input(context: &eframe::egui::Context, id: Id) -> bool {
+    // egui has already hit-tested pointer events using the previous pass's
+    // clipped widget geometry. Route keys to the clicked input before drawing it.
+    let clicked = context.read_response(id).is_some_and(|response| {
+        response.enabled()
+            && (response.clicked_by(eframe::egui::PointerButton::Primary)
+                || response.is_pointer_button_down_on())
+    });
+    if clicked {
+        context.memory_mut(|memory| {
+            memory.request_focus(id);
+            memory.move_focus(eframe::egui::FocusDirection::None);
+        });
+    }
+    clicked
+}
+
 pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers: Modifiers) {
     // Option shortcuts can also generate a text event on macOS. Preserve text
     // typed before/after this occurrence, including the same key typed again
@@ -131,6 +148,61 @@ mod tests {
             requested = true;
         }
         assert!(context.memory(|memory| memory.has_focus(id)));
+    }
+
+    #[test]
+    fn clicked_input_gains_focus_before_same_frame_key_dispatch() {
+        use eframe::egui::{CentralPanel, Context, PointerButton, RawInput, Rect, TextEdit};
+
+        for release in [false, true] {
+            let context = Context::default();
+            let id = Id::new("mouse-input");
+            let mut text = String::new();
+            let mut rect = Rect::NOTHING;
+            let _ = context.run(RawInput::default(), |context| {
+                CentralPanel::default().show(context, |ui| {
+                    rect = ui.add(TextEdit::singleline(&mut text).id(id)).rect;
+                });
+            });
+            let pos = rect.center();
+            let mut events = vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::NONE,
+                },
+            ];
+            if release {
+                events.push(Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            events.extend([key(Key::J, Modifiers::NONE, true), Event::Text("j".into())]);
+            let _ = context.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    assert!(!context.memory(|memory| memory.has_focus(id)));
+                    assert!(!focus_clicked_input(context, Id::new("unrelated-input")));
+                    assert!(focus_clicked_input(context, id));
+                    assert!(
+                        context.memory(|memory| memory.has_focus(id)),
+                        "route J to text input now"
+                    );
+                    CentralPanel::default().show(context, |ui| {
+                        ui.add(TextEdit::singleline(&mut text).id(id));
+                    });
+                },
+            );
+            assert_eq!(text, "j");
+        }
     }
 
     #[test]

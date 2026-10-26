@@ -156,6 +156,7 @@ xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
+xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
 xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
 ```
