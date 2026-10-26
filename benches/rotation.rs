@@ -1,7 +1,7 @@
 #[path = "../src/bitmap.rs"]
 mod bitmap;
 
-use bitmap::{Bitmap, rotate};
+use bitmap::{Bitmap, rotate, rotate_inverted};
 use std::{hint::black_box, time::Instant};
 
 // Original pixel-by-pixel implementation, retained only as a measurement baseline.
@@ -23,6 +23,16 @@ fn baseline(bitmap: Bitmap, turns: u8) -> Bitmap {
     Bitmap { size, rgba }
 }
 
+// Previous night-mode path: scan RGB first, then perform the optimized rotation.
+fn two_pass(mut bitmap: Bitmap, turns: u8) -> Bitmap {
+    for pixel in bitmap.rgba.as_chunks_mut::<4>().0 {
+        for channel in &mut pixel[..3] {
+            *channel = 255 - *channel;
+        }
+    }
+    rotate(bitmap, turns)
+}
+
 fn main() {
     let passes: usize = std::env::args()
         .nth(1)
@@ -32,6 +42,12 @@ fn main() {
         (1..=1000).contains(&passes),
         "Passes must be between 1 and 1000"
     );
+    let night = std::env::args().nth(2).as_deref() == Some("night");
+    let reference = if night { two_pass } else { baseline };
+    let current = if night { rotate_inverted } else { rotate };
+    if night {
+        println!("Night mode: baseline inverts then rotates; current fuses both operations.");
+    }
     println!(
         "Alternating baseline/current, {passes} passes each; medians exclude input cloning, include output allocation."
     );
@@ -44,8 +60,8 @@ fn main() {
             rgba: pixels.clone(),
         };
         for turns in [1, 2, 3] {
-            let expected = baseline(input(), turns);
-            let actual = rotate(input(), turns);
+            let expected = reference(input(), turns);
+            let actual = current(input(), turns);
             assert_eq!(actual.size, expected.size);
             assert_eq!(
                 actual.rgba, expected.rgba,
@@ -59,9 +75,9 @@ fn main() {
                     let bitmap = input();
                     let start = Instant::now();
                     let output = if improved == 1 {
-                        rotate(bitmap, turns)
+                        current(bitmap, turns)
                     } else {
-                        baseline(bitmap, turns)
+                        reference(bitmap, turns)
                     };
                     times[improved].push(start.elapsed().as_secs_f64() * 1000.0);
                     black_box(output);

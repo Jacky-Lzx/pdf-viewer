@@ -73,21 +73,15 @@ pub fn rasterize<'a>(
             bg_color: WHITE,
         },
     );
-    let mut bitmap = Bitmap {
+    let bitmap = Bitmap {
         size: [pixmap.width() as usize, pixmap.height() as usize],
         rgba: pixmap.take_rgba8(hayro::vello_cpu::peniko::ImageAlphaType::AlphaPremultiplied),
     };
-    if key.night {
-        for pixel in bitmap.rgba.as_chunks_mut::<4>().0 {
-            for channel in &mut pixel[..3] {
-                *channel = 255 - *channel;
-            }
-        }
-    }
-    if !key.rotation.is_multiple_of(4) {
-        bitmap = crate::bitmap::rotate(bitmap, key.rotation);
-    }
-    Ok(bitmap)
+    Ok(if key.night {
+        crate::bitmap::rotate_inverted(bitmap, key.rotation)
+    } else {
+        crate::bitmap::rotate(bitmap, key.rotation)
+    })
 }
 
 pub fn write_png(bitmap: &Bitmap, path: &Path) -> Result<(), String> {
