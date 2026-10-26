@@ -56,6 +56,12 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "Vim alignment reader window")
                 position(0, 0, "initial fit page", fit="Page")
+                sequence("a")
+                position(0, 0.5, "100% zoom preserves the fitted page center", fit={"Custom": 1.0}, horizontal=0)
+                sequence("+a", burst=True)
+                position(0, 0.5, "same-frame relative and 100% zoom preserve the center", fit={"Custom": 1.0}, horizontal=0)
+                sequence("p")
+                position(0, 0, "return to fit page after 100% zoom", fit="Page")
                 sequence("wj", burst=True)
                 wait_for(lambda: saved(lambda _, book:
                     book["page"] == 0 and book["fit"] == "Width" and 0 < book["offset"][1] < 1),

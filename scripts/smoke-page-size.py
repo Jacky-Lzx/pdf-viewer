@@ -73,11 +73,17 @@ def run(binary):
                 for _ in range(70):
                     keyboard.key("+", shift=True, delay=0.015)
                 expect(lambda book: book["page"] == 1 and 1e-31 < custom(book) < 2.1e-31, "maximum zoom bounds UI coordinates and saves finite offsets")
+                keyboard.key("p"); keyboard.key("a")
+                expect(lambda book: book["page"] == 1 and 1e-31 < custom(book) < 2.1e-31,
+                       "100% request still obeys extreme page coordinate limits")
                 keyboard.key("g", shift=True); keyboard.key("r", shift=True); keyboard.key("p")
                 keyboard.key("+", shift=True)
                 expect(lambda book: book["page"] == 2 and book["rotation"] == 0 and 0.8 < custom(book) < 1.4, "normal pages retain their usual zoom")
+                keyboard.key("a")
+                expect(lambda book: book["page"] == 2 and custom(book) == 1,
+                       "100% request is exact for ordinary page dimensions")
                 assert application.poll() is None, "reader must stay running"
-                print("PASS: large and near-float-limit page fitting, gradual zoom, rotation, coordinate bounds and normal-page recovery")
+                print("PASS: large and near-float-limit page fitting, gradual zoom, rotation, bounded 100% requests and normal-page recovery")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

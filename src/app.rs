@@ -466,10 +466,21 @@ impl Folio {
         let Some(dimensions) = self.resolve_view() else {
             return;
         };
+        self.apply_zoom(self.scale * factor, dimensions, pivot);
+    }
+
+    fn actual_size(&mut self) {
+        let Some(dimensions) = self.resolve_view() else {
+            return;
+        };
+        self.apply_zoom(1.0, dimensions, self.viewport * 0.5);
+    }
+
+    fn apply_zoom(&mut self, target: f32, dimensions: [f32; 2], pivot: Vec2) {
         self.hints.cancel();
         let viewport = [self.viewport.x, self.viewport.y];
         let before = self.scale;
-        let after = Fit::Custom(before * factor).scale(dimensions, viewport);
+        let after = Fit::Custom(target).scale(dimensions, viewport);
         let pan = crate::geometry::zoom_pan(
             [self.pan.x, self.pan.y],
             dimensions,
@@ -1205,6 +1216,7 @@ impl Folio {
                 }
                 Key::Plus | Key::Equals => self.zoom(1.2),
                 Key::Minus => self.zoom(1.0 / 1.2),
+                Key::A => self.actual_size(),
                 Key::W => {
                     self.reading.fit = Fit::Width;
                     self.dirty = true;
@@ -2067,6 +2079,7 @@ impl Folio {
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
+                        ("a", "100% zoom, keeping the viewport center"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
