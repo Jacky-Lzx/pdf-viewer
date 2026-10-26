@@ -5,6 +5,7 @@ mod destination;
 mod document;
 mod fonts;
 mod geometry;
+mod history;
 mod links;
 mod navigation;
 mod outline;

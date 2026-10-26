@@ -31,6 +31,7 @@ pub struct Folio {
     config: PathBuf,
     reading: ReadingState,
     nav: Navigation,
+    history: crate::history::ViewHistory,
     dimensions: Vec<[f32; 2]>,
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
@@ -90,6 +91,7 @@ impl Folio {
             config,
             reading: ReadingState::default(),
             nav: Navigation::default(),
+            history: crate::history::ViewHistory::default(),
             dimensions: Vec::new(),
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
@@ -158,6 +160,7 @@ impl Folio {
         self.reading.rotation %= 4;
         self.id += 1;
         self.nav = Navigation::default();
+        self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
         self.outline.set_entries(Vec::new());
         self.labels = crate::page_labels::PageLabels::default();
@@ -258,34 +261,49 @@ impl Folio {
         state::normalized_offset([self.pan.x, self.pan.y], [self.overflow.x, self.overflow.y])
     }
 
+    fn current_position(&self) -> ReadingMark {
+        ReadingMark {
+            page: self.nav.page,
+            fit: self.reading.fit,
+            rotation: self.reading.rotation,
+            offset: self.pending_offset.unwrap_or_else(|| self.current_offset()),
+        }
+    }
+
+    fn restore_position(&mut self, position: ReadingMark, record: bool) {
+        if record {
+            self.history.record(self.current_position());
+        }
+        self.nav.jump(position.page);
+        self.page_changed();
+        self.reading.fit = position.fit;
+        self.reading.rotation = position.rotation % 4;
+        self.pending_offset = Some(position.offset);
+    }
+
+    fn history(&mut self, forward: bool) -> bool {
+        let current = self.current_position();
+        if let Some(position) = self.history.go(forward, current, self.nav.count) {
+            self.restore_position(position, false);
+            true
+        } else {
+            false
+        }
+    }
+
     fn mark(&mut self, name: char, action: MarkAction) {
         if self.nav.count == 0 {
             return;
         }
         match action {
             MarkAction::Set => {
-                self.reading.marks.insert(
-                    name,
-                    ReadingMark {
-                        page: self.nav.page,
-                        fit: self.reading.fit,
-                        rotation: self.reading.rotation,
-                        offset: self.current_offset(),
-                    },
-                );
+                self.reading.marks.insert(name, self.current_position());
                 self.dirty = true;
                 self.notify(format!("Mark {name} saved · page {}", self.nav.page + 1));
             }
             MarkAction::Jump => {
                 if let Some(mark) = self.reading.marks.get(&name).cloned() {
-                    self.pending_search_jump = None;
-                    self.jump(mark.page);
-                    self.hints.cancel();
-                    self.reading.fit = mark.fit;
-                    self.reading.rotation = mark.rotation % 4;
-                    self.pending_offset = Some(mark.offset);
-                    self.pending_focus = None;
-                    self.dirty = true;
+                    self.restore_position(mark, true);
                 } else {
                     self.notify(format!("Mark {name} is not set · use m{name} to save it"));
                 }
@@ -323,14 +341,18 @@ impl Folio {
     }
 
     fn jump(&mut self, page: usize) {
+        let current = self.current_position();
         self.pending_destination = None;
         if self.nav.jump(page) {
+            self.history.record(current);
             self.page_changed();
         }
     }
     fn step(&mut self, delta: isize) {
+        let current = self.current_position();
         self.pending_destination = None;
         if self.nav.step(delta) {
+            self.history.record(current);
             self.page_changed();
         }
     }
@@ -447,12 +469,14 @@ impl Folio {
     }
 
     fn select_hit(&mut self, index: usize) {
+        let current = self.current_position();
         self.pending_search_jump = None;
         self.hit_index = Some(index);
         self.reveal_hit = Some(index);
         let page = self.hits[index].page;
         let rect = self.hits[index].rects.first().copied();
         self.jump(page);
+        self.history.record(current);
         self.pending_focus = rect;
     }
 
@@ -496,6 +520,7 @@ impl Folio {
                     self.pending_focus = None;
                     if reloaded {
                         self.nav.resize(dimensions.len());
+                        self.history.retain_pages(dimensions.len());
                     } else {
                         self.nav = Navigation::new(dimensions.len(), self.reading.page);
                     }
@@ -734,17 +759,25 @@ impl Folio {
                     Key::U => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.5 * n), true),
                     Key::F => self.scroll(Vec2::new(0.0, self.viewport.y * 0.9 * n), true),
                     Key::B => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.9 * n), true),
-                    Key::I if self.nav.history(true) => self.page_changed(),
+                    Key::I => {
+                        for _ in 0..n as usize {
+                            if !self.history(true) {
+                                break;
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 continue;
             }
             if modifiers.alt {
-                self.nav.clear_prefix();
-                if matches!(key, Key::ArrowLeft | Key::ArrowRight)
-                    && self.nav.history(key == Key::ArrowRight)
-                {
-                    self.page_changed();
+                let count = self.nav.take_count();
+                if matches!(key, Key::ArrowLeft | Key::ArrowRight) {
+                    for _ in 0..count {
+                        if !self.history(key == Key::ArrowRight) {
+                            break;
+                        }
+                    }
                 }
                 continue;
             }
@@ -1593,7 +1626,9 @@ impl Folio {
             f64::from(self.pan.x) / f64::from(self.scale),
             f64::from(self.pan.y) / f64::from(self.scale),
         ];
+        let current = self.current_position();
         self.jump(destination.page);
+        self.history.record(current);
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();

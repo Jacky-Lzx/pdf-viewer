@@ -62,14 +62,17 @@ class Keyboard:
             self.x11.XFlush(self.display)
         return found
 
-    def key(self, symbol, shift=False, ctrl=False, delay=0.08):
+    def key(self, symbol, shift=False, ctrl=False, delay=0.08, alt=False):
         if isinstance(symbol, str):
             symbol = ord(symbol)
         shift_code = self.x11.XKeysymToKeycode(self.display, 0xFFE1)
         ctrl_code = self.x11.XKeysymToKeycode(self.display, 0xFFE3)
+        alt_code = self.x11.XKeysymToKeycode(self.display, 0xFFE9)
         code = self.x11.XKeysymToKeycode(self.display, symbol)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 1, 0)
+        if alt:
+            self.xtst.XTestFakeKeyEvent(self.display, alt_code, 1, 0)
         if shift:
             self.xtst.XTestFakeKeyEvent(self.display, shift_code, 1, 0)
         self.xtst.XTestFakeKeyEvent(self.display, code, 1, 0)
@@ -78,6 +81,8 @@ class Keyboard:
             self.xtst.XTestFakeKeyEvent(self.display, shift_code, 0, 0)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 0, 0)
+        if alt:
+            self.xtst.XTestFakeKeyEvent(self.display, alt_code, 0, 0)
         self.x11.XFlush(self.display)
         time.sleep(delay)
 

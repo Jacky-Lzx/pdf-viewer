@@ -39,8 +39,6 @@ pub struct Navigation {
     pub prefix: String,
     pub pending_g: bool,
     pub direction: isize,
-    back: Vec<usize>,
-    forward: Vec<usize>,
 }
 
 impl Navigation {
@@ -57,11 +55,6 @@ impl Navigation {
         if page == self.page || self.count == 0 {
             return false;
         }
-        self.back.push(self.page);
-        if self.back.len() > 256 {
-            self.back.remove(0);
-        }
-        self.forward.clear();
         self.direction = if page > self.page { 1 } else { -1 };
         self.page = page;
         true
@@ -70,30 +63,11 @@ impl Navigation {
     pub fn resize(&mut self, count: usize) {
         self.count = count;
         self.page = self.page.min(count.saturating_sub(1));
-        self.back.retain(|page| *page < count && *page != self.page);
-        self.forward
-            .retain(|page| *page < count && *page != self.page);
         self.clear_prefix();
     }
 
     pub fn step(&mut self, delta: isize) -> bool {
         self.jump(self.page.saturating_add_signed(delta))
-    }
-
-    pub fn history(&mut self, forward: bool) -> bool {
-        let (from, to) = if forward {
-            (&mut self.forward, &mut self.back)
-        } else {
-            (&mut self.back, &mut self.forward)
-        };
-        if let Some(page) = from.pop() {
-            to.push(self.page);
-            self.direction = if page > self.page { 1 } else { -1 };
-            self.page = page;
-            true
-        } else {
-            false
-        }
     }
 
     pub fn digit(&mut self, digit: char) {
@@ -119,21 +93,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn navigation_clamps_and_restores_history() {
+    fn navigation_clamps_and_tracks_reading_direction() {
         let mut nav = Navigation::new(5, 20);
         assert_eq!(nav.page, 4);
         assert!(!nav.step(1));
         assert!(nav.step(-100));
         assert_eq!(nav.direction, -1);
         assert_eq!(nav.page, 0);
-        assert!(nav.history(false));
+        assert!(nav.jump(4));
         assert_eq!(nav.direction, 1);
         assert_eq!(nav.page, 4);
-        assert!(nav.history(true));
+        assert!(nav.jump(0));
         assert_eq!(nav.direction, -1);
         assert_eq!(nav.page, 0);
         nav.jump(2);
-        assert!(!nav.history(true));
+        assert!(!nav.jump(2));
     }
 
     #[test]
@@ -187,20 +161,16 @@ mod tests {
     }
 
     #[test]
-    fn reload_clamps_changed_page_counts_and_keeps_valid_history() {
+    fn reload_clamps_changed_page_counts_and_clears_prefixes() {
         let mut nav = Navigation::new(6, 0);
         nav.jump(2);
         nav.jump(5);
         nav.resize(3);
         assert_eq!((nav.page, nav.count), (2, 3));
-        assert!(nav.history(false));
-        assert_eq!(nav.page, 0);
-        assert!(nav.history(true));
-        assert_eq!(nav.page, 2);
+        nav.digit('5');
         nav.resize(0);
         assert_eq!(nav.page, 0);
-        assert!(!nav.history(false));
-        assert!(!nav.history(true));
+        assert!(nav.prefix.is_empty());
     }
 
     #[test]
