@@ -67,6 +67,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 大幅面图纸也能适合整页：缩放下限会随页面尺寸降低，低于 5% 后仍可渐进缩放；极端页面会限制最大缩放，保持界面坐标可用。
 
+侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图。点击预览跳页，键盘翻页后预览会跟随当前页；预览支持页面旋转和颜色反转，并记住所选模式。
+
 重新编译或更新 PDF 后，按 `Ctrl/Cmd+r` 可重新加载，保留页码、缩放、旋转、相对滚动位置和有效标记，并重新搜索当前查询。只有解析成功才切换文档；若文件暂时写入不完整，原文档仍可阅读，文件恢复后再次重新加载即可。
 
 ## 性能设计
@@ -74,6 +76,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 - PDF 加载、渲染、文本提取和搜索均放在后台线程，UI 通过事件唤醒。
 - 优先渲染当前页，再沿翻页方向优先预取相邻页；按各页尺寸、旋转和屏幕 DPI 计算分辨率，混合横竖版文档切页时可直接命中缓存。视图变化会替换尚未执行的渲染请求；已过期的在途结果会丢弃，仍需要的相同任务直接复用。
 - GPU 页面纹理使用 **96 MiB LRU 缓存**，预取不会淘汰当前页；高倍缩放时跳过无法与当前页同时放入缓存的预取任务，纹理上传前再次检查容量。文本索引使用 32 MiB LRU 缓存，最多保留 512 页，容量不足时只逐出最近最少使用的页面。
+- 缩略图仅请求可见行，使用独立 **8 MiB LRU 缓存**；滚动或关闭侧栏会取消过期任务，主页面渲染、文本操作和搜索优先执行。
 - 复用文档的解释器和字形缓存；缩放时可先复用同页已有纹理。
 - 搜索、整页复制与文本选择共享按需提取的文本缓存，选择模式通过共享引用接收当前页字形坐标，避免复制整页索引。
 - Unicode 搜索映射每个字节只记录一个源位置，索引建成后按实际容量计入文本缓存预算。
@@ -101,6 +104,7 @@ xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
+xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

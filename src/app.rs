@@ -44,6 +44,7 @@ pub struct Folio {
     pending_destination: Option<(crate::destination::Destination, [f64; 2])>,
     selection: TextSelection,
     cache: TextureCache,
+    thumbnails: crate::thumbnails::Thumbnails,
     id: u64,
     loading: bool,
     reloading: bool,
@@ -104,6 +105,7 @@ impl Folio {
             pending_destination: None,
             selection: TextSelection::default(),
             cache: TextureCache::default(),
+            thumbnails: crate::thumbnails::Thumbnails::default(),
             id: 0,
             loading: false,
             reloading: false,
@@ -170,6 +172,7 @@ impl Folio {
         self.selection.cancel();
         self.mark_action = None;
         self.cache.clear();
+        self.thumbnails.clear();
         self.requested = None;
         self.pan = Vec2::ZERO;
         self.pending_offset = Some(self.reading.offset);
@@ -357,6 +360,7 @@ impl Folio {
         }
     }
     fn page_changed(&mut self) {
+        self.thumbnails.reveal = Some(self.nav.page);
         self.pending_destination = None;
         self.nav.clear_prefix();
         self.hints.cancel();
@@ -512,6 +516,7 @@ impl Folio {
                     self.loading = false;
                     self.error = None;
                     self.cache.clear();
+                    self.thumbnails.clear();
                     self.requested = None;
                     self.links.clear();
                     self.visible_links.clear();
@@ -531,6 +536,7 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
+                    self.thumbnails.reveal = Some(self.nav.page);
                     self.outline.set_entries(outline);
                     self.labels = labels;
                     if reloaded {
@@ -576,6 +582,11 @@ impl Folio {
                         self.render_ms = milliseconds;
                     }
                 }
+                Event::Thumbnail { id, key, bitmap } if id == self.id => {
+                    if key.rotation == self.reading.rotation && key.night == self.library.night {
+                        self.thumbnails.accept(key, bitmap, context);
+                    }
+                }
                 Event::Search {
                     id,
                     revision,
@@ -613,6 +624,7 @@ impl Folio {
                     if opening && self.loading && self.reloading {
                         self.restart_search();
                         self.requested = None;
+                        self.thumbnails.invalidate_requests();
                     }
                     if opening {
                         self.loading = false;
@@ -1275,8 +1287,127 @@ impl Folio {
         ui.add_space(20.0);
     }
 
+    fn page_previews(&mut self, ui: &mut egui::Ui) {
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt("page-previews")
+            .max_height((ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 400.0));
+        if let Some(page) = self.thumbnails.reveal.take() {
+            scroll = scroll.vertical_scroll_offset(
+                page as f32 * (crate::thumbnails::ROW_HEIGHT + ui.spacing().item_spacing.y),
+            );
+        }
+        let mut target = None;
+        scroll.show_rows(
+            ui,
+            crate::thumbnails::ROW_HEIGHT,
+            self.nav.count,
+            |ui, range| {
+                for page in range {
+                    let (rect, response) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), crate::thumbnails::ROW_HEIGHT),
+                        egui::Sense::click(),
+                    );
+                    if !ui.is_rect_visible(rect) {
+                        continue;
+                    }
+                    let dimensions = self.dimensions[page];
+                    let key = crate::thumbnails::key(
+                        page,
+                        dimensions,
+                        self.reading.rotation,
+                        self.library.night,
+                        ui.ctx().pixels_per_point(),
+                    );
+                    let texture = self.thumbnails.want(key);
+                    let painter = ui.painter();
+                    if page == self.nav.page {
+                        painter.rect_filled(rect, 4.0, ACCENT.gamma_multiply(0.15));
+                        painter.rect_stroke(
+                            rect,
+                            4.0,
+                            egui::Stroke::new(1.0_f32, ACCENT),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if response.hovered() {
+                        painter.rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let box_size = crate::thumbnails::IMAGE_SIZE;
+                    let center = egui::pos2(rect.center().x, rect.top() + box_size[1] * 0.5 + 4.0);
+                    let rotated = if key.rotation % 2 == 1 {
+                        [dimensions[1], dimensions[0]]
+                    } else {
+                        dimensions
+                    };
+                    let scale = Fit::Page.scale(rotated, box_size);
+                    let image_rect = egui::Rect::from_center_size(
+                        center,
+                        Vec2::new(rotated[0] * scale, rotated[1] * scale),
+                    );
+                    painter.rect_filled(
+                        image_rect,
+                        0.0,
+                        if key.night {
+                            Color32::BLACK
+                        } else {
+                            Color32::WHITE
+                        },
+                    );
+                    if let Some(texture) = texture {
+                        painter.image(
+                            texture.id(),
+                            image_rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                    } else {
+                        painter.text(
+                            center,
+                            egui::Align2::CENTER_CENTER,
+                            if self.thumbnails.failed(key) {
+                                "Unavailable"
+                            } else {
+                                "Loading…"
+                            },
+                            egui::FontId::proportional(12.0),
+                            if key.night {
+                                Color32::LIGHT_GRAY
+                            } else {
+                                Color32::DARK_GRAY
+                            },
+                        );
+                    }
+                    painter.text(
+                        egui::pos2(rect.center().x, rect.bottom() - 8.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        format!("Page {}", self.page_name(page)),
+                        egui::FontId::proportional(13.0),
+                        ui.visuals().text_color(),
+                    );
+                    if response
+                        .on_hover_text(format!("Go to page {}", self.page_name(page)))
+                        .clicked()
+                    {
+                        target = Some(page);
+                    }
+                }
+            },
+        );
+        if let Some(page) = target {
+            self.jump(page);
+            // The clicked row is already visible. Keep the preview scroll stable
+            // so adjacent pages remain under the pointer after navigation.
+            self.thumbnails.reveal = None;
+        }
+    }
+
     fn sidebar(&mut self, context: &egui::Context) {
+        self.thumbnails.begin_frame();
         if !self.library.sidebar || self.nav.count == 0 {
+            if !self.loading
+                && let Some(keys) = self.thumbnails.requests()
+            {
+                self.worker.thumbnails(keys);
+            }
             return;
         }
         egui::SidePanel::left("sidebar")
@@ -1380,25 +1511,45 @@ impl Folio {
                         }
                     }
                     ui.add_space(20.0);
-                    ui.label(RichText::new("PAGES").small().strong().color(ACCENT));
-                    egui::ScrollArea::vertical()
-                        .id_salt("page-list")
-                        .max_height(300.0)
-                        .show_rows(ui, 25.0, self.nav.count, |ui, range| {
-                            for page in range {
-                                if ui
-                                    .selectable_label(
-                                        page == self.nav.page,
-                                        format!("Page {}", self.page_name(page)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.jump(page);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("PAGES").small().strong().color(ACCENT));
+                        let changed = ui
+                            .selectable_value(&mut self.library.thumbnails, false, "List")
+                            .changed()
+                            | ui.selectable_value(&mut self.library.thumbnails, true, "Previews")
+                                .changed();
+                        if changed {
+                            self.dirty = true;
+                            self.thumbnails.reveal = Some(self.nav.page);
+                        }
+                    });
+                    if self.library.thumbnails {
+                        self.page_previews(ui);
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("page-list")
+                            .max_height(300.0)
+                            .show_rows(ui, 25.0, self.nav.count, |ui, range| {
+                                for page in range {
+                                    if ui
+                                        .selectable_label(
+                                            page == self.nav.page,
+                                            format!("Page {}", self.page_name(page)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.jump(page);
+                                    }
                                 }
-                            }
-                        });
+                            });
+                    }
                 });
             });
+        if !self.loading
+            && let Some(keys) = self.thumbnails.requests()
+        {
+            self.worker.thumbnails(keys);
+        }
     }
 
     fn canvas(&mut self, context: &egui::Context) {

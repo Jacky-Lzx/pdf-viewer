@@ -33,6 +33,13 @@ impl Default for TextureCache {
 }
 
 impl TextureCache {
+    pub fn with_budget(budget: usize) -> Self {
+        Self {
+            budget,
+            ..Self::default()
+        }
+    }
+
     pub fn budget(&self) -> usize {
         self.budget
     }

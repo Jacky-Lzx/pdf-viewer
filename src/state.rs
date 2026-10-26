@@ -43,6 +43,7 @@ pub struct Library {
     pub dark: bool,
     pub night: bool,
     pub sidebar: bool,
+    pub thumbnails: bool,
 }
 
 impl Library {

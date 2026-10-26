@@ -27,6 +27,11 @@ pub enum Event {
         bitmap: Bitmap,
         milliseconds: f64,
     },
+    Thumbnail {
+        id: u64,
+        key: RenderKey,
+        bitmap: Option<Bitmap>,
+    },
     Search {
         id: u64,
         revision: u64,
@@ -74,6 +79,8 @@ struct Pending {
     open: Option<OpenRequest>,
     render: VecDeque<RenderKey>,
     render_revision: u64,
+    thumbnails: VecDeque<RenderKey>,
+    thumbnail_revision: u64,
     search: Option<SearchRequest>,
     copy: Option<usize>,
     links: Option<usize>,
@@ -96,6 +103,22 @@ impl Pending {
         }
         // A view update can request the same page while it is still rendering.
         self.render.retain(|pending| *pending != key);
+        true
+    }
+
+    fn replace_thumbnails(&mut self, keys: Vec<RenderKey>) {
+        self.thumbnail_revision = self.thumbnail_revision.wrapping_add(1);
+        self.thumbnails = keys.into_iter().take(16).collect();
+    }
+
+    fn finish_thumbnail(&mut self, key: RenderKey, revision: u64) -> bool {
+        if self.stop
+            || self.open.is_some()
+            || (revision != self.thumbnail_revision && !self.thumbnails.contains(&key))
+        {
+            return false;
+        }
+        self.thumbnails.retain(|pending| *pending != key);
         true
     }
 }
@@ -224,6 +247,7 @@ impl Worker {
                 keep_on_error,
             });
             pending.render.clear();
+            pending.thumbnails.clear();
             pending.search = None;
             pending.copy = None;
             pending.links = None;
@@ -233,6 +257,9 @@ impl Worker {
 
     pub fn render(&self, keys: Vec<RenderKey>) {
         self.update(|pending| pending.replace_renders(keys));
+    }
+    pub fn thumbnails(&self, keys: Vec<RenderKey>) {
+        self.update(|pending| pending.replace_thumbnails(keys));
     }
     pub fn search(&self, revision: u64, query: String) {
         self.update(|pending| pending.search = Some(SearchRequest { revision, query }));
@@ -262,6 +289,7 @@ fn emit(tx: &SyncSender<Event>, context: &egui::Context, event: Event) {
 
 enum Job {
     Render(RenderKey, u64),
+    Thumbnail(RenderKey, u64),
     Search(usize),
     Copy(usize),
     Links(usize),
@@ -304,6 +332,9 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if let Some((_, page, _)) = &search {
                     break Job::Search(*page);
                 }
+                if let Some(key) = pending.thumbnails.pop_front() {
+                    break Job::Thumbnail(key, pending.thumbnail_revision);
+                }
                 pending = wake.wait(pending).unwrap();
             }
         };
@@ -317,12 +348,33 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     emit(tx, context, Event::Links { id, page, links });
                 }
             }
-            Job::Render(key, revision) => {
+            Job::Render(key, revision) | Job::Thumbnail(key, revision) => {
+                let thumbnail = matches!(job, Job::Thumbnail(..));
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     document::rasterize(pdf, &render_cache, key)
                 }));
-                if !shared.0.lock().unwrap().finish_render(key, revision) {
+                let relevant = {
+                    let mut pending = shared.0.lock().unwrap();
+                    if thumbnail {
+                        pending.finish_thumbnail(key, revision)
+                    } else {
+                        pending.finish_render(key, revision)
+                    }
+                };
+                if !relevant {
+                    continue;
+                }
+                if thumbnail {
+                    emit(
+                        tx,
+                        context,
+                        Event::Thumbnail {
+                            id,
+                            key,
+                            bitmap: result.ok().and_then(Result::ok),
+                        },
+                    );
                     continue;
                 }
                 match result {
@@ -460,6 +512,62 @@ mod tests {
             pending.render.into_iter().collect::<Vec<_>>(),
             [render_key(2)]
         );
+    }
+
+    #[test]
+    fn thumbnail_requests_are_bounded_cancelable_and_reuse_still_needed_work() {
+        let mut pending = Pending::default();
+        pending.replace_thumbnails((0..100).map(render_key).collect());
+        assert_eq!(pending.thumbnails.len(), 16);
+        let revision = pending.thumbnail_revision;
+        let running = pending.thumbnails.pop_front().unwrap();
+        pending.replace_thumbnails(vec![render_key(20)]);
+        assert!(!pending.finish_thumbnail(running, revision));
+        let revision = pending.thumbnail_revision;
+        let running = pending.thumbnails.pop_front().unwrap();
+        pending.replace_thumbnails(vec![running, render_key(21)]);
+        assert!(pending.finish_thumbnail(running, revision));
+        assert_eq!(pending.thumbnails.front(), Some(&render_key(21)));
+        let revision = pending.thumbnail_revision;
+        pending.replace_thumbnails(Vec::new());
+        assert!(!pending.finish_thumbnail(render_key(21), revision));
+    }
+
+    #[test]
+    fn page_rendering_and_search_finish_before_queued_thumbnails() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.update(|pending| {
+            pending.replace_thumbnails(vec![render_key(1)]);
+            pending.replace_renders(vec![render_key(0)]);
+            pending.search = Some(SearchRequest {
+                revision: 1,
+                query: "Rust".into(),
+            });
+        });
+        assert!(matches!(
+            receive(&worker),
+            Event::Rendered {
+                key: RenderKey { page: 0, .. },
+                ..
+            }
+        ));
+        loop {
+            match receive(&worker) {
+                Event::Search { complete: true, .. } => break,
+                Event::Search { .. } => {}
+                _ => panic!("Thumbnails must follow document search"),
+            }
+        }
+        assert!(matches!(
+            receive(&worker),
+            Event::Thumbnail {
+                key: RenderKey { page: 1, .. },
+                bitmap: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]

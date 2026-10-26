@@ -111,19 +111,36 @@ class Keyboard:
         self.x11.XFlush(self.display)
         time.sleep(0.1)
 
-    def wheel(self, position, ctrl=False):
+    def wheel(self, position, ctrl=False, down=False, steps=1):
         self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         ctrl_code = self.x11.XKeysymToKeycode(self.display, 0xFFE3)
         self.xtst.XTestFakeMotionEvent(self.display, -1, *position, 0)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 1, 0)
-        self.xtst.XTestFakeButtonEvent(self.display, 4, 1, 0)
-        self.xtst.XTestFakeButtonEvent(self.display, 4, 0, 0)
+        button = 5 if down else 4
+        for _ in range(steps):
+            self.xtst.XTestFakeButtonEvent(self.display, button, 1, 0)
+            self.xtst.XTestFakeButtonEvent(self.display, button, 0, 0)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 0, 0)
         self.x11.XFlush(self.display)
         time.sleep(0.2)
+
+    def pixel(self, position):
+        self.x11.XGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_int]
+        self.x11.XGetImage.restype = ctypes.c_void_p
+        self.x11.XGetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        self.x11.XGetPixel.restype = ctypes.c_ulong
+        self.x11.XDestroyImage.argtypes = [ctypes.c_void_p]
+        image = self.x11.XGetImage(self.display, self.x11.XDefaultRootWindow(self.display), *position, 1, 1, ctypes.c_ulong(-1).value, 2)
+        if not image:
+            raise RuntimeError("Cannot read desktop pixels")
+        try:
+            color = self.x11.XGetPixel(image, 0, 0)
+            return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+        finally:
+            self.x11.XDestroyImage(image)
 
     def clipboard(self):
         x11 = self.x11
