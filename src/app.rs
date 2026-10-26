@@ -207,6 +207,7 @@ impl Folio {
             return;
         }
         self.remember();
+        self.nav.clear_prefix();
         self.loading = true;
         self.reloading = true;
         self.error = None;
@@ -303,6 +304,7 @@ impl Folio {
     }
 
     fn choose_file(&mut self) {
+        self.nav.clear_prefix();
         if self.dialog.is_some() {
             return;
         }
@@ -328,6 +330,7 @@ impl Folio {
         }
     }
     fn page_changed(&mut self) {
+        self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
         self.visible_links.clear();
@@ -402,6 +405,7 @@ impl Folio {
     }
 
     fn find(&mut self) {
+        self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
         self.mark_action = None;
@@ -717,17 +721,19 @@ impl Folio {
                 continue;
             }
             if modifiers.ctrl {
+                let n = self.nav.take_count() as f32;
                 match key {
-                    Key::D => self.scroll(Vec2::new(0.0, self.viewport.y * 0.5), true),
-                    Key::U => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.5), true),
-                    Key::F => self.scroll(Vec2::new(0.0, self.viewport.y * 0.9), true),
-                    Key::B => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.9), true),
+                    Key::D => self.scroll(Vec2::new(0.0, self.viewport.y * 0.5 * n), true),
+                    Key::U => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.5 * n), true),
+                    Key::F => self.scroll(Vec2::new(0.0, self.viewport.y * 0.9 * n), true),
+                    Key::B => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.9 * n), true),
                     Key::I if self.nav.history(true) => self.page_changed(),
                     _ => {}
                 }
                 continue;
             }
             if modifiers.alt {
+                self.nav.clear_prefix();
                 if matches!(key, Key::ArrowLeft | Key::ArrowRight)
                     && self.nav.history(key == Key::ArrowRight)
                 {
@@ -736,6 +742,7 @@ impl Folio {
                 continue;
             }
             if modifiers.command {
+                self.nav.clear_prefix();
                 continue;
             }
             if let Some(digit) = match key {
@@ -774,19 +781,40 @@ impl Folio {
                     let n = self.nav.take_count();
                     self.scroll(Vec2::new(0.0, -60.0 * n as f32), true);
                 }
-                Key::H if modifiers.shift => self.step(-1),
-                Key::L if modifiers.shift => self.step(1),
-                Key::H | Key::ArrowLeft => self.scroll(Vec2::new(-60.0, 0.0), false),
-                Key::L | Key::ArrowRight => self.scroll(Vec2::new(60.0, 0.0), false),
-                Key::PageDown | Key::CloseBracket => self.step(1),
-                Key::PageUp | Key::OpenBracket => self.step(-1),
-                Key::Space => self.scroll(
-                    Vec2::new(
-                        0.0,
-                        self.viewport.y * if modifiers.shift { -0.9 } else { 0.9 },
-                    ),
-                    true,
-                ),
+                Key::H if modifiers.shift => {
+                    let n = self.nav.take_count();
+                    self.step(-(n as isize));
+                }
+                Key::L if modifiers.shift => {
+                    let n = self.nav.take_count();
+                    self.step(n as isize);
+                }
+                Key::H | Key::ArrowLeft => {
+                    let n = self.nav.take_count();
+                    self.scroll(Vec2::new(-60.0 * n as f32, 0.0), false);
+                }
+                Key::L | Key::ArrowRight => {
+                    let n = self.nav.take_count();
+                    self.scroll(Vec2::new(60.0 * n as f32, 0.0), false);
+                }
+                Key::PageDown | Key::CloseBracket => {
+                    let n = self.nav.take_count();
+                    self.step(n as isize);
+                }
+                Key::PageUp | Key::OpenBracket => {
+                    let n = self.nav.take_count();
+                    self.step(-(n as isize));
+                }
+                Key::Space => {
+                    let n = self.nav.take_count();
+                    self.scroll(
+                        Vec2::new(
+                            0.0,
+                            self.viewport.y * if modifiers.shift { -0.9 } else { 0.9 } * n as f32,
+                        ),
+                        true,
+                    );
+                }
                 Key::G if modifiers.shift => {
                     let page = if self.nav.prefix.is_empty() {
                         self.nav.count.saturating_sub(1)
@@ -881,6 +909,9 @@ impl Folio {
                     context.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
                 _ => self.nav.clear_prefix(),
+            }
+            if key != Key::G {
+                self.nav.clear_prefix();
             }
         }
     }
