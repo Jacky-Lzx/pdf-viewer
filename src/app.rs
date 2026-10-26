@@ -1426,14 +1426,19 @@ impl Folio {
                         Color32::WHITE,
                     );
                     self.highlights(&painter, page_rect, dimensions);
-                    for rect in &self.selection.rects {
-                        painter.rect_filled(
-                            self.link_rect(*rect, page_rect, dimensions)
-                                .intersect(page_rect),
-                            1.0,
-                            Color32::from_rgba_unmultiplied(74, 145, 230, 95),
-                        );
-                    }
+                    let clip = painter.clip_rect().intersect(page_rect);
+                    painter.extend(self.selection.rects.iter().filter_map(|rect| {
+                        let rect = self
+                            .link_rect(*rect, page_rect, dimensions)
+                            .intersect(page_rect);
+                        (rect.is_positive() && clip.intersects(rect)).then(|| {
+                            egui::Shape::rect_filled(
+                                rect,
+                                1.0,
+                                Color32::from_rgba_unmultiplied(74, 145, 230, 95),
+                            )
+                        })
+                    }));
                     self.link_overlays(ui, page_rect, dimensions);
                 } else {
                     painter.text(
@@ -1448,22 +1453,27 @@ impl Folio {
     }
 
     fn highlights(&self, painter: &egui::Painter, page_rect: egui::Rect, dimensions: [f32; 2]) {
-        for index in crate::text::page_hits(&self.hits, self.nav.page) {
-            let hit = &self.hits[index];
-            let color = if self.hit_index == Some(index) {
-                Color32::from_rgba_unmultiplied(255, 143, 36, 120)
-            } else {
-                Color32::from_rgba_unmultiplied(255, 215, 40, 85)
-            };
-            for rect in &hit.rects {
-                painter.rect_filled(
-                    self.link_rect(*rect, page_rect, dimensions)
-                        .intersect(page_rect),
-                    1.0,
-                    color,
-                );
-            }
+        let clip = painter.clip_rect().intersect(page_rect);
+        if !clip.is_positive() {
+            return;
         }
+        painter.extend(
+            crate::text::page_hits(&self.hits, self.nav.page).flat_map(|index| {
+                let hit = &self.hits[index];
+                let color = if self.hit_index == Some(index) {
+                    Color32::from_rgba_unmultiplied(255, 143, 36, 120)
+                } else {
+                    Color32::from_rgba_unmultiplied(255, 215, 40, 85)
+                };
+                hit.rects.iter().filter_map(move |rect| {
+                    let rect = self
+                        .link_rect(*rect, page_rect, dimensions)
+                        .intersect(page_rect);
+                    (rect.is_positive() && clip.intersects(rect))
+                        .then(|| egui::Shape::rect_filled(rect, 1.0, color))
+                })
+            }),
+        );
     }
 
     fn follow_destination(&mut self, destination: crate::destination::Destination) {
