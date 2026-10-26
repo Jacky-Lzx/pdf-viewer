@@ -209,6 +209,41 @@ impl Folio {
             .max(20.0)
     }
 
+    fn bookmark_list(&mut self, ui: &mut egui::Ui) {
+        let row_height = Self::sidebar_row_height(ui);
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt("bookmarks")
+            .max_height(140.0);
+        if self.reveal_page.is_some()
+            && let Ok(row) = self.bookmark_pages.binary_search(&self.nav.page)
+        {
+            scroll = scroll
+                .vertical_scroll_offset(row as f32 * (row_height + ui.spacing().item_spacing.y));
+        }
+        let mut target = None;
+        scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
+            for row in range {
+                let page = self.bookmark_pages[row];
+                if ui
+                    .add_sized(
+                        Vec2::new(ui.available_width(), row_height),
+                        egui::Button::selectable(
+                            page == self.nav.page,
+                            format!("Page {}", self.page_name(page)),
+                        )
+                        .truncate(),
+                    )
+                    .clicked()
+                {
+                    target = Some(page);
+                }
+            }
+        });
+        if let Some(page) = target {
+            self.jump(page);
+        }
+    }
+
     fn page_previews(&mut self, ui: &mut egui::Ui) {
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("page-previews")
@@ -353,16 +388,8 @@ impl Folio {
                     if self.reading.bookmarks.is_empty() {
                         ui.weak("Press b to bookmark a page.");
                     }
-                    for page in self.reading.bookmarks.clone() {
-                        if ui
-                            .selectable_label(
-                                page == self.nav.page,
-                                format!("Page {}", self.page_name(page)),
-                            )
-                            .clicked()
-                        {
-                            self.jump(page);
-                        }
+                    if !self.bookmark_pages.is_empty() {
+                        self.bookmark_list(ui);
                     }
                     if !self.reading.marks.is_empty() {
                         ui.add_space(20.0);

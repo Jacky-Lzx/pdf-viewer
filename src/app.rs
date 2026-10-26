@@ -34,6 +34,7 @@ pub struct Folio {
     state_writer: crate::state_writer::StateWriter,
     library: Library,
     reading: ReadingState,
+    bookmark_pages: Vec<usize>,
     nav: Navigation,
     history: crate::history::ViewHistory,
     dimensions: Vec<[f32; 2]>,
@@ -100,6 +101,7 @@ impl Folio {
             state_writer: crate::state_writer::StateWriter::new(config, cc.egui_ctx.clone()),
             library,
             reading: ReadingState::default(),
+            bookmark_pages: Vec::new(),
             nav: Navigation::default(),
             history: crate::history::ViewHistory::default(),
             dimensions: Vec::new(),
@@ -181,6 +183,7 @@ impl Folio {
         self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
         self.outline.set_entries(Vec::new());
+        self.bookmark_pages.clear();
         self.labels = crate::page_labels::PageLabels::default();
         self.links.clear();
         self.visible_links.clear();
@@ -490,7 +493,15 @@ impl Folio {
         } else {
             self.notify("Bookmark removed");
         }
+        self.refresh_bookmarks();
+        self.reveal_page = Some(self.nav.page);
         self.dirty = true;
+    }
+
+    fn refresh_bookmarks(&mut self) {
+        self.bookmark_pages.clear();
+        self.bookmark_pages
+            .extend(self.reading.bookmarks.iter().copied());
     }
 
     fn find(&mut self) {
@@ -619,6 +630,7 @@ impl Folio {
                     self.reading
                         .bookmarks
                         .retain(|page| *page < dimensions.len());
+                    self.refresh_bookmarks();
                     self.reading.marks.retain(|name, mark| {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });

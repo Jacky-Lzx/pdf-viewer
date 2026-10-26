@@ -137,6 +137,7 @@ cargo bench --locked --bench search_snippet -- 9
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
+xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
