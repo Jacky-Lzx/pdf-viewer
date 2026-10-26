@@ -1005,6 +1005,18 @@ impl Folio {
                             break;
                         }
                     }
+                } else if matches!(key, Key::J | Key::K) {
+                    self.pending_search_jump = None;
+                    if let Some(page) = crate::navigation::bookmark_target(
+                        &self.bookmark_pages,
+                        self.nav.page,
+                        key == Key::K,
+                        count,
+                    ) {
+                        self.jump(page);
+                    } else {
+                        self.notify("No bookmarks yet · b to add one");
+                    }
                 }
                 continue;
             }
@@ -2009,6 +2021,7 @@ impl Folio {
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
+                        ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),

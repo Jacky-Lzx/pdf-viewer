@@ -5,6 +5,40 @@ pub const MAX_SCALE: f32 = 8.0;
 // Single-precision UI coordinates retain pixel precision up to this extent.
 pub const MAX_PAGE_EXTENT: f32 = 16_000_000.0;
 
+/// Find a counted next/previous bookmark in a sorted, unique page list.
+/// Skip the current page, wrap at either end, and avoid intermediate jumps.
+pub fn bookmark_target(
+    pages: &[usize],
+    current: usize,
+    reverse: bool,
+    count: usize,
+) -> Option<usize> {
+    let total = pages.len();
+    if total == 0 {
+        return None;
+    }
+    let delta = count.saturating_sub(1) % total;
+    let row = if reverse {
+        let first = pages
+            .partition_point(|&page| page < current)
+            .checked_sub(1)
+            .unwrap_or(total - 1);
+        if delta <= first {
+            first - delta
+        } else {
+            total - (delta - first)
+        }
+    } else {
+        let first = pages.partition_point(|&page| page <= current) % total;
+        if delta < total - first {
+            first + delta
+        } else {
+            delta - (total - first)
+        }
+    };
+    Some(pages[row])
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Fit {
     #[default]
@@ -93,6 +127,57 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bookmark_jumps_skip_current_wrap_and_handle_large_counts() {
+        let pages = [2, 5, 10];
+        for (current, next, previous) in [
+            (0, 2, 10),
+            (2, 5, 10),
+            (4, 5, 2),
+            (5, 10, 2),
+            (10, 2, 5),
+            (20, 2, 10),
+        ] {
+            assert_eq!(bookmark_target(&pages, current, false, 1), Some(next));
+            assert_eq!(bookmark_target(&pages, current, true, 1), Some(previous));
+        }
+        for reverse in [false, true] {
+            for current in 0..=12 {
+                for count in [1, 2, 3, 4, 7, 100] {
+                    let mut expected = current;
+                    for _ in 0..count {
+                        expected = if reverse {
+                            pages
+                                .iter()
+                                .copied()
+                                .rev()
+                                .find(|&page| page < expected)
+                                .unwrap_or(10)
+                        } else {
+                            pages
+                                .iter()
+                                .copied()
+                                .find(|&page| page > expected)
+                                .unwrap_or(2)
+                        };
+                    }
+                    assert_eq!(
+                        bookmark_target(&pages, current, reverse, count),
+                        Some(expected)
+                    );
+                }
+                let equivalent = (usize::MAX - 1) % pages.len() + 1;
+                assert_eq!(
+                    bookmark_target(&pages, current, reverse, usize::MAX),
+                    bookmark_target(&pages, current, reverse, equivalent)
+                );
+            }
+            assert_eq!(bookmark_target(&[], 0, reverse, 1), None);
+            assert_eq!(bookmark_target(&[5], 5, reverse, usize::MAX), Some(5));
+            assert_eq!(bookmark_target(&[5], 0, reverse, 0), Some(5));
+        }
+    }
 
     #[test]
     fn navigation_clamps_and_tracks_reading_direction() {
