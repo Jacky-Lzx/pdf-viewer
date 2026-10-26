@@ -59,6 +59,15 @@ impl Navigation {
         true
     }
 
+    pub fn resize(&mut self, count: usize) {
+        self.count = count;
+        self.page = self.page.min(count.saturating_sub(1));
+        self.back.retain(|page| *page < count && *page != self.page);
+        self.forward
+            .retain(|page| *page < count && *page != self.page);
+        self.clear_prefix();
+    }
+
     pub fn step(&mut self, delta: isize) -> bool {
         self.jump(self.page.saturating_add_signed(delta))
     }
@@ -126,6 +135,23 @@ mod tests {
         assert_eq!(Fit::Page.scale([600.0, 800.0], [300.0, 800.0]), 0.5);
         assert_eq!(Fit::Width.scale([600.0, 800.0], [300.0, 100.0]), 0.5);
         assert!(Fit::Page.scale([0.0, 0.0], [0.0, 0.0]).is_finite());
+    }
+
+    #[test]
+    fn reload_clamps_changed_page_counts_and_keeps_valid_history() {
+        let mut nav = Navigation::new(6, 0);
+        nav.jump(2);
+        nav.jump(5);
+        nav.resize(3);
+        assert_eq!((nav.page, nav.count), (2, 3));
+        assert!(nav.history(false));
+        assert_eq!(nav.page, 0);
+        assert!(nav.history(true));
+        assert_eq!(nav.page, 2);
+        nav.resize(0);
+        assert_eq!(nav.page, 0);
+        assert!(!nav.history(false));
+        assert!(!nav.history(true));
     }
 
     #[test]

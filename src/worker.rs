@@ -54,6 +54,7 @@ pub enum Event {
     Error {
         id: u64,
         message: String,
+        opening: bool,
     },
 }
 
@@ -61,6 +62,7 @@ struct OpenRequest {
     id: u64,
     path: PathBuf,
     password: String,
+    keep_on_error: bool,
 }
 struct SearchRequest {
     revision: u64,
@@ -113,6 +115,7 @@ impl Worker {
         std::thread::Builder::new()
             .name("folio-render".into())
             .spawn(move || {
+                let mut active: Option<(Pdf, u64)> = None;
                 loop {
                     let request = {
                         let (lock, wake) = &*state;
@@ -126,6 +129,9 @@ impl Worker {
                         pending.open.take().unwrap()
                     };
                     let id = request.id;
+                    if !request.keep_on_error {
+                        active = None;
+                    }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let pdf = document::load(&request.path, &request.password)?;
                         let dimensions: Vec<_> = pdf
@@ -144,24 +150,50 @@ impl Worker {
                         }
                         let outline = crate::outline::read(&pdf);
                         let labels = crate::page_labels::PageLabels::read(&pdf);
-                        emit(
-                            &tx,
-                            &context,
-                            Event::Opened {
-                                id,
-                                dimensions,
-                                outline,
-                                labels,
-                            },
-                        );
-                        session(&pdf, id, &state, &tx, &context);
-                        Ok::<_, String>(())
+                        Ok::<_, String>((pdf, dimensions, outline, labels))
                     }))
                     .unwrap_or_else(|_| {
                         Err("The PDF engine could not process this document.".into())
                     });
-                    if let Err(message) = result {
-                        emit(&tx, &context, Event::Error { id, message });
+                    match result {
+                        Ok((pdf, dimensions, outline, labels)) => {
+                            active = Some((pdf, id));
+                            emit(
+                                &tx,
+                                &context,
+                                Event::Opened {
+                                    id,
+                                    dimensions,
+                                    outline,
+                                    labels,
+                                },
+                            );
+                        }
+                        Err(message) => emit(
+                            &tx,
+                            &context,
+                            Event::Error {
+                                id,
+                                message,
+                                opening: true,
+                            },
+                        ),
+                    }
+                    if let Some((pdf, active_id)) = &active
+                        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            session(pdf, *active_id, &state, &tx, &context);
+                        }))
+                        .is_err()
+                    {
+                        emit(
+                            &tx,
+                            &context,
+                            Event::Error {
+                                id: *active_id,
+                                message: "The PDF engine could not process this document.".into(),
+                                opening: false,
+                            },
+                        );
                     }
                 }
             })
@@ -176,8 +208,21 @@ impl Worker {
     }
 
     pub fn open(&self, id: u64, path: PathBuf, password: String) {
+        self.request_open(id, path, password, false);
+    }
+
+    pub fn reload(&self, id: u64, path: PathBuf, password: String) {
+        self.request_open(id, path, password, true);
+    }
+
+    fn request_open(&self, id: u64, path: PathBuf, password: String, keep_on_error: bool) {
         self.update(|pending| {
-            pending.open = Some(OpenRequest { id, path, password });
+            pending.open = Some(OpenRequest {
+                id,
+                path,
+                password,
+                keep_on_error,
+            });
             pending.render.clear();
             pending.search = None;
             pending.copy = None;
@@ -297,7 +342,15 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                             Ok(Err(message)) => message,
                             _ => "This page could not be rendered.".into(),
                         };
-                        emit(tx, context, Event::Error { id, message });
+                        emit(
+                            tx,
+                            context,
+                            Event::Error {
+                                id,
+                                message,
+                                opening: false,
+                            },
+                        );
                     }
                 }
             }
@@ -427,6 +480,7 @@ mod tests {
             id: 2,
             path: sample(),
             password: String::new(),
+            keep_on_error: false,
         });
         assert!(!pending.finish_render(render_key(0), revision));
         pending.open = None;
@@ -505,6 +559,15 @@ mod tests {
             }
         }
         assert_eq!(count, 4);
+        worker.render(vec![render_key(99)]);
+        assert!(matches!(
+            receive(&worker),
+            Event::Error {
+                id: 7,
+                opening: false,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -543,5 +606,56 @@ mod tests {
             _ => panic!("Expected the new document's text"),
         }
         assert!(first.text.contains("native"));
+    }
+
+    #[test]
+    fn failed_reload_preserves_the_active_pdf_and_a_later_reload_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.pdf");
+        std::fs::copy(sample(), &path).unwrap();
+        let worker = Worker::new(egui::Context::default());
+        worker.open(12, path.clone(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 12, .. }));
+        std::fs::write(&path, b"incomplete update").unwrap();
+        worker.reload(12, path.clone(), String::new());
+        assert!(matches!(
+            receive(&worker),
+            Event::Error {
+                id: 12,
+                opening: true,
+                ..
+            }
+        ));
+        worker.copy(1);
+        match receive(&worker) {
+            Event::Text {
+                id: 12,
+                page: 1,
+                text,
+            } => assert!(text.contains("NAVIGATION")),
+            _ => panic!("Expected the previous PDF to remain readable"),
+        }
+        // Replace bytes in place so binary PDF data and cross-reference offsets remain intact.
+        let mut bytes = std::fs::read(sample()).unwrap();
+        let mut replacements = 0;
+        for offset in 0..bytes.len().saturating_sub(5) {
+            if &bytes[offset..offset + 6] == b"little" {
+                bytes[offset..offset + 6].copy_from_slice(b"gentle");
+                replacements += 1;
+            }
+        }
+        assert!(replacements > 0);
+        std::fs::write(&path, bytes).unwrap();
+        worker.reload(12, path, String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 12, .. }));
+        worker.copy(0);
+        match receive(&worker) {
+            Event::Text {
+                id: 12,
+                page: 0,
+                text,
+            } => assert!(text.contains("gentle")),
+            _ => panic!("Expected the updated PDF"),
+        }
     }
 }

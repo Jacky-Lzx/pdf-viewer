@@ -44,6 +44,7 @@ pub struct Folio {
     cache: TextureCache,
     id: u64,
     loading: bool,
+    reloading: bool,
     error: Option<String>,
     message: Option<(String, Instant)>,
     pan: Vec2,
@@ -101,6 +102,7 @@ impl Folio {
             cache: TextureCache::default(),
             id: 0,
             loading: false,
+            reloading: false,
             error: None,
             message: None,
             pan: Vec2::ZERO,
@@ -180,6 +182,7 @@ impl Folio {
         self.search_limited = false;
         self.revision += 1;
         self.loading = true;
+        self.reloading = false;
         self.error = None;
         self.password.clear();
         self.password_open = false;
@@ -197,6 +200,33 @@ impl Folio {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Folio".into())
+    }
+
+    fn reload(&mut self) {
+        if self.nav.count == 0 || self.loading {
+            return;
+        }
+        self.remember();
+        self.loading = true;
+        self.reloading = true;
+        self.error = None;
+        self.hints.cancel();
+        self.selection.cancel();
+        self.pending_search_jump = None;
+        self.worker
+            .reload(self.id, self.reading.path.clone(), String::new());
+    }
+
+    fn restart_search(&mut self) {
+        self.revision += 1;
+        self.hits.clear();
+        self.hit_index = None;
+        self.reveal_hit = None;
+        self.scanned = 0;
+        self.scan_total = self.nav.count;
+        self.search_complete = self.query.trim().is_empty();
+        self.search_limited = false;
+        self.search_due = (!self.search_complete).then_some(Instant::now());
     }
 
     fn page_name(&self, page: usize) -> String {
@@ -439,8 +469,26 @@ impl Folio {
                     outline,
                     labels,
                 } if id == self.id => {
+                    let reloaded = self.reloading;
+                    if reloaded {
+                        self.reading.page = self.nav.page;
+                        self.pending_offset = Some(self.current_offset());
+                    }
+                    self.reloading = false;
                     self.loading = false;
-                    self.nav = Navigation::new(dimensions.len(), self.reading.page);
+                    self.error = None;
+                    self.cache.clear();
+                    self.requested = None;
+                    self.links.clear();
+                    self.visible_links.clear();
+                    self.hints.cancel();
+                    self.selection.cancel();
+                    self.pending_focus = None;
+                    if reloaded {
+                        self.nav.resize(dimensions.len());
+                    } else {
+                        self.nav = Navigation::new(dimensions.len(), self.reading.page);
+                    }
                     self.reading
                         .bookmarks
                         .retain(|page| *page < dimensions.len());
@@ -450,6 +498,9 @@ impl Folio {
                     self.dimensions = dimensions;
                     self.outline = outline;
                     self.labels = labels;
+                    if reloaded {
+                        self.restart_search();
+                    }
                     self.dirty = true;
                 }
                 Event::Rendered {
@@ -516,9 +567,22 @@ impl Folio {
                         self.notify(format!("Copied text from page {}", page + 1));
                     }
                 }
-                Event::Error { id, message } if id == self.id => {
-                    self.loading = false;
-                    if message.contains("Decryption") {
+                Event::Error {
+                    id,
+                    message,
+                    opening,
+                } if id == self.id => {
+                    if self.loading && !opening {
+                        continue;
+                    }
+                    if opening && self.loading && self.reloading {
+                        self.restart_search();
+                        self.requested = None;
+                    }
+                    if opening {
+                        self.loading = false;
+                    }
+                    if opening && message.contains("Decryption") {
                         self.password_open = true;
                     }
                     self.error = Some(message);
@@ -605,6 +669,10 @@ impl Folio {
             }
             if modifiers.command && key == Key::F {
                 self.find();
+                continue;
+            }
+            if modifiers.command && key == Key::R {
+                self.reload();
                 continue;
             }
             if typing || self.help || self.password_open || self.goto_open {
@@ -1296,7 +1364,7 @@ impl Folio {
                 let key = view.key(self.nav.page, dimensions);
                 self.cache.protect(key);
                 let plan = view.plan(self.nav.page, &self.dimensions, self.cache.budget());
-                if self.requested.as_ref() != Some(&plan) {
+                if !self.loading && self.requested.as_ref() != Some(&plan) {
                     if !self.links.contains_key(&self.nav.page) {
                         self.worker.links(self.nav.page);
                     }
@@ -1546,7 +1614,10 @@ impl Folio {
                         ));
                     }
                     ui.separator();
-                    if let Some((message, at)) = &self.message
+                    if self.loading && self.reloading {
+                        ui.spinner();
+                        ui.label("Reloading document…");
+                    } else if let Some((message, at)) = &self.message
                         && at.elapsed() < Duration::from_secs(5)
                     {
                         ui.label(message);
@@ -1626,11 +1697,14 @@ impl Folio {
                         self.error = None;
                         self.loading = true;
                         self.password_open = false;
-                        self.worker.open(
-                            self.id,
-                            self.reading.path.clone(),
-                            std::mem::take(&mut self.password),
-                        );
+                        let password = std::mem::take(&mut self.password);
+                        if self.reloading {
+                            self.worker
+                                .reload(self.id, self.reading.path.clone(), password);
+                        } else {
+                            self.worker
+                                .open(self.id, self.reading.path.clone(), password);
+                        }
                     }
                 });
         }
@@ -1645,6 +1719,7 @@ impl Folio {
                         ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
+                        ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }
@@ -1659,9 +1734,21 @@ impl Folio {
                     if ui.button("Dismiss").clicked() {
                         self.error = None;
                     }
-                    if self.nav.count > 0 && ui.button("Retry page").clicked() {
-                        self.requested = None;
-                        self.error = None;
+                    if self.nav.count > 0
+                        && ui
+                            .button(if self.reloading {
+                                "Retry reload"
+                            } else {
+                                "Retry page"
+                            })
+                            .clicked()
+                    {
+                        if self.reloading {
+                            self.reload();
+                        } else {
+                            self.requested = None;
+                            self.error = None;
+                        }
                     }
                 });
             });
