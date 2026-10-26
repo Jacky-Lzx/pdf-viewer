@@ -84,6 +84,7 @@ pub struct Folio {
     recent_picker: Option<crate::recent::RecentPicker>,
     password: String,
     password_open: bool,
+    password_focus: bool,
     saved: Instant,
     dirty: bool,
 }
@@ -149,6 +150,7 @@ impl Folio {
             recent_picker: None,
             password: String::new(),
             password_open: false,
+            password_focus: false,
             saved: Instant::now(),
             dirty: false,
         };
@@ -210,6 +212,7 @@ impl Folio {
         self.error = None;
         self.password.clear();
         self.password_open = false;
+        self.password_focus = false;
         self.worker
             .open(self.id, self.reading.path.clone(), String::new());
         context.send_viewport_cmd(egui::ViewportCommand::Title(format!(
@@ -687,6 +690,15 @@ impl Folio {
                     }
                     if opening && message.contains("Decryption") {
                         self.password_open = true;
+                        self.password_focus = true;
+                        self.goto_open = false;
+                        self.help = false;
+                        self.recent_picker = None;
+                        context.memory_mut(|memory| {
+                            if let Some(id) = memory.focused() {
+                                memory.surrender_focus(id);
+                            }
+                        });
                     }
                     self.error = Some(message);
                 }
@@ -786,6 +798,8 @@ impl Folio {
                 self.search_focus = false;
                 self.pending_search_jump = None;
                 self.password_open = false;
+                self.password_focus = false;
+                self.password.clear();
                 self.nav.clear_prefix();
                 context.memory_mut(|memory| {
                     if let Some(id) = memory.focused() {
@@ -1846,14 +1860,22 @@ impl Folio {
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
                     ui.label("This document is encrypted.");
+                    let focused_now = shortcuts::focus_text_input(
+                        ui,
+                        egui::Id::new("folio-password-input"),
+                        &mut self.password_focus,
+                        &mut self.deferred_input,
+                    );
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.password)
                             .id(egui::Id::new("folio-password-input"))
                             .password(true),
                     );
-                    if ui.button("Unlock").clicked()
-                        || (response.lost_focus()
-                            && ui.input(|input| input.key_pressed(Key::Enter)))
+                    let unlock = ui.button("Unlock").clicked();
+                    if !ui.is_sizing_pass()
+                        && (unlock
+                            || ((response.lost_focus() || focused_now)
+                                && ui.input(|input| input.key_pressed(Key::Enter))))
                     {
                         self.error = None;
                         self.loading = true;

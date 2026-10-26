@@ -196,6 +196,29 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_pdf_rejects_bad_passwords_and_decodes_real_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("encrypted.pdf");
+        std::fs::write(&path, include_bytes!("../tests/fixtures/encrypted.pdf")).unwrap();
+        for password in ["", "wrong"] {
+            assert!(load(&path, password).err().unwrap().contains("Decryption"));
+        }
+        let pdf = load(&path, "jkgdi").unwrap();
+        assert_eq!(pdf.pages().len(), 3);
+        let interpreter = hayro::hayro_interpret::InterpreterCache::new();
+        for (page, data) in pdf.pages().iter().enumerate() {
+            let text = crate::text::extract(data, &interpreter);
+            assert!(
+                text.text
+                    .contains(&format!("Encrypted document page {}.", page + 1)),
+                "{}",
+                text.text
+            );
+            assert_eq!(text.search(page, "Rust").len(), 1);
+        }
+    }
+
+    #[test]
     fn invalid_and_missing_documents_report_errors() {
         let dir = tempfile::tempdir().unwrap();
         assert!(load(&dir.path().join("missing.pdf"), "").is_err());
