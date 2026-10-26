@@ -36,7 +36,7 @@ pub fn normalized_offset(pan: [f32; 2], overflow: [f32; 2]) -> [f32; 2] {
     })
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Library {
     pub recent: Vec<ReadingState>,

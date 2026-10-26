@@ -20,7 +20,7 @@ def run(binary):
         root = Path(directory)
         document = root / "folio-smoke.pdf"
         document.write_bytes(make_pdf(destination_views={1: "/XYZ 48 500 2", 2: "/FitR 100 100 300 300", 3: "/FitH 600", 4: "/FitV 250", 5: "/XYZ null 650 null"}))
-        environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), LIBGL_ALWAYS_SOFTWARE="1")
+        environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:

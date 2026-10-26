@@ -179,7 +179,7 @@ def run(binary):
         fixture = Path(__file__).resolve().parent.parent / "assets/folio-guide.pdf"
         document = root / "阅读指南-folio-smoke.pdf"
         shutil.copyfile(fixture, document)
-        environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), LIBGL_ALWAYS_SOFTWARE="1")
+        environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
         keyboard = Keyboard()
         log = open(root / "application.log", "w+")

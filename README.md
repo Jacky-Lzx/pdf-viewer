@@ -31,7 +31,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 ## 键盘操作
 
-快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
+页面导航快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
 
 | 按键 | 操作 |
 | --- | --- |
@@ -59,6 +59,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | 选择模式中双击 / 三击 | 选中整个词 / 整行；之后拖动按词 / 行扩展，单击恢复按字形选择 |
 | `o`，`Ctrl/Cmd+o` | 打开文档 |
 | `Ctrl/Cmd+r` | 重新加载当前 PDF，保留阅读位置和标记 |
+| `Ctrl/Cmd+q` | 正常退出并保存最新阅读状态 |
 | `:` | 页码跳转对话框 |
 | `F11` | 全屏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
@@ -92,6 +93,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 - 链接元数据使用 **4 MiB、最多 64 页的 LRU 缓存**，计入向量和 URL 容量，容量满时逐页淘汰；过期页面结果不会挤掉当前页。超大当前页的链接临时保留在缓存之外，离开该页即释放。
 - 渲染器直接移交像素缓冲区；后台结果队列最多容纳 4 条消息，避免 UI 暂停时无限积累图像。
 - 没有输入或后台结果时，界面不持续重绘。
+- 阅读进度在独立后台线程序列化并原子替换配置文件，队列只保留最新待写快照；写入失败后显示提示并重试，正常退出会等待最新状态写完。
 
 阅读状态保存在系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/folio/library.json`（默认 `~/.config/folio/library.json`），macOS 为 `~/Library/Application Support/dev.folio.Folio/library.json`。密码不持久化。
 
@@ -119,6 +121,7 @@ xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
 xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
 xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
+xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

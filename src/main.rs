@@ -17,6 +17,7 @@ mod render_plan;
 mod selection;
 mod selection_index;
 mod state;
+mod state_writer;
 mod text;
 mod text_cache;
 mod thumbnails;

@@ -29,8 +29,8 @@ enum MarkAction {
 
 pub struct Folio {
     worker: Worker,
+    state_writer: crate::state_writer::StateWriter,
     library: Library,
-    config: PathBuf,
     reading: ReadingState,
     nav: Navigation,
     history: crate::history::ViewHistory,
@@ -91,8 +91,8 @@ impl Folio {
         crate::fonts::install(cc.egui_ctx.clone());
         let mut app = Self {
             worker: Worker::new(cc.egui_ctx.clone()),
+            state_writer: crate::state_writer::StateWriter::new(config, cc.egui_ctx.clone()),
             library,
-            config,
             reading: ReadingState::default(),
             nav: Navigation::default(),
             history: crate::history::ViewHistory::default(),
@@ -321,9 +321,7 @@ impl Folio {
 
     fn save(&mut self) {
         self.remember();
-        if let Err(error) = self.library.save(&self.config) {
-            self.notify(format!("Could not save reading progress: {error}"));
-        }
+        self.state_writer.save(self.library.clone());
         self.saved = Instant::now();
         self.dirty = false;
     }
@@ -494,6 +492,10 @@ impl Folio {
     }
 
     fn events(&mut self, context: &egui::Context) {
+        if let Some(Err(error)) = self.state_writer.result() {
+            self.notify(format!("Could not save reading progress: {error}"));
+            self.dirty = true;
+        }
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
                 Event::PageText { id, page, text }
@@ -727,6 +729,13 @@ impl Folio {
             }
             if modifiers.command && key == Key::R {
                 self.reload();
+                continue;
+            }
+            if modifiers.command && key == Key::Q {
+                context.input_mut(|input| {
+                    input.consume_key(modifiers, key);
+                });
+                context.send_viewport_cmd(egui::ViewportCommand::Close);
                 continue;
             }
             if typing || self.help || self.password_open || self.goto_open {
@@ -1728,6 +1737,7 @@ impl Folio {
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
+                        ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }
