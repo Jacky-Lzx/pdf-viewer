@@ -1254,6 +1254,10 @@ impl Folio {
                     self.reading.fit = Fit::Width;
                     self.dirty = true;
                 }
+                Key::E => {
+                    self.reading.fit = Fit::Height;
+                    self.dirty = true;
+                }
                 Key::P => {
                     self.reading.fit = Fit::Page;
                     self.pan = Vec2::ZERO;
@@ -2118,7 +2122,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
-                        ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
+                        ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
                         ("a", "100% zoom, keeping the viewport center"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),

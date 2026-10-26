@@ -51,7 +51,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `Alt+Left` / `Alt+Right` | 历史返回 / 前进，恢复页码、缩放、旋转和滚动；支持数字前缀 |
 | `+` / `-` | 放大 / 缩小 |
 | `a` | 恢复 100% 缩放并保持视口中心；超大页面仍受尺寸上限约束 |
-| `p` / `w` | 适合整页 / 适合宽度 |
+| `p` / `w` / `e` | 适合整页 / 适合宽度 / 适合高度 |
 | `r` / `Shift+r` | 顺时针 / 逆时针旋转 |
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
 | 搜索输入框中的 `Enter` / `Shift+Enter` | 下一个 / 上一个匹配；结果尚未就绪时等待扫描 |
@@ -80,6 +80,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。键盘缩放保持视口中心；`Ctrl`+滚轮或触控板捏合缩放保持指针下的位置。`v` 进入文本选择模式，拖选会高亮选区，支持反向、跨行和旋转后的文字；文本顺序取决于 PDF 的文本层。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。命名位置显示在侧栏，可点击返回或删除。重启后恢复页码与页内滚动，窗口尺寸变化时按相对滚动位置恢复。侧栏目录支持逐章节折叠、全部展开/折叠和 Unicode 标题筛选；筛选会显示命中条目的祖先，清空后恢复原来的折叠状态。目录支持 GoTo 动作和命名目标；内部链接和目录会应用 `XYZ` 的页内位置与缩放，以及 `Fit`、`FitH`、`FitV` 和 `FitR` 目标视图，支持裁剪框、文档自带旋转、阅读旋转及同页重新定位；网页链接在系统浏览器中打开。
 
 支持 PDF 的文档页码标签，如前言 `i`、`ii` 和附录 `A-1`，同时显示对应的物理页码。按 `:` 后可以输入标签跳转；普通数字和 `42G` 始终表示物理页码，要跳到文档标签“1”可输入 `=1`。标签按区间保存，查找无需遍历整本文档。
+
+横向图纸可按 `e` 适合高度，再用 `h/l` 横向阅读；旋转、窗口调整、标记、历史和重新打开都会保留自动适配模式。PDF 的 `FitV` / `FitBV` 目标同样使用该模式，窗口高度变化后继续适配。输入框内的字母 `e` 仍作为文字输入。
 
 大幅面图纸也能适合整页：缩放下限会随页面尺寸降低，低于 5% 后仍可渐进缩放；极端页面会限制最大缩放，保持界面坐标可用。
 
@@ -152,6 +154,7 @@ xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
 xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
+xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
 xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio

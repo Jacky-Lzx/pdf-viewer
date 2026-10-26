@@ -44,6 +44,7 @@ pub enum Fit {
     #[default]
     Page,
     Width,
+    Height,
     Custom(f32),
 }
 
@@ -59,6 +60,7 @@ impl Fit {
         let scale = match self {
             Self::Page => fit,
             Self::Width => width,
+            Self::Height => height,
             Self::Custom(scale) if scale.is_nan() => fit,
             Self::Custom(scale) => f64::from(scale),
         };
@@ -203,6 +205,9 @@ mod tests {
         assert!(!nav.step(1));
         assert_eq!(Fit::Page.scale([600.0, 800.0], [300.0, 800.0]), 0.5);
         assert_eq!(Fit::Width.scale([600.0, 800.0], [300.0, 100.0]), 0.5);
+        assert_eq!(Fit::Height.scale([1200.0, 400.0], [600.0, 300.0]), 0.75);
+        assert_eq!(Fit::Height.scale([1200.0, 400.0], [600.0, 200.0]), 0.5);
+        assert_eq!(Fit::Height.scale([400.0, 1200.0], [600.0, 300.0]), 0.25);
         assert!(Fit::Page.scale([0.0, 0.0], [0.0, 0.0]).is_finite());
     }
 
@@ -222,6 +227,7 @@ mod tests {
             for mode in [
                 Fit::Page,
                 Fit::Width,
+                Fit::Height,
                 Fit::Custom(8.0),
                 Fit::Custom(f32::MAX),
                 Fit::Custom(f32::INFINITY),

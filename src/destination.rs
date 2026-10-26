@@ -38,15 +38,10 @@ impl Destination {
         if let Some(zoom) = self.zoom {
             return Fit::Custom(zoom);
         }
-        let rotated = if rotation % 2 == 1 {
-            [dimensions[1], dimensions[0]]
-        } else {
-            dimensions
-        };
         match self.fit {
             Some(DestinationFit::Page) => Fit::Page,
             Some(DestinationFit::Width) => Fit::Width,
-            Some(DestinationFit::Height) => Fit::Custom(viewport[1] / rotated[1]),
+            Some(DestinationFit::Height) => Fit::Height,
             Some(DestinationFit::Rectangle(rect)) => {
                 let rect = crate::geometry::rotate_rect(rect, dimensions, rotation);
                 Fit::Custom(
@@ -198,7 +193,7 @@ mod tests {
         };
         assert_eq!(
             height.fit(Fit::Page, [600.0, 800.0], 0, [500.0, 400.0]),
-            Fit::Custom(0.5)
+            Fit::Height
         );
     }
 }

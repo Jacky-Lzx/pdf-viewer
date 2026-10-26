@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn mixed_size_prefetch_matches_the_key_after_navigation() {
         let pages = [[600.0, 800.0], [1200.0, 600.0], [500.0, 1000.0]];
-        for fit in [Fit::Page, Fit::Width, Fit::Custom(1.5)] {
+        for fit in [Fit::Page, Fit::Width, Fit::Height, Fit::Custom(1.5)] {
             for rotation in 0..4 {
                 let view = RenderView {
                     rotation,

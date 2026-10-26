@@ -89,6 +89,7 @@ mod tests {
         library.remember(ReadingState {
             path: "文档.pdf".into(),
             page: 7,
+            fit: Fit::Height,
             bookmarks: [1, 7].into(),
             offset: [0.25, 0.7],
             marks: [(
@@ -106,6 +107,7 @@ mod tests {
         library.save(&path).unwrap();
         let restored = Library::load(&path);
         assert_eq!(restored.recent[0].page, 7);
+        assert_eq!(restored.recent[0].fit, Fit::Height);
         assert_eq!(restored.recent[0].bookmarks.len(), 2);
         assert_eq!(restored.recent[0].path, PathBuf::from("文档.pdf"));
         assert_eq!(restored.recent[0].offset, [0.25, 0.7]);
