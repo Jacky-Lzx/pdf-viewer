@@ -1234,10 +1234,13 @@ impl Folio {
                                 self.page_name(self.nav.page),
                                 self.nav.count
                             ))
-                            .on_hover_text(format!(
-                                "Go to page · :\n{}",
-                                self.labels.label(self.nav.page).unwrap_or_default()
-                            ))
+                            .on_hover_ui(|ui| {
+                                ui.set_max_width(ui.spacing().tooltip_width);
+                                ui.label(format!(
+                                    "Go to page · :\n{}",
+                                    self.labels.label(self.nav.page).unwrap_or_default()
+                                ));
+                            })
                             .clicked()
                         {
                             self.goto_open = true;
@@ -1823,7 +1826,10 @@ impl Folio {
                     let name = item.path.file_name().unwrap_or_default().to_string_lossy();
                     if ui
                         .button(format!("{name}    ·    page {}", item.page + 1))
-                        .on_hover_text(item.path.display().to_string())
+                        .on_hover_ui(|ui| {
+                            ui.set_max_width(ui.spacing().tooltip_width);
+                            ui.label(item.path.display().to_string());
+                        })
                         .clicked()
                     {
                         open = Some(item.path.clone());

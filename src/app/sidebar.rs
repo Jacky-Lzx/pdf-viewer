@@ -159,11 +159,14 @@ impl Folio {
                                     )
                                     .truncate(),
                                 )
-                                .on_hover_text(format!(
-                                    "{}\nPage {}",
-                                    entry.title,
-                                    self.page_name(page)
-                                ))
+                                .on_hover_ui(|ui| {
+                                    ui.set_max_width(ui.spacing().tooltip_width);
+                                    ui.label(format!(
+                                        "{}\nPage {}",
+                                        entry.title,
+                                        self.page_name(page)
+                                    ));
+                                })
                                 .clicked()
                             {
                                 selected = Some(index);
@@ -303,7 +306,10 @@ impl Folio {
                         ui.visuals().text_color(),
                     );
                     if response
-                        .on_hover_text(format!("Go to page {}", self.page_name(page)))
+                        .on_hover_ui(|ui| {
+                            ui.set_max_width(ui.spacing().tooltip_width);
+                            ui.label(format!("Go to page {}", self.page_name(page)));
+                        })
                         .clicked()
                     {
                         target = Some(page);
