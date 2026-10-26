@@ -483,7 +483,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 };
                 if matches!(job, Job::Inspect(_)) {
                     text.prepare_selection();
-                    texts.refresh(page);
+                    texts.refresh(page, &text);
                     emit(
                         tx,
                         context,
@@ -514,7 +514,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         &mut progress.cursor,
                         limit,
                     );
-                    texts.refresh(page);
+                    texts.refresh(page, &text);
                     progress.hits += batch.hits.len();
                     if batch.complete {
                         progress.page += 1;

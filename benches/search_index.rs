@@ -1,3 +1,4 @@
+#[allow(unused_imports)] // Test-only imports are unused in a harness-free bench.
 #[path = "../src/text/search_index.rs"]
 mod search_index;
 
@@ -37,13 +38,20 @@ fn main() {
     println!(
         "{passes} alternating passes; medians per index build (20 builds/sample); buffer capacity only, no extraction, matching, GPU or UI."
     );
-    for (kind, row, repeats) in [
+    for (kind, text) in [
         ("ASCII", "Rust PDF reader, 2026.\n", 100),
         ("ASCII", "Rust PDF reader, 2026.\n", 1000),
         ("ASCII", "Rust PDF reader, 2026.\n", 10000),
+        ("CJK", "中文阅读器，跨平台运行。\n", 10000),
+        ("Greek/Latin", "ÉCOLE école Σσς ΟΣ ος\n", 10000),
         ("Unicode", "Rust Straße Σσς ﬃ 中文 İ\n", 10000),
-    ] {
-        let text = row.repeat(repeats);
+    ]
+    .into_iter()
+    .map(|(kind, row, repeats)| (kind, row.repeat(repeats)))
+    .chain(std::iter::once((
+        "Late expansion",
+        format!("{}ß", "中文 ÉCOLE Σσς 👩‍💻\n".repeat(10000)),
+    ))) {
         let reference = mapped_index(&text);
         let index = SearchIndex::new(&text);
         assert_eq!(index.folded, reference.0);

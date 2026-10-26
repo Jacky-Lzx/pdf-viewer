@@ -86,9 +86,10 @@ impl TextCache {
         true
     }
 
-    /// Replace a lazy index reservation with its actual string/vector capacities.
-    pub fn refresh(&mut self, page: usize) {
+    /// Replace a lazy reservation; previously oversized text may now fit too.
+    pub fn refresh(&mut self, page: usize, text: &Arc<PageText>) {
         let Some(entry) = self.entries.get_mut(&page) else {
+            self.insert(page, Arc::clone(text));
             return;
         };
         let bytes = memory_bytes(&entry.text);
@@ -160,13 +161,35 @@ mod tests {
         };
         cache.insert(0, Arc::clone(&text));
         text.search(0, "missing");
-        cache.refresh(0);
+        cache.refresh(0, &text);
         assert_eq!(cache.bytes, memory_bytes(&text));
         assert!(cache.bytes <= reserved);
         let remaining = cache.budget - cache.bytes;
         assert!(memory_bytes(&page("a")) < remaining);
         assert!(cache.insert(1, page("a")));
         assert!(cache.get(0).is_some());
+    }
+
+    #[test]
+    fn an_uncached_unicode_page_is_admitted_after_its_reservation_shrinks() {
+        let value = "中文 Σσς École 👩‍💻 ".repeat(1000);
+        let text = page(&value);
+        let prepared = page(&value);
+        prepared.search(1, "missing");
+        let kept = page("kept");
+        let mut cache = TextCache {
+            budget: memory_bytes(&prepared) + memory_bytes(&kept),
+            ..Default::default()
+        };
+        assert!(memory_bytes(&text) > cache.budget);
+        assert!(cache.insert(0, Arc::clone(&kept)));
+        assert!(!cache.insert(1, Arc::clone(&text)));
+        assert!(cache.get(0).is_some());
+        assert_eq!(text.search(1, "中文").len(), 1000);
+        cache.refresh(1, &text);
+        assert!(Arc::ptr_eq(&cache.get(1).unwrap(), &text));
+        assert!(Arc::ptr_eq(&cache.get(0).unwrap(), &kept));
+        assert_eq!(cache.bytes, cache.budget);
     }
 
     #[test]
@@ -201,7 +224,7 @@ mod tests {
         assert!(cache.insert(0, Arc::clone(&text)));
         assert_eq!(text.search_with(0, &query).len(), 1000);
         assert!(memory_bytes(&text) > before);
-        cache.refresh(0);
+        cache.refresh(0, &text);
         assert!(cache.get(0).is_none());
         assert_eq!(cache.bytes, 0);
         assert_eq!(text.search_with(0, &query).len(), 1000);
@@ -231,7 +254,7 @@ mod tests {
         assert!(cache.insert(0, Arc::clone(&dense)));
         dense.prepare_selection();
         assert!(memory_bytes(&dense) > before);
-        cache.refresh(0);
+        cache.refresh(0, &dense);
         assert!(cache.get(0).is_none());
         assert_eq!(cache.bytes, 0);
         assert_eq!(
