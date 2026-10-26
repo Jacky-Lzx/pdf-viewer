@@ -1102,6 +1102,8 @@ impl Folio {
             if modifiers.ctrl {
                 let n = self.nav.take_count() as f32;
                 match key {
+                    Key::E => self.scroll(Vec2::new(0.0, 60.0 * n), false),
+                    Key::Y => self.scroll(Vec2::new(0.0, -60.0 * n), false),
                     Key::D => self.scroll(Vec2::new(0.0, self.viewport.y * 0.5 * n), true),
                     Key::U => self.scroll(Vec2::new(0.0, -self.viewport.y * 0.5 * n), true),
                     Key::F => self.scroll(Vec2::new(0.0, self.viewport.y * 0.9 * n), true),
@@ -2122,6 +2124,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
+                        ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
                         ("a", "100% zoom, keeping the viewport center"),
