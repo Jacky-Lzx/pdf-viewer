@@ -36,24 +36,26 @@ impl Folio {
             .default_width(580.0)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(context, |ui| {
+                super::shortcuts::focus_text_input(
+                    ui,
+                    egui::Id::new("folio-recent-input"),
+                    &mut picker.focus,
+                    &mut self.deferred_input,
+                );
                 let input = ui.add(
                     egui::TextEdit::singleline(&mut picker.query)
                         .id(egui::Id::new("folio-recent-input"))
                         .desired_width(f32::INFINITY)
                         .hint_text("Filter by filename or path…"),
                 );
-                if picker.focus {
-                    input.request_focus();
-                    picker.focus = false;
-                }
                 if input.changed() {
                     picker.filter();
                 }
-                if picker.motion != 0 {
+                if !ui.is_sizing_pass() && picker.motion != 0 {
                     let motion = std::mem::take(&mut picker.motion);
                     picker.step(motion);
                 }
-                if std::mem::take(&mut picker.confirm) {
+                if !ui.is_sizing_pass() && std::mem::take(&mut picker.confirm) {
                     chosen = picker.selected_path().map(ToOwned::to_owned);
                 }
                 ui.weak(format!(

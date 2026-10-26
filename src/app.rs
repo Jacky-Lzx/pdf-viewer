@@ -62,6 +62,7 @@ pub struct Folio {
     requested: Option<Vec<RenderKey>>,
     render_ms: f64,
     dialog: Option<Receiver<Option<PathBuf>>>,
+    deferred_input: Vec<egui::Event>,
     search_open: bool,
     search_focus: bool,
     query: String,
@@ -126,6 +127,7 @@ impl Folio {
             requested: None,
             render_ms: 0.0,
             dialog: None,
+            deferred_input: Vec::new(),
             search_open: false,
             search_focus: false,
             query: String::new(),
@@ -473,6 +475,9 @@ impl Folio {
         self.hints.cancel();
         self.selection.cancel();
         self.mark_action = None;
+        self.help = false;
+        self.goto_open = false;
+        self.password_open = false;
         self.search_open = true;
         self.search_focus = true;
         if let Some(query) = selected {
@@ -716,18 +721,24 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        let typing = context.memory(|memory| {
-            [
-                "folio-search-input",
-                "folio-recent-input",
-                "folio-page-input",
-                "folio-password-input",
-                "folio-outline-input",
-            ]
-            .iter()
-            .any(|name| memory.has_focus(egui::Id::new(name)))
-        });
         for event in context.input(|input| input.events.clone()) {
+            // Opening/closing an input changes how later keys in this same
+            // frame must be routed, before its widget has been drawn.
+            let typing = (self.search_open && self.search_focus)
+                || self.goto_open
+                || self.password_open
+                || self.recent_picker.is_some()
+                || context.memory(|memory| {
+                    [
+                        "folio-search-input",
+                        "folio-recent-input",
+                        "folio-page-input",
+                        "folio-password-input",
+                        "folio-outline-input",
+                    ]
+                    .iter()
+                    .any(|name| memory.has_focus(egui::Id::new(name)))
+                });
             if matches!(event, egui::Event::Copy) && !typing && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
@@ -772,6 +783,7 @@ impl Folio {
                 self.recent_picker = None;
                 self.goto_open = false;
                 self.search_open = false;
+                self.search_focus = false;
                 self.pending_search_jump = None;
                 self.password_open = false;
                 self.nav.clear_prefix();
@@ -787,6 +799,7 @@ impl Folio {
                 continue;
             }
             if modifiers.command && key == Key::F {
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 self.find();
                 continue;
             }
@@ -835,7 +848,7 @@ impl Folio {
                 continue;
             }
             context.input_mut(|input| {
-                input.consume_key(modifiers, key);
+                shortcuts::consume_text_shortcut(input, key, modifiers);
             });
             if let Some(action) = self.mark_action.take() {
                 if !modifiers.ctrl && !modifiers.command && !modifiers.alt {
@@ -1217,16 +1230,18 @@ impl Folio {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(16.0);
                     ui.label("Find");
+                    let focused_now = shortcuts::focus_text_input(
+                        ui,
+                        egui::Id::new("folio-search-input"),
+                        &mut self.search_focus,
+                        &mut self.deferred_input,
+                    );
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(egui::Id::new("folio-search-input"))
                             .desired_width((ui.available_width() - 600.0).clamp(100.0, 280.0))
                             .hint_text("Search this document…"),
                     );
-                    if self.search_focus {
-                        response.request_focus();
-                        self.search_focus = false;
-                    }
                     let case_changed = ui
                         .selectable_label(self.search_options.match_case, "Aa")
                         .on_hover_text("Match case · Alt+C")
@@ -1247,8 +1262,22 @@ impl Folio {
                     if response.changed() || case_changed || word_changed {
                         self.change_search();
                     }
-                    if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
-                        self.next_hit(ui.input(|input| input.modifiers.shift));
+                    // egui compares focus with the previous frame. Acquiring
+                    // and releasing it with Enter in one frame is not lost_focus.
+                    if (response.lost_focus() || focused_now)
+                        && let Some(reverse) = ui.input(|input| {
+                            input.events.iter().find_map(|event| match event {
+                                egui::Event::Key {
+                                    key: Key::Enter,
+                                    pressed: true,
+                                    modifiers,
+                                    ..
+                                } => Some(modifiers.shift),
+                                _ => None,
+                            })
+                        })
+                    {
+                        self.next_hit(reverse);
                     }
                     if ui.button("Prev").clicked() {
                         self.next_hit(true);
@@ -1785,17 +1814,21 @@ impl Folio {
                 .show(context, |ui| {
                     ui.label(format!("Physical page 1–{}", self.nav.count));
                     ui.weak("Or a PDF label: iv, A-3. Use =1 for label 1.");
+                    let focused_now = shortcuts::focus_text_input(
+                        ui,
+                        egui::Id::new("folio-page-input"),
+                        &mut self.goto_focus,
+                        &mut self.deferred_input,
+                    );
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.goto)
                             .id(egui::Id::new("folio-page-input")),
                     );
-                    if self.goto_focus {
-                        response.request_focus();
-                        self.goto_focus = false;
-                    }
-                    if ui.button("Go").clicked()
-                        || (response.lost_focus()
-                            && ui.input(|input| input.key_pressed(Key::Enter)))
+                    let go = ui.button("Go").clicked();
+                    if !ui.is_sizing_pass()
+                        && (go
+                            || ((response.lost_focus() || focused_now)
+                                && ui.input(|input| input.key_pressed(Key::Enter))))
                     {
                         if let Some(page) = self.labels.resolve_input(&self.goto, self.nav.count) {
                             self.jump(page);
@@ -1889,6 +1922,13 @@ impl Folio {
 
 impl eframe::App for Folio {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
+        if !self.deferred_input.is_empty() {
+            let mut events = std::mem::take(&mut self.deferred_input);
+            context.input_mut(|input| {
+                events.append(&mut input.events);
+                input.events = events;
+            });
+        }
         self.events(context);
         self.keys(context);
         self.toolbar(context);

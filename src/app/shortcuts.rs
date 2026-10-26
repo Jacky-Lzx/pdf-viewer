@@ -1,8 +1,43 @@
-use eframe::egui::{Event, InputState, Key, Modifiers};
+use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
+
+pub(super) fn focus_text_input(
+    ui: &Ui,
+    id: Id,
+    requested: &mut bool,
+    deferred: &mut Vec<Event>,
+) -> bool {
+    if !*requested {
+        return false;
+    }
+    if ui.is_sizing_pass() {
+        // A new window first lays out an invisible, disabled area. Its text
+        // widget cannot accept focus or input until the next pass.
+        ui.input_mut(|input| {
+            deferred.extend(input.events.extract_if(.., |event| {
+                matches!(
+                    event,
+                    Event::Key { .. }
+                        | Event::Text(_)
+                        | Event::Copy
+                        | Event::Cut
+                        | Event::Paste(_)
+                        | Event::Ime(_)
+                )
+            }));
+        });
+        ui.ctx().request_repaint();
+        return false;
+    }
+    *requested = false;
+    ui.memory_mut(|memory| memory.request_focus(id));
+    true
+}
 
 pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers: Modifiers) {
     // Option shortcuts can also generate a text event on macOS. Preserve text
-    // typed before/after the shortcut, even when a busy frame batches both.
+    // typed before/after this occurrence, including the same key typed again
+    // after it opens an input, even when a busy frame batches everything.
+    let mut consumed = false;
     let mut shortcut_text = false;
     input.events.retain(|event| match event {
         Event::Key {
@@ -11,13 +46,14 @@ pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers:
             pressed,
             ..
         } => {
-            shortcut_text = *pressed && *event_key == key && *event_modifiers == modifiers;
-            true
+            shortcut_text =
+                !consumed && *pressed && *event_key == key && *event_modifiers == modifiers;
+            consumed |= shortcut_text;
+            !shortcut_text
         }
         Event::Text(_) => !shortcut_text,
         _ => true,
     });
-    input.consume_key(modifiers, key);
 }
 
 #[cfg(test)]
@@ -32,6 +68,77 @@ mod tests {
             pressed,
             repeat: false,
         }
+    }
+
+    #[test]
+    fn opening_shortcut_preserves_the_same_character_typed_in_the_query() {
+        let plain = Modifiers::NONE;
+        let mut input = InputState::default();
+        input.events = vec![
+            key(Key::Slash, plain, true),
+            Event::Text("/".into()),
+            key(Key::Slash, plain, false),
+            key(Key::Slash, plain, true),
+            Event::Text("/".into()),
+            key(Key::Slash, plain, false),
+            key(Key::U, plain, true),
+            Event::Text("u".into()),
+        ];
+        consume_text_shortcut(&mut input, Key::Slash, plain);
+        let text: String = input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "/u");
+        assert_eq!(input.num_presses(Key::Slash), 1);
+    }
+
+    #[test]
+    fn initial_window_sizing_defers_text_and_enter_until_the_input_is_interactive() {
+        use eframe::egui::{Context, RawInput, TextEdit, Window};
+
+        let context = Context::default();
+        let id = Id::new("test-input");
+        let mut requested = true;
+        let mut deferred = Vec::new();
+        let mut text = String::new();
+        let mut focused_now = false;
+        let input = RawInput {
+            events: vec![
+                key(Key::Num2, Modifiers::NONE, true),
+                Event::Text("2".into()),
+                key(Key::Enter, Modifiers::NONE, true),
+            ],
+            ..Default::default()
+        };
+        let _ = context.run(input, |context| {
+            Window::new("Input test").show(context, |ui| {
+                assert!(ui.is_sizing_pass());
+                focused_now = focus_text_input(ui, id, &mut requested, &mut deferred);
+                ui.add(TextEdit::singleline(&mut text).id(id));
+            });
+        });
+        assert!(requested && !focused_now && text.is_empty());
+        assert_eq!(deferred.len(), 3);
+        let input = RawInput {
+            events: std::mem::take(&mut deferred),
+            ..Default::default()
+        };
+        let _ = context.run(input, |context| {
+            Window::new("Input test").show(context, |ui| {
+                assert!(!ui.is_sizing_pass());
+                focused_now = focus_text_input(ui, id, &mut requested, &mut deferred);
+                ui.add(TextEdit::singleline(&mut text).id(id));
+                assert!(ui.input(|input| input.key_pressed(Key::Enter)));
+            });
+        });
+        assert!(focused_now && !requested && deferred.is_empty());
+        assert_eq!(text, "2");
+        assert!(!context.memory(|memory| memory.has_focus(id)));
     }
 
     #[test]
