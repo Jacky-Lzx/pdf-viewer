@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const MIN_SCALE: f32 = 0.05;
+pub const MAX_SCALE: f32 = 8.0;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Fit {
     #[default]
@@ -17,7 +20,7 @@ impl Fit {
             Self::Width => width,
             Self::Custom(scale) => scale,
         }
-        .clamp(0.05, 8.0)
+        .clamp(MIN_SCALE, MAX_SCALE)
     }
 }
 

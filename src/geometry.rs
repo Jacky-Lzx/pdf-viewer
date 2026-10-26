@@ -11,6 +11,23 @@ pub fn unrotate_point(point: Point, dimensions: [f32; 2], rotation: u8) -> Point
     }
 }
 
+pub fn zoom_pan(
+    pan: [f32; 2],
+    page: [f32; 2],
+    viewport: [f32; 2],
+    before: f32,
+    after: f32,
+    pivot: [f32; 2],
+) -> [f32; 2] {
+    std::array::from_fn(|axis| {
+        let old_margin = (viewport[axis] - page[axis] * before).max(0.0) * 0.5;
+        let new_margin = (viewport[axis] - page[axis] * after).max(0.0) * 0.5;
+        let overflow = (page[axis] * after - viewport[axis]).max(0.0);
+        ((pan[axis] + pivot[axis] - old_margin) * (after / before) + new_margin - pivot[axis])
+            .clamp(0.0, overflow)
+    })
+}
+
 pub fn rotate_rect(rect: Rect, dimensions: [f32; 2], rotation: u8) -> Rect {
     let rotate = |x: f64, y: f64| {
         let [w, h] = dimensions.map(f64::from);
@@ -43,6 +60,54 @@ pub fn focus_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zooming_from_fit_page_keeps_the_reading_center() {
+        let pan = zoom_pan(
+            [0.0; 2],
+            [600.0, 800.0],
+            [1000.0, 700.0],
+            0.875,
+            1.75,
+            [500.0, 350.0],
+        );
+        assert_eq!(pan, [25.0, 350.0]);
+        assert_eq!(
+            zoom_pan(
+                pan,
+                [600.0, 800.0],
+                [1000.0, 700.0],
+                1.75,
+                0.875,
+                [500.0, 350.0]
+            ),
+            [0.0; 2]
+        );
+    }
+
+    #[test]
+    fn zoom_preserves_an_off_center_pointer_and_clamps_at_page_edges() {
+        assert_eq!(
+            zoom_pan(
+                [320.0, 450.0],
+                [600.0, 800.0],
+                [700.0, 500.0],
+                2.0,
+                3.0,
+                [250.0, 160.0]
+            ),
+            [605.0, 755.0]
+        );
+        let pan = zoom_pan(
+            [0.0; 2],
+            [600.0, 800.0],
+            [700.0, 500.0],
+            2.0,
+            0.5,
+            [250.0, 160.0],
+        );
+        assert_eq!(pan, [0.0; 2]);
+    }
 
     #[test]
     fn search_focus_keeps_rotated_matches_visible_at_high_zoom() {

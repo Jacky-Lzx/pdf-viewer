@@ -2,7 +2,7 @@ use crate::{
     cache::TextureCache,
     document::RenderKey,
     links::{LinkHints, LinkTarget, PageLink},
-    navigation::{Fit, Navigation},
+    navigation::{Fit, MAX_SCALE, MIN_SCALE, Navigation},
     render_plan::RenderView,
     selection::TextSelection,
     state::{self, Library, ReadingMark, ReadingState},
@@ -309,9 +309,35 @@ impl Folio {
     }
 
     fn zoom(&mut self, factor: f32) {
+        self.zoom_at(factor, self.viewport * 0.5);
+    }
+
+    fn zoom_at(&mut self, factor: f32, pivot: Vec2) {
+        let Some(&dimensions) = self.dimensions.get(self.nav.page) else {
+            return;
+        };
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
         self.hints.cancel();
-        self.reading.fit = Fit::Custom((self.scale * factor).clamp(0.1, 8.0));
-        self.pan *= factor;
+        let dimensions = if self.reading.rotation % 2 == 1 {
+            [dimensions[1], dimensions[0]]
+        } else {
+            dimensions
+        };
+        let viewport = [self.viewport.x, self.viewport.y];
+        let before = self.reading.fit.scale(dimensions, viewport);
+        let after = (before * factor).clamp(MIN_SCALE, MAX_SCALE);
+        let pan = crate::geometry::zoom_pan(
+            [self.pan.x, self.pan.y],
+            dimensions,
+            viewport,
+            before,
+            after,
+            [pivot.x, pivot.y],
+        );
+        self.pan = Vec2::new(pan[0], pan[1]);
+        self.reading.fit = Fit::Custom(after);
         self.dirty = true;
     }
 
@@ -1131,7 +1157,7 @@ impl Folio {
                 } else {
                     dimensions
                 };
-                let view = RenderView {
+                let mut view = RenderView {
                     fit: self.reading.fit,
                     viewport: [rect.width(), rect.height()],
                     pixels_per_point: context.pixels_per_point(),
@@ -1140,7 +1166,7 @@ impl Folio {
                     backwards: self.nav.direction < 0,
                 };
                 self.scale = view.scale(dimensions);
-                let size = Vec2::new(rotated[0], rotated[1]) * self.scale;
+                let mut size = Vec2::new(rotated[0], rotated[1]) * self.scale;
                 self.overflow = (size - rect.size()).max(Vec2::ZERO);
                 if let Some(offset) = self.pending_offset.take() {
                     self.pan = Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0))
@@ -1170,7 +1196,12 @@ impl Folio {
                     let (scroll, zoom) =
                         ui.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
                     if (zoom - 1.0).abs() > 0.001 {
-                        self.zoom(zoom);
+                        let pivot = ui
+                            .input(|input| input.pointer.hover_pos())
+                            .map(|pos| pos - rect.min)
+                            .unwrap_or(rect.size() * 0.5)
+                            .clamp(Vec2::ZERO, rect.size());
+                        self.zoom_at(zoom, pivot);
                     } else {
                         self.scroll(-scroll, false);
                     }
@@ -1179,6 +1210,13 @@ impl Folio {
                         self.pan = Vec2::ZERO;
                         self.dirty = true;
                     }
+                }
+                if view.fit != self.reading.fit {
+                    view.fit = self.reading.fit;
+                    self.scale = view.scale(dimensions);
+                    size = Vec2::new(rotated[0], rotated[1]) * self.scale;
+                    self.overflow = (size - rect.size()).max(Vec2::ZERO);
+                    self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 }
                 let offset = self.current_offset();
                 if self.reading.offset != offset {
