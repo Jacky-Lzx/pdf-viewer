@@ -2,7 +2,7 @@ use crate::{
     cache::TextureCache,
     document::RenderKey,
     link_hints::LinkHints,
-    links::{LinkTarget, PageLink},
+    links::LinkTarget,
     navigation::{Fit, Navigation},
     render_plan::RenderView,
     selection::{SelectionUnit, TextSelection},
@@ -12,7 +12,6 @@ use crate::{
 };
 use eframe::egui::{self, Color32, Key, RichText, Vec2};
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant},
@@ -36,7 +35,7 @@ pub struct Folio {
     dimensions: Vec<[f32; 2]>,
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
-    links: HashMap<usize, Vec<PageLink>>,
+    links: crate::link_cache::LinkCache,
     visible_links: Vec<usize>,
     hints: LinkHints,
     mark_action: Option<MarkAction>,
@@ -98,7 +97,7 @@ impl Folio {
             dimensions: Vec::new(),
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
-            links: HashMap::new(),
+            links: crate::link_cache::LinkCache::default(),
             visible_links: Vec::new(),
             hints: LinkHints::default(),
             mark_action: None,
@@ -367,6 +366,7 @@ impl Folio {
         }
     }
     fn page_changed(&mut self) {
+        self.links.set_page(self.nav.page);
         self.reveal_page = Some(self.nav.page);
         self.pending_destination = None;
         self.nav.clear_prefix();
@@ -503,10 +503,7 @@ impl Folio {
                     self.selection.set_text(text);
                 }
                 Event::Links { id, page, links } if id == self.id => {
-                    if self.links.len() >= 64 {
-                        self.links.retain(|page, _| *page == self.nav.page);
-                    }
-                    self.links.insert(page, links);
+                    self.links.insert(page, links, self.nav.page);
                 }
                 Event::Opened {
                     id,

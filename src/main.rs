@@ -6,6 +6,7 @@ mod document;
 mod fonts;
 mod geometry;
 mod history;
+mod link_cache;
 mod link_hints;
 mod links;
 mod navigation;
