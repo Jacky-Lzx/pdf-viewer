@@ -42,6 +42,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `5j`，`2l`，`3J`，`3]`，`2 Space` | 带数字前缀的四向滚动、翻页和整屏滚动；数字与按键之间无需空格 |
 | `Ctrl+d` / `Ctrl+u` | 下移 / 上移半屏 |
 | `Space` / `Shift+Space` | 下移 / 上移一屏 |
+| `zt` / `zz` / `zb` | 当前页顶部 / 垂直中点 / 底部，保留缩放与横向位置 |
 | `Alt+Left` / `Alt+Right` | 历史返回 / 前进，恢复页码、缩放、旋转和滚动；支持数字前缀 |
 | `+` / `-` | 放大 / 缩小 |
 | `p` / `w` | 适合整页 / 适合宽度 |
@@ -146,6 +147,7 @@ xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
+xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

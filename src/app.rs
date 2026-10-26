@@ -424,6 +424,33 @@ impl Folio {
         self.zoom_at(factor, self.viewport * 0.5);
     }
 
+    fn align_page(&mut self, vertical: f32) {
+        let Some(&dimensions) = self.dimensions.get(self.nav.page) else {
+            return;
+        };
+        self.hints.cancel();
+        self.pending_focus = None;
+        self.pending_destination = None;
+        self.pending_search_jump = None;
+        let dimensions = if self.reading.rotation % 2 == 1 {
+            [dimensions[1], dimensions[0]]
+        } else {
+            dimensions
+        };
+        let scale = self
+            .reading
+            .fit
+            .scale(dimensions, [self.viewport.x, self.viewport.y]);
+        let overflow = (Vec2::from(dimensions) * scale - self.viewport).max(Vec2::ZERO);
+        let mut offset = self.pending_offset.unwrap_or_else(|| {
+            state::normalized_offset([self.pan.x, self.pan.y], [overflow.x, overflow.y])
+        });
+        offset[1] = vertical;
+        // Apply after this frame's zoom/rotation has established its overflow.
+        self.pending_offset = Some(offset);
+        self.dirty = true;
+    }
+
     fn zoom_at(&mut self, factor: f32, pivot: Vec2) {
         let Some(&dimensions) = self.dimensions.get(self.nav.page) else {
             return;
@@ -929,6 +956,18 @@ impl Folio {
                 self.nav.clear_prefix();
                 continue;
             }
+            if self.nav.pending_z {
+                self.nav.clear_prefix();
+                if !modifiers.shift {
+                    match key {
+                        Key::T => self.align_page(0.0),
+                        Key::Z => self.align_page(0.5),
+                        Key::B => self.align_page(1.0),
+                        _ => {}
+                    }
+                }
+                continue;
+            }
             if let Some(digit) = match key {
                 Key::Num0 => Some('0'),
                 Key::Num1 => Some('1'),
@@ -1013,6 +1052,7 @@ impl Folio {
                     self.jump(page);
                 }
                 Key::G => self.nav.pending_g = true,
+                Key::Z if !modifiers.shift => self.nav.pending_z = true,
                 Key::Home => self.jump(0),
                 Key::End => self.jump(self.nav.count.saturating_sub(1)),
                 Key::Enter if !self.nav.prefix.is_empty() => {
@@ -1105,7 +1145,7 @@ impl Folio {
                 }
                 _ => self.nav.clear_prefix(),
             }
-            if key != Key::G {
+            if !matches!(key, Key::G | Key::Z) {
                 self.nav.clear_prefix();
             }
         }
@@ -1776,11 +1816,17 @@ impl Folio {
                     if self.hints.active {
                         ui.monospace(&self.hints.prefix);
                     }
-                    if !self.nav.prefix.is_empty() || self.nav.pending_g {
+                    if !self.nav.prefix.is_empty() || self.nav.pending_g || self.nav.pending_z {
                         ui.monospace(format!(
                             "{}{}",
                             self.nav.prefix,
-                            if self.nav.pending_g { "g" } else { "" }
+                            if self.nav.pending_g {
+                                "g"
+                            } else if self.nav.pending_z {
+                                "z"
+                            } else {
+                                ""
+                            }
                         ));
                     }
                     ui.separator();
@@ -1898,6 +1944,7 @@ impl Folio {
                     for (keys, action) in [
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
+                        ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),

@@ -38,6 +38,7 @@ pub struct Navigation {
     pub count: usize,
     pub prefix: String,
     pub pending_g: bool,
+    pub pending_z: bool,
     pub direction: isize,
 }
 
@@ -85,6 +86,7 @@ impl Navigation {
     pub fn clear_prefix(&mut self) {
         self.prefix.clear();
         self.pending_g = false;
+        self.pending_z = false;
     }
 }
 
