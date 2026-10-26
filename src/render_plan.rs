@@ -58,15 +58,34 @@ impl RenderView {
     }
 
     pub fn key(self, page: usize, dimensions: [f32; 2]) -> RenderKey {
+        self.key_and_size(page, dimensions).0
+    }
+
+    fn key_and_size(
+        self,
+        page: usize,
+        dimensions: [f32; 2],
+    ) -> (RenderKey, Result<RasterSize, String>) {
         let width = (dimensions[0] * self.scale(dimensions) * self.pixels_per_point)
             .clamp(1.0, 16384.0)
             .ceil() as u32;
-        RenderKey {
-            page,
-            width: width.div_ceil(32) * 32,
-            rotation: self.rotation,
-            night: self.night,
-        }
+        let width = width.div_ceil(32) * 32;
+        let raster = RasterSize::new(dimensions, width);
+        // Requests beyond the pixel/side limit produce identical rasters. Use
+        // one key, keeping a bucket strictly above the actual width so that
+        // rasterization still selects exactly the same limiting scale.
+        let width = raster.as_ref().map_or(width, |raster| {
+            width.min((raster.size[0] as u32 / 32 + 1) * 32)
+        });
+        (
+            RenderKey {
+                page,
+                width,
+                rotation: self.rotation,
+                night: self.night,
+            },
+            raster,
+        )
     }
 
     /// Reserve the visible raster first, then admit neighbors that can coexist with it.
@@ -86,8 +105,8 @@ impl RenderView {
             let Some(&size) = dimensions.get(candidate) else {
                 continue;
             };
-            let key = self.key(candidate, size);
-            let Ok(raster) = RasterSize::new(size, key.width) else {
+            let (key, raster) = self.key_and_size(candidate, size);
+            let Ok(raster) = raster else {
                 // Let the visible render report invalid aspect ratios through the worker.
                 if candidate == page {
                     keys.push(key);
@@ -153,6 +172,68 @@ mod tests {
             .map(|key| RasterSize::new(pages[key.page], key.width).unwrap().bytes())
             .sum();
         assert!(bytes <= budget);
+    }
+
+    #[test]
+    fn zooms_above_the_raster_limit_share_a_key_without_changing_pixels() {
+        let dimensions = [600.0, 800.0];
+        let mut keys = Vec::new();
+        for (zoom, old_width) in [(5.0, 6016), (6.0, 7200), (7.0, 8416), (8.0, 9600)] {
+            let key = view(Fit::Custom(zoom)).key(0, dimensions);
+            let requested = RasterSize::new(dimensions, old_width).unwrap();
+            let actual = RasterSize::new(dimensions, key.width).unwrap();
+            assert_eq!(actual.size, requested.size);
+            assert_eq!(actual.scale.to_bits(), requested.scale.to_bits());
+            keys.push(key);
+        }
+        assert!(keys.iter().all(|key| *key == keys[0]), "{keys:?}");
+        assert_eq!(view(Fit::Custom(1.0)).key(0, dimensions).width, 1216);
+        assert_eq!(view(Fit::Custom(2.0)).key(0, dimensions).width, 2400);
+    }
+
+    #[test]
+    fn canonical_keys_match_planned_rasters_at_pixel_and_side_boundaries() {
+        for dimensions in [
+            [600.0, 800.0],
+            [1000.0, 1000.0],
+            [4.0, 10000.0],
+            [10000.0, 4.0],
+            [600000.0, 800000.0],
+            [f32::MAX; 2],
+        ] {
+            for fit in [
+                Fit::Page,
+                Fit::Width,
+                Fit::Height,
+                Fit::Custom(0.05),
+                Fit::Custom(1.0),
+                Fit::Custom(4.0),
+                Fit::Custom(8.0),
+            ] {
+                for rotation in 0..4 {
+                    for pixels_per_point in [0.5, 1.0, 1.25, 2.0, 4.0] {
+                        let view = RenderView {
+                            fit,
+                            rotation,
+                            pixels_per_point,
+                            ..view(fit)
+                        };
+                        let (key, planned) = view.key_and_size(0, dimensions);
+                        let actual = RasterSize::new(dimensions, key.width);
+                        let signature = |raster: Result<RasterSize, String>| {
+                            raster
+                                .map(|raster| (raster.size, raster.scale.to_bits()))
+                                .map_err(|_| ())
+                        };
+                        assert_eq!(
+                            signature(actual),
+                            signature(planned),
+                            "{dimensions:?}, {fit:?}, rotation {rotation}, dpi {pixels_per_point}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
