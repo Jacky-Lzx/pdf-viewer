@@ -1,3 +1,4 @@
+use caseless::Caseless;
 use hayro::{
     hayro_interpret::{
         self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image,
@@ -116,7 +117,7 @@ impl PageText {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        // Reserve for Unicode lowercase expansion before the lazy index is built.
+        // Reserve for Unicode case-fold expansion before the lazy index is built.
         let index_bytes = self.index.get().map_or_else(
             || self.text.len() * 3 * (1 + std::mem::size_of::<usize>()),
             |index| {
@@ -130,27 +131,36 @@ impl PageText {
         if query.trim().is_empty() {
             return Vec::new();
         }
-        // Keep an explicit byte mapping: Unicode lowercasing can change byte length.
+        // Case folding can expand one source glyph into several searchable characters.
         let index = self.index.get_or_init(|| {
             let mut folded = String::with_capacity(self.text.len());
             let mut source = Vec::with_capacity(self.text.len());
             for (offset, ch) in self.text.char_indices() {
-                for lower in ch.to_lowercase() {
+                if ch.is_ascii() {
+                    folded.push(ch.to_ascii_lowercase());
+                    source.push(offset);
+                    continue;
+                }
+                for lower in std::iter::once(ch).default_case_fold() {
                     folded.push(lower);
                     source.extend(std::iter::repeat_n(offset, lower.len_utf8()));
                 }
             }
             SearchIndex { folded, source }
         });
-        let needle = query.to_lowercase();
+        let needle = caseless::default_case_fold_str(query);
+        let mut previous = None;
         index
             .folded
             .match_indices(&needle)
-            .take(1000)
-            .map(|(offset, matched)| {
+            .filter_map(|(offset, matched)| {
                 let start = index.source[offset];
                 let last = index.source[offset + matched.len() - 1];
                 let end = last + self.text[last..].chars().next().unwrap().len_utf8();
+                if previous == Some((start, end)) {
+                    return None;
+                }
+                previous = Some((start, end));
                 let rects = self.rects_for_range(start..end);
                 let before: String = self.text[..start]
                     .chars()
@@ -161,12 +171,13 @@ impl PageText {
                     .rev()
                     .collect();
                 let after: String = self.text[start..].chars().take(80).collect();
-                SearchHit {
+                Some(SearchHit {
                     page,
                     rects,
                     snippet: format!("{before}{after}").replace('\n', " "),
-                }
+                })
             })
+            .take(1000)
             .collect()
     }
 }
@@ -324,7 +335,7 @@ mod tests {
     #[test]
     fn lazy_index_reservation_covers_large_unicode_expansion() {
         let page = PageText {
-            text: "İȺȾΣ 中文 ".repeat(1000),
+            text: "İȺȾΣΐ 中文 ".repeat(1000),
             ..Default::default()
         };
         let reserved = page.memory_bytes();
@@ -332,6 +343,41 @@ mod tests {
         assert!(page.memory_bytes() <= reserved);
         assert_eq!(page.search(0, "中文").len(), 1000);
         assert!(page.memory_bytes() <= reserved);
+    }
+
+    #[test]
+    fn unicode_case_folding_matches_sharp_s_sigma_and_ligatures() {
+        let value = "Straße STRASSE ΟΣ ος Σσς ﬃ İ ı";
+        let spans = value
+            .char_indices()
+            .enumerate()
+            .map(|(index, (start, ch))| TextSpan {
+                range: start..start + ch.len_utf8(),
+                rect: Rect::new(index as f64 * 10.0, 0.0, index as f64 * 10.0 + 10.0, 10.0),
+            })
+            .collect();
+        let text = PageText {
+            text: value.into(),
+            spans,
+            ..Default::default()
+        };
+        let german = text.search(0, "strasse");
+        assert_eq!(german.len(), 2);
+        assert_eq!(german[0].rects, [Rect::new(0.0, 0.0, 60.0, 10.0)]);
+        assert_eq!(text.search(0, "ΟΣ").len(), 2);
+        assert_eq!(text.search(0, "σ").len(), 5);
+        assert_eq!(text.search(0, "ffi").len(), 1);
+        assert_eq!(
+            text.search(0, "f").len(),
+            1,
+            "one ligature must not produce duplicate matches"
+        );
+        assert_eq!(
+            text.search(0, "s").len(),
+            5,
+            "one sharp-s glyph must not produce duplicate matches"
+        );
+        assert_eq!(text.search(0, "ı").len(), 1);
     }
 
     #[test]
