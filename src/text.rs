@@ -1,9 +1,9 @@
 mod boundaries;
+mod search_index;
 mod span;
 pub use span::TextSpan;
 
 use boundaries::WordBoundaries;
-use caseless::Caseless;
 use hayro::{
     hayro_interpret::{
         self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image,
@@ -15,6 +15,7 @@ use hayro::{
     hayro_syntax::page::Page,
     kurbo::{BezPath, Point, Rect},
 };
+use search_index::SearchIndex;
 use std::{ops::Range, sync::OnceLock};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -52,12 +53,6 @@ pub struct PageText {
     index: OnceLock<SearchIndex>,
     selection_index: OnceLock<crate::selection_index::SelectionIndex>,
     word_boundaries: OnceLock<WordBoundaries>,
-}
-
-#[derive(Clone, Debug)]
-struct SearchIndex {
-    folded: String,
-    source: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -217,15 +212,9 @@ impl PageText {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        // Unicode folding expands by at most 3×; growing vectors can reserve 4×.
         let index_bytes = self.index.get().map_or_else(
-            || {
-                let growth = if self.text.is_ascii() { 1 } else { 4 };
-                self.text.len() * growth * (1 + std::mem::size_of::<usize>())
-            },
-            |index| {
-                index.folded.capacity() + index.source.capacity() * std::mem::size_of::<usize>()
-            },
+            || SearchIndex::reservation(&self.text),
+            SearchIndex::memory_bytes,
         );
         self.text.capacity()
             + self.spans.capacity() * std::mem::size_of::<TextSpan>()
@@ -275,24 +264,8 @@ impl PageText {
             };
         }
         // Case folding can expand one source glyph into several searchable characters.
-        let index = (!query.options.match_case).then(|| {
-            self.index.get_or_init(|| {
-                let mut folded = String::with_capacity(self.text.len());
-                let mut source = Vec::with_capacity(self.text.len());
-                for (offset, ch) in self.text.char_indices() {
-                    if ch.is_ascii() {
-                        folded.push(ch.to_ascii_lowercase());
-                        source.push(offset);
-                        continue;
-                    }
-                    for lower in std::iter::once(ch).default_case_fold() {
-                        folded.push(lower);
-                        source.extend(std::iter::repeat_n(offset, lower.len_utf8()));
-                    }
-                }
-                SearchIndex { folded, source }
-            })
-        });
+        let index = (!query.options.match_case)
+            .then(|| self.index.get_or_init(|| SearchIndex::new(&self.text)));
         let boundaries = query.options.whole_word.then(|| {
             self.word_boundaries
                 .get_or_init(|| WordBoundaries::new(&self.text))
@@ -314,18 +287,10 @@ impl PageText {
             cursor.offset = matched_end;
             // A partial case-fold expansion is not an entire word (s != ß).
             let partial_expansion = boundaries.is_some()
-                && index.is_some_and(|index| {
-                    (offset > 0 && index.source[offset - 1] == index.source[offset])
-                        || (matched_end < index.source.len()
-                            && index.source[matched_end - 1] == index.source[matched_end])
-                });
+                && index.is_some_and(|index| index.partial_expansion(offset..matched_end));
             let (start, end) = if let Some(index) = index {
-                let start = index.source[offset];
-                let last = index.source[matched_end - 1];
-                (
-                    start,
-                    last + self.text[last..].chars().next().unwrap().len_utf8(),
-                )
+                let range = index.source_range(&self.text, offset..matched_end);
+                (range.start, range.end)
             } else {
                 (offset, matched_end)
             };
@@ -738,6 +703,66 @@ mod tests {
     }
 
     #[test]
+    fn ascii_search_preserves_mapped_geometry_options_and_unicode_queries_without_a_map() {
+        let value = "RUST K FFI s rusting\nrust \0\t".repeat(20);
+        let optimized = PageText {
+            spans: value
+                .char_indices()
+                .map(|(offset, _)| TextSpan {
+                    range: offset..offset + 1,
+                    rect: Rect::new(offset as f64, 0.0, offset as f64 + 1.0, 10.0),
+                })
+                .collect(),
+            text: value.clone(),
+            ..Default::default()
+        };
+        let mapped = optimized.clone();
+        mapped
+            .index
+            .set(SearchIndex {
+                folded: value.to_ascii_lowercase(),
+                source: Some((0..value.len()).collect()),
+            })
+            .unwrap();
+        let reserved = optimized.memory_bytes();
+        for whole_word in [false, true] {
+            for needle in ["rUsT", "K", "ﬃ", "ſ", "s", "rust rusting", "missing", "\0"] {
+                let query = SearchQuery::new(
+                    needle.into(),
+                    SearchOptions {
+                        match_case: false,
+                        whole_word,
+                    },
+                );
+                let reference = mapped.search_with(2, &query);
+                let mut cursor = SearchCursor::default();
+                let mut hits = Vec::new();
+                loop {
+                    let batch = optimized.search_batch(2, &query, &mut cursor, 3);
+                    hits.extend(batch.hits);
+                    if batch.complete {
+                        break;
+                    }
+                }
+                assert_eq!(hits.len(), reference.len(), "{needle}, {whole_word}");
+                for (actual, expected) in hits.iter().zip(reference) {
+                    assert_eq!(actual.page, expected.page);
+                    assert_eq!(actual.rects, expected.rects);
+                    assert_eq!(actual.snippet, expected.snippet);
+                }
+            }
+        }
+        let index = optimized.index.get().unwrap();
+        assert!(index.source.is_none());
+        assert_eq!(index.memory_bytes(), value.len());
+        // Whole-word data has its own independently accounted allocation.
+        assert_eq!(
+            optimized.memory_bytes(),
+            reserved + optimized.word_boundaries.get().unwrap().memory_bytes()
+        );
+    }
+
+    #[test]
     fn compact_mapping_preserves_expanded_case_and_multibyte_glyph_ranges() {
         let value = "İ中İ 文";
         let spans = value
@@ -768,10 +793,10 @@ mod tests {
         );
         assert!(page.memory_bytes() <= reserve);
         let index = page.index.get().unwrap();
-        assert_eq!(index.source.len(), index.folded.len());
+        let source = index.source.as_ref().unwrap();
+        assert_eq!(source.len(), index.folded.len());
         assert!(
-            index
-                .source
+            source
                 .iter()
                 .all(|offset| page.text.is_char_boundary(*offset))
         );

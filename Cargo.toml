@@ -50,3 +50,7 @@ harness = false
 [[bench]]
 name = "word_selection"
 harness = false
+
+[[bench]]
+name = "search_index"
+harness = false
