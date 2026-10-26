@@ -969,7 +969,7 @@ impl Folio {
             {
                 egui::Popup::close_all(context);
             }
-            if (typing || !(self.help || self.properties_open))
+            if (typing || !(self.help || self.properties_open || popup_open))
                 && matches!(
                     key,
                     Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
@@ -977,7 +977,6 @@ impl Folio {
             {
                 // egui scheduled directional focus before dispatch. Arrow
                 // keys belong to text editing or reader navigation here.
-                // The link menu has one item; keep its focus inside the menu.
                 context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
             }
             if self.search_open
@@ -1985,6 +1984,17 @@ impl Folio {
                     if response.secondary_clicked() {
                         copy.request_focus();
                     }
+                    ui.memory_mut(|memory| {
+                        memory.set_focus_lock_filter(
+                            copy.id,
+                            egui::EventFilter {
+                                tab: true,
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                ..Default::default()
+                            },
+                        );
+                    });
                     if copy.clicked() {
                         ui.ctx().copy_text(url.clone());
                         copied = true;

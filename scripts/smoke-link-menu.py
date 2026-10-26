@@ -75,6 +75,12 @@ def run(binary):
                 menu(point())
                 keyboard.key(0xFF54); keyboard.key(0xFF0D)
                 assert keyboard.clipboard() == URL, "arrow and Enter activate the menu item"
+                keyboard.key("y")
+                menu(point())
+                keyboard.key(0xFF09); keyboard.key(0xFF09, shift=True)
+                keyboard.key(0xFF51); keyboard.key(0xFF53)
+                keyboard.key(0xFF0D)
+                assert keyboard.clipboard() == URL, "Tab and directional focus stay inside the menu"
                 keyboard.key("v")
                 menu(point()); keyboard.key("j", shift=True)
                 expect(1)
@@ -118,7 +124,7 @@ def run(binary):
                 expect(1)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: web-link menu copy, reader-key isolation, count reset, arrows/Enter, selection isolation, rotated and compact links, Escape preserves search, Find focus, close/reopen and graceful quit")
+                print("PASS: web-link menu copy, reader-key isolation, count reset, arrows/Enter and Tab focus isolation, selection isolation, rotated and compact links, Escape preserves search, Find focus, close/reopen and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
