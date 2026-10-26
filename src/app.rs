@@ -701,7 +701,7 @@ impl Folio {
                 Event::Rendered {
                     id,
                     key,
-                    bitmap,
+                    image,
                     milliseconds,
                 } if id == self.id => {
                     let wanted = self
@@ -711,7 +711,7 @@ impl Folio {
                     if (!wanted && key.page != self.nav.page)
                         || key.rotation != self.reading.rotation
                         || key.night != self.library.night
-                        || !self.cache.can_insert(key, bitmap.rgba.len())
+                        || !self.cache.can_insert(key, image.pixels.len() * 4)
                     {
                         continue;
                     }
@@ -724,8 +724,6 @@ impl Folio {
                     {
                         continue;
                     }
-                    let image =
-                        egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba);
                     let texture = context.load_texture(
                         format!("page-{}-{}", key.page, key.width),
                         image,
@@ -736,9 +734,9 @@ impl Folio {
                         self.render_ms = milliseconds;
                     }
                 }
-                Event::Thumbnail { id, key, bitmap } if id == self.id => {
+                Event::Thumbnail { id, key, image } if id == self.id => {
                     if key.rotation == self.reading.rotation && key.night == self.library.night {
-                        self.thumbnails.accept(key, bitmap, context);
+                        self.thumbnails.accept(key, image, context);
                     }
                 }
                 Event::Search {

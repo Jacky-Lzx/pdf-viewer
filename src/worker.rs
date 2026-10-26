@@ -1,5 +1,5 @@
 use crate::{
-    document::{self, Bitmap, RenderKey},
+    document::{self, RenderKey},
     text::{self, PageText, SearchHit, SearchOptions, SearchQuery},
 };
 use eframe::egui;
@@ -24,13 +24,13 @@ pub enum Event {
     Rendered {
         id: u64,
         key: RenderKey,
-        bitmap: Bitmap,
+        image: egui::ColorImage,
         milliseconds: f64,
     },
     Thumbnail {
         id: u64,
         key: RenderKey,
-        bitmap: Option<Bitmap>,
+        image: Option<egui::ColorImage>,
     },
     Search {
         id: u64,
@@ -410,6 +410,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     document::rasterize(pdf, &render_cache, key)
                 }));
+                let milliseconds = start.elapsed().as_secs_f64() * 1000.0;
                 let relevant = {
                     let mut pending = shared.0.lock().unwrap();
                     if thumbnail {
@@ -421,6 +422,13 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if !relevant {
                     continue;
                 }
+                // Discard obsolete raster work before allocating the texture pixels.
+                // Keep conversion off the UI thread; the receiver only uploads images.
+                let result = result.map(|result| {
+                    result.map(|bitmap| {
+                        egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba)
+                    })
+                });
                 if thumbnail {
                     emit(
                         tx,
@@ -428,20 +436,20 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         Event::Thumbnail {
                             id,
                             key,
-                            bitmap: result.ok().and_then(Result::ok),
+                            image: result.ok().and_then(Result::ok),
                         },
                     );
                     continue;
                 }
                 match result {
-                    Ok(Ok(bitmap)) => emit(
+                    Ok(Ok(image)) => emit(
                         tx,
                         context,
                         Event::Rendered {
                             id,
                             key,
-                            bitmap,
-                            milliseconds: start.elapsed().as_secs_f64() * 1000.0,
+                            image,
+                            milliseconds,
                         },
                     ),
                     result => {
@@ -840,10 +848,78 @@ mod tests {
             receive(&worker),
             Event::Thumbnail {
                 key: RenderKey { page: 1, .. },
-                bitmap: Some(_),
+                image: Some(_),
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn prepared_page_and_thumbnail_images_preserve_raster_pixels() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        let pdf = document::load(&sample(), "").unwrap();
+        let cache = RenderCache::new();
+        for rotation in 0..4 {
+            for night in [false, true] {
+                let key = RenderKey {
+                    page: 0,
+                    width: 96,
+                    rotation,
+                    night,
+                };
+                let expected = document::rasterize(&pdf, &cache, key).unwrap();
+                worker.update(|pending| {
+                    pending.replace_renders(vec![key]);
+                    pending.replace_thumbnails(vec![key]);
+                });
+                for thumbnail in [false, true] {
+                    let image = match receive(&worker) {
+                        Event::Rendered {
+                            id: 1,
+                            key: actual,
+                            image,
+                            milliseconds,
+                        } if !thumbnail && actual == key => {
+                            assert!(milliseconds.is_finite() && milliseconds >= 0.0);
+                            image
+                        }
+                        Event::Thumbnail {
+                            id: 1,
+                            key: actual,
+                            image: Some(image),
+                        } if thumbnail && actual == key => image,
+                        _ => panic!("Expected a prepared image for {key:?}"),
+                    };
+                    assert_eq!(image.size, expected.size);
+                    assert_eq!(image.pixels.len() * 4, expected.rgba.len());
+                    for (pixel, expected) in
+                        image.pixels.iter().zip(expected.rgba.as_chunks::<4>().0)
+                    {
+                        assert_eq!(pixel.to_array(), *expected);
+                    }
+                }
+            }
+        }
+        let invalid = RenderKey {
+            page: 99,
+            ..render_key(0)
+        };
+        worker.update(|pending| {
+            pending.replace_renders(vec![invalid]);
+            pending.replace_thumbnails(vec![invalid]);
+        });
+        assert!(matches!(
+            receive(&worker),
+            Event::Error { opening: false, .. }
+        ));
+        assert!(matches!(
+            receive(&worker),
+            Event::Thumbnail { image: None, .. }
+        ));
+        worker.render(vec![render_key(0)]);
+        assert!(matches!(receive(&worker), Event::Rendered { .. }));
     }
 
     #[test]
@@ -900,12 +976,10 @@ mod tests {
         let (mut rendered, mut copied, mut complete, mut count) = (false, false, false, 0);
         while !(rendered && copied && complete) {
             match receive(&worker) {
-                Event::Rendered {
-                    id, key, bitmap, ..
-                } => {
+                Event::Rendered { id, key, image, .. } => {
                     assert_eq!(id, 7);
                     assert_eq!(key.page, 2);
-                    assert_eq!(bitmap.size, [400, 300]);
+                    assert_eq!(image.size, [400, 300]);
                     rendered = true;
                 }
                 Event::Text { id, page, text } => {

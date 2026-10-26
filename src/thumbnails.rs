@@ -1,7 +1,4 @@
-use crate::{
-    cache::TextureCache,
-    document::{Bitmap, RenderKey},
-};
+use crate::{cache::TextureCache, document::RenderKey};
 use eframe::egui::{self, TextureHandle};
 use std::collections::HashSet;
 
@@ -86,20 +83,24 @@ impl Thumbnails {
         Some(missing)
     }
 
-    pub fn accept(&mut self, key: RenderKey, bitmap: Option<Bitmap>, context: &egui::Context) {
+    pub fn accept(
+        &mut self,
+        key: RenderKey,
+        image: Option<egui::ColorImage>,
+        context: &egui::Context,
+    ) {
         if !self.wanted.contains(&key) {
             return;
         }
-        let Some(bitmap) = bitmap else {
+        let Some(image) = image else {
             self.failed.insert(key);
             return;
         };
-        if !self.cache.can_insert(key, bitmap.rgba.len()) {
+        if !self.cache.can_insert(key, image.pixels.len() * 4) {
             self.failed.insert(key);
             return;
         }
         self.failed.remove(&key);
-        let image = egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba);
         let texture = context.load_texture(
             format!("preview-{}-{}", key.page, key.width),
             image,
@@ -148,10 +149,7 @@ mod tests {
         assert_eq!(previews.requests(), Some(vec![second]));
         previews.accept(
             first,
-            Some(Bitmap {
-                size: [2, 2],
-                rgba: vec![255; 16],
-            }),
+            Some(egui::ColorImage::filled([2, 2], egui::Color32::WHITE)),
             &context,
         );
         assert!(previews.cache.get(&first).is_none());
@@ -178,13 +176,10 @@ mod tests {
         let keys: Vec<_> = (0..3)
             .map(|page| key(page, [600.0, 800.0], 0, false, 1.0))
             .collect();
-        let bitmap = || Bitmap {
-            size: [2, 2],
-            rgba: vec![255; 16],
-        };
+        let image = || egui::ColorImage::filled([2, 2], egui::Color32::WHITE);
         for &key in &keys[..2] {
             previews.want(key);
-            previews.accept(key, Some(bitmap()), &context);
+            previews.accept(key, Some(image()), &context);
         }
         assert_eq!(previews.requests(), Some(vec![]));
         assert_eq!(previews.cache.bytes, 32);
@@ -193,16 +188,13 @@ mod tests {
         previews.want(keys[2]);
         previews.accept(
             keys[2],
-            Some(Bitmap {
-                size: [3, 3],
-                rgba: vec![255; 36],
-            }),
+            Some(egui::ColorImage::filled([3, 3], egui::Color32::WHITE)),
             &context,
         );
         assert!(previews.failed(keys[2]));
         assert!(previews.cache.contains(&keys[0]));
         assert!(previews.cache.contains(&keys[1]));
-        previews.accept(keys[2], Some(bitmap()), &context);
+        previews.accept(keys[2], Some(image()), &context);
         assert!(!previews.failed(keys[2]));
         assert!(previews.cache.contains(&keys[0]));
         assert!(!previews.cache.contains(&keys[1]));
