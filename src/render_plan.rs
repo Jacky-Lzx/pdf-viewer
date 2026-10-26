@@ -3,6 +3,40 @@ use crate::{
     navigation::Fit,
 };
 
+/// Current page plus at most two neighbors, stored inline for per-frame planning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderPlan {
+    keys: [RenderKey; 3],
+    len: usize,
+}
+
+impl RenderPlan {
+    fn new() -> Self {
+        Self {
+            keys: [RenderKey {
+                page: 0,
+                width: 0,
+                rotation: 0,
+                night: false,
+            }; 3],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, key: RenderKey) {
+        self.keys[self.len] = key;
+        self.len += 1;
+    }
+}
+
+impl std::ops::Deref for RenderPlan {
+    type Target = [RenderKey];
+
+    fn deref(&self) -> &Self::Target {
+        &self.keys[..self.len]
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RenderView {
     pub fit: Fit,
@@ -37,9 +71,9 @@ impl RenderView {
 
     /// Reserve the visible raster first, then admit neighbors that can coexist with it.
     /// Include cached pages in the reservation to prevent neighbors evicting one another.
-    pub fn plan(self, page: usize, dimensions: &[[f32; 2]], budget: usize) -> Vec<RenderKey> {
+    pub fn plan(self, page: usize, dimensions: &[[f32; 2]], budget: usize) -> RenderPlan {
         let mut remaining = budget;
-        let mut keys = Vec::with_capacity(3);
+        let mut keys = RenderPlan::new();
         let neighbors = if self.backwards {
             [page.checked_sub(1), page.checked_add(1)]
         } else {
@@ -96,7 +130,7 @@ mod tests {
                 };
                 let plan = view.plan(1, &pages, 96 * 1024 * 1024);
                 assert_eq!(plan.len(), 3);
-                for key in plan {
+                for &key in plan.iter() {
                     assert_eq!(key, view.plan(key.page, &pages, 96 * 1024 * 1024)[0]);
                 }
             }
@@ -155,5 +189,30 @@ mod tests {
         let pages = [[100.0, 100.0], [600.0, 800.0], [600.0, 800.0]];
         let plan = view(Fit::Custom(8.0)).plan(1, &pages, 96 * 1024 * 1024);
         assert_eq!(plan.iter().map(|key| key.page).collect::<Vec<_>>(), [1, 0]);
+    }
+
+    #[test]
+    fn inline_plans_expose_only_initialized_keys_at_document_edges() {
+        let view = view(Fit::Page);
+        let pages = [[600.0, 800.0]; 3];
+        assert!(view.plan(0, &[], 0).is_empty());
+        for (page, expected) in [(0, vec![0, 1]), (2, vec![2, 1])] {
+            let plan = view.plan(page, &pages, 96 * 1024 * 1024);
+            assert_eq!(plan.len(), 2);
+            assert_eq!(
+                plan.iter().map(|key| key.page).collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(plan, view.plan(page, &pages, 96 * 1024 * 1024));
+        }
+        let plan = view.plan(1, &pages, 0);
+        assert_eq!(plan.len(), 1, "always request the visible page");
+        assert_eq!(plan.first().unwrap().page, 1);
+        let invalid = view.plan(0, &[[1.0e38, 1.0]], 0);
+        assert_eq!(
+            invalid.len(),
+            1,
+            "let the worker report invalid aspect ratios"
+        );
     }
 }

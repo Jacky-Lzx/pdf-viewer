@@ -4,11 +4,10 @@ mod sidebar;
 
 use crate::{
     cache::TextureCache,
-    document::RenderKey,
     link_hints::LinkHints,
     links::LinkTarget,
     navigation::{Fit, Navigation},
-    render_plan::RenderView,
+    render_plan::{RenderPlan, RenderView},
     selection::{SelectionUnit, TextSelection},
     state::{self, Library, ReadingMark, ReadingState},
     text::{SearchHit, SearchOptions},
@@ -60,7 +59,7 @@ pub struct Folio {
     overflow: Vec2,
     viewport: Vec2,
     scale: f32,
-    requested: Option<Vec<RenderKey>>,
+    requested: Option<RenderPlan>,
     render_ms: f64,
     dialog: Option<Receiver<Option<PathBuf>>>,
     deferred_input: Vec<egui::Event>,
