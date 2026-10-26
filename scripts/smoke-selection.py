@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import runpy
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ def run(binary):
         root = Path(directory)
         document = root / "folio-smoke.pdf"
         shutil.copyfile(SCRIPTS.parent / "assets/folio-guide.pdf", document)
+        page_text = [subprocess.run([str(binary), "--text", str(document), str(page)], check=True, capture_output=True).stdout.decode("utf-8").removesuffix("\n") for page in (1, 2)]
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
         keyboard = Keyboard()
@@ -46,6 +48,22 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "selection reader window")
                 wait_for(lambda: saved(lambda book: book["page"] == 0), "initial reading state")
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    keyboard.key("a", ctrl=True, delay=0)
+                    keyboard.key("c", ctrl=True, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                time.sleep(0.4)
+                assert keyboard.clipboard() == page_text[0], "same-frame Select All and Copy works before text arrives"
+                clicks((400, 290), 1)
+                keyboard.key("y")
+                assert len(keyboard.clipboard()) == 1, "clicking starts a fresh glyph selection after Select All"
+                keyboard.key("a", ctrl=True)
+                keyboard.key("a", ctrl=True)
+                keyboard.key("y")
+                assert keyboard.clipboard() == page_text[0], "Select All is repeatable and y copies the complete page"
+                keyboard.key("v")
                 keyboard.key("v")
                 time.sleep(0.3)
                 clicks((400, 290), 2)
@@ -75,6 +93,8 @@ def run(binary):
                 copy("native")
                 clicks((768, 175), 3)
                 copy(SENTENCE)
+                keyboard.key("a", ctrl=True)
+                copy(page_text[0])
                 keyboard.key(0xFF1B)
                 keyboard.key("r", shift=True); keyboard.key("w")
                 wait_for(lambda: saved(lambda book: book["fit"] == "Width"), "normal mode fit width")
@@ -107,7 +127,15 @@ def run(binary):
                 keyboard.key("a", ctrl=True)
                 copy("kept")
                 keyboard.key(0xFF1B)
-                print("PASS: word/line selection, forward/reverse drags, clipboard, rotated text, preserved zoom, search prefill from word/line and multi-line fallback")
+                keyboard.key("j", shift=True)
+                wait_for(lambda: saved(lambda book: book["page"] == 1), "second page for Select All")
+                keyboard.key("a", ctrl=True)
+                copy(page_text[1])
+                keyboard.key("k", shift=True)
+                wait_for(lambda: saved(lambda book: book["page"] == 0), "page navigation cancels Select All")
+                keyboard.key("y")
+                assert keyboard.clipboard() == page_text[0], "page change must not copy a stale full-page selection"
+                print("PASS: same-frame Select All/Copy before text arrives, repeat/glyph reset, rotated/current-page full text, page-change cancellation, word/line drags, clipboard, preserved zoom and search input/prefill guards")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

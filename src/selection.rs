@@ -20,6 +20,7 @@ pub struct TextSelection {
     head: Option<Point>,
     range: Option<Range<usize>>,
     unit: SelectionUnit,
+    all: bool,
 }
 
 impl TextSelection {
@@ -38,6 +39,24 @@ impl TextSelection {
         self.text.is_some()
     }
 
+    pub fn is_all(&self) -> bool {
+        self.all
+    }
+
+    pub fn select_all(&mut self) {
+        if self.all {
+            return;
+        }
+        self.active = true;
+        self.all = true;
+        self.anchor = None;
+        self.head = None;
+        self.anchor_span = None;
+        self.unit = SelectionUnit::Glyph;
+        self.range = None;
+        self.update();
+    }
+
     pub fn set_text(&mut self, text: Arc<PageText>) {
         self.text = Some(text);
         self.anchor_span = None;
@@ -47,6 +66,7 @@ impl TextSelection {
     }
 
     pub fn begin(&mut self, point: Point) {
+        self.all = false;
         self.anchor = Some(point);
         self.anchor_span = None;
         self.head = Some(point);
@@ -72,6 +92,16 @@ impl TextSelection {
     }
 
     fn update(&mut self) {
+        if self.all {
+            if let Some(text) = &self.text {
+                let range = 0..text.text.len();
+                if self.range.as_ref() != Some(&range) {
+                    self.rects = text.rects_for_range(range.clone());
+                    self.range = Some(range);
+                }
+            }
+            return;
+        }
         let (Some(text), Some(anchor), Some(head)) = (&self.text, self.anchor, self.head) else {
             return;
         };
@@ -126,6 +156,34 @@ mod tests {
             })
             .collect();
         Arc::new(page)
+    }
+
+    #[test]
+    fn select_all_survives_late_text_and_resets_when_dragging_or_cancelled() {
+        let mut selection = TextSelection::default();
+        selection.select_all();
+        assert!(selection.active && selection.is_all() && !selection.ready());
+        assert!(selection.selected_text().is_none());
+        selection.set_text(text());
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        assert!(!selection.rects.is_empty());
+        selection.select(Point::new(15.0, 5.0), SelectionUnit::Word);
+        assert!(!selection.is_all());
+        assert_eq!(selection.selected_text(), Some("Rust"));
+        selection.select_all();
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        selection.begin(Point::new(15.0, 5.0));
+        assert!(!selection.is_all());
+        assert_eq!(selection.selected_text(), Some("u"));
+        selection.select_all();
+        selection.set_text(Arc::new(PageText::default()));
+        assert_eq!(selection.selected_text(), Some(""));
+        assert!(selection.rects.is_empty());
+        selection.cancel();
+        assert!(!selection.active && !selection.is_all());
+        selection.start();
+        selection.set_text(text());
+        assert!(selection.selected_text().is_none());
     }
 
     #[test]

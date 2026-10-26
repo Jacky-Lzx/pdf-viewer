@@ -1098,6 +1098,17 @@ impl Folio {
             if typing || self.help || self.password_open || self.goto_open {
                 continue;
             }
+            if modifiers.command && key == Key::A && self.nav.count > 0 {
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                self.nav.clear_prefix();
+                self.hints.cancel();
+                self.mark_action = None;
+                self.selection.select_all();
+                if !self.selection.ready() {
+                    self.worker.inspect(self.nav.page);
+                }
+                continue;
+            }
             if modifiers.command && key == Key::C && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
@@ -1855,6 +1866,10 @@ impl Folio {
     }
 
     fn copy_selection(&mut self, context: &egui::Context) {
+        if self.selection.is_all() && !self.selection.ready() {
+            self.worker.copy(self.nav.page);
+            return;
+        }
         if let Some(text) = self
             .selection
             .selected_text()
@@ -2183,6 +2198,7 @@ impl Folio {
                         ("t", "Toggle page previews and open sidebar"),
                         ("c", "Find chapter · ↑/↓ or Ctrl+j/k · Enter to follow"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
+                        ("Ctrl/Cmd+a", "Select all text on the current page"),
                         ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
                         ("s, then y", "Document information, copy details"),
