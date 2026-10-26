@@ -128,11 +128,15 @@ impl Pending {
         self.render = keys.into();
     }
 
+    fn wants_render(&self, key: RenderKey, revision: u64) -> bool {
+        !self.stop
+            && !self.close
+            && self.open.is_none()
+            && (revision == self.render_revision || self.render.contains(&key))
+    }
+
     fn finish_render(&mut self, key: RenderKey, revision: u64) -> bool {
-        if self.stop || self.close || self.open.is_some() {
-            return false;
-        }
-        if revision != self.render_revision && !self.render.contains(&key) {
+        if !self.wants_render(key, revision) {
             return false;
         }
         // A view update can request the same page while it is still rendering.
@@ -145,12 +149,15 @@ impl Pending {
         self.thumbnails = keys.into_iter().take(16).collect();
     }
 
+    fn wants_thumbnail(&self, key: RenderKey, revision: u64) -> bool {
+        !self.stop
+            && !self.close
+            && self.open.is_none()
+            && (revision == self.thumbnail_revision || self.thumbnails.contains(&key))
+    }
+
     fn finish_thumbnail(&mut self, key: RenderKey, revision: u64) -> bool {
-        if self.stop
-            || self.close
-            || self.open.is_some()
-            || (revision != self.thumbnail_revision && !self.thumbnails.contains(&key))
-        {
+        if !self.wants_thumbnail(key, revision) {
             return false;
         }
         self.thumbnails.retain(|pending| *pending != key);
@@ -437,11 +444,11 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     document::rasterize_untransformed(pdf, &render_cache, key.page, key.width)
                 }));
                 let relevant = {
-                    let mut pending = shared.0.lock().unwrap();
+                    let pending = shared.0.lock().unwrap();
                     if thumbnail {
-                        pending.finish_thumbnail(key, revision)
+                        pending.wants_thumbnail(key, revision)
                     } else {
-                        pending.finish_render(key, revision)
+                        pending.wants_render(key, revision)
                     }
                 };
                 if !relevant {
@@ -454,6 +461,19 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         crate::texture_pixels::prepare(bitmap, key.rotation, key.night)
                     })
                 });
+                // Requests can change during pixel preparation too. Consume any
+                // duplicate still-needed job only when its final image is ready.
+                let relevant = {
+                    let mut pending = shared.0.lock().unwrap();
+                    if thumbnail {
+                        pending.finish_thumbnail(key, revision)
+                    } else {
+                        pending.finish_render(key, revision)
+                    }
+                };
+                if !relevant {
+                    continue;
+                }
                 let milliseconds = start.elapsed().as_secs_f64() * 1000.0;
                 if thumbnail {
                     emit(
@@ -820,6 +840,48 @@ mod tests {
         assert_eq!(
             pending.render.into_iter().collect::<Vec<_>>(),
             [render_key(2)]
+        );
+    }
+
+    #[test]
+    fn texture_preparation_rechecks_cancellation_and_coalesces_new_requests() {
+        let mut pending = Pending::default();
+        let running = render_key(0);
+        pending.replace_renders(vec![running]);
+        pending.replace_thumbnails(vec![running]);
+        let (render_revision, thumbnail_revision) =
+            (pending.render_revision, pending.thumbnail_revision);
+        pending.render.pop_front();
+        pending.thumbnails.pop_front();
+        // The raster is wanted before starting its texture preparation.
+        assert!(pending.wants_render(running, render_revision));
+        assert!(pending.wants_thumbnail(running, thumbnail_revision));
+        // A new view arrives while the final pixels are being prepared.
+        pending.replace_renders(vec![render_key(1)]);
+        pending.replace_thumbnails(vec![render_key(1)]);
+        assert!(!pending.finish_render(running, render_revision));
+        assert!(!pending.finish_thumbnail(running, thumbnail_revision));
+        assert_eq!(pending.render.front(), Some(&render_key(1)));
+        assert_eq!(pending.thumbnails.front(), Some(&render_key(1)));
+
+        pending.replace_renders(vec![running, render_key(2)]);
+        pending.replace_thumbnails(vec![running, render_key(2)]);
+        assert!(pending.wants_render(running, render_revision));
+        assert!(pending.wants_thumbnail(running, thumbnail_revision));
+        assert_eq!(pending.render.front(), Some(&running));
+        assert_eq!(pending.thumbnails.front(), Some(&running));
+        // Further same-key requests during preparation must reuse the result.
+        pending.replace_renders(vec![running, render_key(3)]);
+        pending.replace_thumbnails(vec![running, render_key(3)]);
+        assert!(pending.finish_render(running, render_revision));
+        assert!(pending.finish_thumbnail(running, thumbnail_revision));
+        assert_eq!(
+            pending.render.into_iter().collect::<Vec<_>>(),
+            [render_key(3)]
+        );
+        assert_eq!(
+            pending.thumbnails.into_iter().collect::<Vec<_>>(),
+            [render_key(3)]
         );
     }
 
