@@ -1,6 +1,8 @@
+mod boundaries;
 mod span;
 pub use span::TextSpan;
 
+use boundaries::WordBoundaries;
 use caseless::Caseless;
 use hayro::{
     hayro_interpret::{
@@ -15,12 +17,41 @@ use hayro::{
 };
 use std::{ops::Range, sync::OnceLock};
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchOptions {
+    pub match_case: bool,
+    pub whole_word: bool,
+}
+
+pub struct SearchQuery {
+    needle: String,
+    options: SearchOptions,
+}
+
+impl SearchQuery {
+    pub fn new(query: String, options: SearchOptions) -> Self {
+        let needle = if query.trim().is_empty() {
+            String::new()
+        } else if options.match_case {
+            query
+        } else {
+            caseless::default_case_fold_str(&query)
+        };
+        Self { needle, options }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.needle.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PageText {
     pub text: String,
     pub spans: Vec<TextSpan>,
     index: OnceLock<SearchIndex>,
     selection_index: OnceLock<crate::selection_index::SelectionIndex>,
+    word_boundaries: OnceLock<WordBoundaries>,
 }
 
 #[derive(Clone, Debug)]
@@ -142,40 +173,86 @@ impl PageText {
                 .selection_index
                 .get()
                 .map_or(0, |index| index.memory_bytes())
+            + self
+                .word_boundaries
+                .get()
+                .map_or(0, |boundaries| boundaries.memory_bytes())
     }
 
+    #[cfg(test)]
     pub fn search(&self, page: usize, query: &str) -> Vec<SearchHit> {
-        if query.trim().is_empty() {
+        self.search_with(
+            page,
+            &SearchQuery::new(query.into(), SearchOptions::default()),
+        )
+    }
+
+    pub fn search_with(&self, page: usize, query: &SearchQuery) -> Vec<SearchHit> {
+        if query.is_empty() {
             return Vec::new();
         }
         // Case folding can expand one source glyph into several searchable characters.
-        let index = self.index.get_or_init(|| {
-            let mut folded = String::with_capacity(self.text.len());
-            let mut source = Vec::with_capacity(self.text.len());
-            for (offset, ch) in self.text.char_indices() {
-                if ch.is_ascii() {
-                    folded.push(ch.to_ascii_lowercase());
-                    source.push(offset);
+        let index = (!query.options.match_case).then(|| {
+            self.index.get_or_init(|| {
+                let mut folded = String::with_capacity(self.text.len());
+                let mut source = Vec::with_capacity(self.text.len());
+                for (offset, ch) in self.text.char_indices() {
+                    if ch.is_ascii() {
+                        folded.push(ch.to_ascii_lowercase());
+                        source.push(offset);
+                        continue;
+                    }
+                    for lower in std::iter::once(ch).default_case_fold() {
+                        folded.push(lower);
+                        source.extend(std::iter::repeat_n(offset, lower.len_utf8()));
+                    }
+                }
+                SearchIndex { folded, source }
+            })
+        });
+        let boundaries = query.options.whole_word.then(|| {
+            self.word_boundaries
+                .get_or_init(|| WordBoundaries::new(&self.text))
+        });
+        let haystack = index.map_or(self.text.as_str(), |index| &index.folded);
+        let mut previous = None;
+        let mut base = 0;
+        let mut matches = haystack.match_indices(query.needle.as_str());
+        std::iter::from_fn(|| {
+            loop {
+                let (relative, matched) = matches.next()?;
+                let offset = base + relative;
+                let matched_end = offset + matched.len();
+                // A partial case-fold expansion is not an entire word (s != ß).
+                let partial_expansion = boundaries.is_some()
+                    && index.is_some_and(|index| {
+                        (offset > 0 && index.source[offset - 1] == index.source[offset])
+                            || (matched_end < index.source.len()
+                                && index.source[matched_end - 1] == index.source[matched_end])
+                    });
+                let (start, end) = if let Some(index) = index {
+                    let start = index.source[offset];
+                    let last = index.source[matched_end - 1];
+                    (
+                        start,
+                        last + self.text[last..].chars().next().unwrap().len_utf8(),
+                    )
+                } else {
+                    (offset, matched_end)
+                };
+                if partial_expansion
+                    || boundaries.is_some_and(|boundaries| {
+                        !boundaries.contains(start) || !boundaries.contains(end)
+                    })
+                {
+                    // A rejected candidate can overlap a later valid phrase. Only
+                    // restart in that case; ordinary matching keeps its searcher.
+                    base = offset + haystack[offset..].chars().next().unwrap().len_utf8();
+                    matches = haystack[base..].match_indices(query.needle.as_str());
                     continue;
                 }
-                for lower in std::iter::once(ch).default_case_fold() {
-                    folded.push(lower);
-                    source.extend(std::iter::repeat_n(offset, lower.len_utf8()));
-                }
-            }
-            SearchIndex { folded, source }
-        });
-        let needle = caseless::default_case_fold_str(query);
-        let mut previous = None;
-        index
-            .folded
-            .match_indices(&needle)
-            .filter_map(|(offset, matched)| {
-                let start = index.source[offset];
-                let last = index.source[offset + matched.len() - 1];
-                let end = last + self.text[last..].chars().next().unwrap().len_utf8();
                 if previous == Some((start, end)) {
-                    return None;
+                    continue;
                 }
                 previous = Some((start, end));
                 let rects = self.rects_for_range(start..end);
@@ -188,14 +265,15 @@ impl PageText {
                     .rev()
                     .collect();
                 let after: String = self.text[start..].chars().take(80).collect();
-                Some(SearchHit {
+                return Some(SearchHit {
                     page,
                     rects,
                     snippet: format!("{before}{after}").replace('\n', " "),
-                })
-            })
-            .take(1000)
-            .collect()
+                });
+            }
+        })
+        .take(1000)
+        .collect()
     }
 }
 
@@ -269,6 +347,148 @@ impl<'a> Device<'a> for TextDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn match_case_uses_original_unicode_and_does_not_build_a_folded_index() {
+        let page = PageText {
+            text: "Rust rust RUST Straße STRASSE Σ σ ς İ i\u{307}".into(),
+            ..Default::default()
+        };
+        let exact = |needle: &str| {
+            SearchQuery::new(
+                needle.into(),
+                SearchOptions {
+                    match_case: true,
+                    whole_word: false,
+                },
+            )
+        };
+        for needle in [
+            "Rust", "rust", "RUST", "Straße", "STRASSE", "Σ", "σ", "ς", "İ", "i\u{307}",
+        ] {
+            assert_eq!(page.search_with(2, &exact(needle)).len(), 1, "{needle}");
+        }
+        assert!(page.search_with(2, &exact("strasse")).is_empty());
+        assert!(page.index.get().is_none());
+        assert!(page.word_boundaries.get().is_none());
+        assert_eq!(page.search(2, "strasse").len(), 2);
+    }
+
+    #[test]
+    fn whole_words_follow_unicode_boundaries_and_keep_original_highlight_ranges() {
+        let value =
+            "rust rusting trust (RUST), rust-lang rust_lang don't don e\u{301} e Straße ß ﬃ 中文";
+        let page = PageText {
+            text: value.into(),
+            spans: value
+                .char_indices()
+                .map(|(start, ch)| TextSpan {
+                    range: start..start + ch.len_utf8(),
+                    rect: Rect::new(start as f64, 0.0, (start + ch.len_utf8()) as f64, 10.0),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let whole = |needle: &str| {
+            SearchQuery::new(
+                needle.into(),
+                SearchOptions {
+                    match_case: false,
+                    whole_word: true,
+                },
+            )
+        };
+        for (needle, count) in [
+            ("rust", 3),
+            ("rust-lang", 1),
+            ("rust_lang", 1),
+            ("don", 1),
+            ("don't", 1),
+            ("e", 1),
+            ("e\u{301}", 1),
+            ("strasse", 1),
+            ("ss", 1),
+            ("s", 0),
+            ("f", 0),
+            ("ffi", 1),
+            ("中文", 1),
+            ("中", 1),
+            ("rust rusting", 1),
+        ] {
+            assert_eq!(page.search_with(0, &whole(needle)).len(), count, "{needle}");
+        }
+        let start = value.find('ß').unwrap();
+        assert_eq!(
+            page.search_with(0, &whole("strasse"))[0].rects,
+            [Rect::new((start - 4) as f64, 0.0, (start + 3) as f64, 10.0)]
+        );
+        assert!(page.word_boundaries.get().unwrap().contains(value.len()));
+        let exact = SearchQuery::new(
+            "rust".into(),
+            SearchOptions {
+                match_case: true,
+                whole_word: true,
+            },
+        );
+        assert_eq!(page.search_with(0, &exact).len(), 2);
+    }
+
+    #[test]
+    fn prepared_query_reuses_unicode_folding_and_empty_search_stays_lazy() {
+        let query = SearchQuery::new("STRASSE".into(), SearchOptions::default());
+        assert_eq!(query.needle, "strasse");
+        for value in ["Straße", "STRASSE", "strasse"] {
+            let page = PageText {
+                text: value.into(),
+                ..Default::default()
+            };
+            assert_eq!(page.search_with(0, &query).len(), 1);
+        }
+        let page = PageText {
+            text: "text".into(),
+            ..Default::default()
+        };
+        let empty = SearchQuery::new(
+            " \n\t".into(),
+            SearchOptions {
+                match_case: false,
+                whole_word: true,
+            },
+        );
+        assert!(page.search_with(0, &empty).is_empty());
+        assert!(page.index.get().is_none() && page.word_boundaries.get().is_none());
+    }
+
+    #[test]
+    fn rejected_whole_word_candidate_does_not_skip_an_overlapping_valid_phrase() {
+        for match_case in [false, true] {
+            let page = PageText {
+                text: "ba a a".into(),
+                ..Default::default()
+            };
+            let query = SearchQuery::new(
+                "a a".into(),
+                SearchOptions {
+                    match_case,
+                    whole_word: true,
+                },
+            );
+            assert_eq!(page.search_with(0, &query).len(), 1);
+        }
+        // Accepting a phrase still consumes it, preserving non-overlapping results.
+        let page = PageText {
+            text: "a a a a".into(),
+            ..Default::default()
+        };
+        let query = SearchQuery::new(
+            "a a".into(),
+            SearchOptions {
+                match_case: false,
+                whole_word: true,
+            },
+        );
+        assert_eq!(page.search_with(0, &query).len(), 2);
+    }
 
     #[test]
     fn page_hit_ranges_preserve_global_selection_indices() {

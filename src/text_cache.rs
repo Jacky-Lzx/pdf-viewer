@@ -184,6 +184,30 @@ mod tests {
     }
 
     #[test]
+    fn whole_word_boundary_capacity_is_accounted_after_search() {
+        let text = page(&"a ".repeat(1000));
+        let query = crate::text::SearchQuery::new(
+            "a".into(),
+            crate::text::SearchOptions {
+                match_case: true,
+                whole_word: true,
+            },
+        );
+        let before = memory_bytes(&text);
+        let mut cache = TextCache {
+            budget: before,
+            ..Default::default()
+        };
+        assert!(cache.insert(0, Arc::clone(&text)));
+        assert_eq!(text.search_with(0, &query).len(), 1000);
+        assert!(memory_bytes(&text) > before);
+        cache.refresh(0);
+        assert!(cache.get(0).is_none());
+        assert_eq!(cache.bytes, 0);
+        assert_eq!(text.search_with(0, &query).len(), 1000);
+    }
+
+    #[test]
     fn selection_index_growth_is_accounted_and_held_text_survives_eviction() {
         let mut dense = PageText::default();
         dense.text = "a".repeat(1000);

@@ -1,6 +1,6 @@
 use crate::{
     document::{self, Bitmap, RenderKey},
-    text::{self, PageText, SearchHit},
+    text::{self, PageText, SearchHit, SearchOptions, SearchQuery},
 };
 use eframe::egui;
 use hayro::{RenderCache, hayro_interpret::InterpreterCache, hayro_syntax::Pdf};
@@ -71,7 +71,7 @@ struct OpenRequest {
 }
 struct SearchRequest {
     revision: u64,
-    query: String,
+    query: SearchQuery,
 }
 
 #[derive(Default)]
@@ -261,7 +261,8 @@ impl Worker {
     pub fn thumbnails(&self, keys: Vec<RenderKey>) {
         self.update(|pending| pending.replace_thumbnails(keys));
     }
-    pub fn search(&self, revision: u64, query: String) {
+    pub fn search(&self, revision: u64, query: String, options: SearchOptions) {
+        let query = SearchQuery::new(query, options);
         self.update(|pending| pending.search = Some(SearchRequest { revision, query }));
     }
     pub fn copy(&self, page: usize) {
@@ -311,7 +312,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     return;
                 }
                 if let Some(request) = pending.search.take() {
-                    search = if request.query.trim().is_empty() {
+                    search = if request.query.is_empty() {
                         None
                     } else {
                         Some((request, 0, 0))
@@ -444,7 +445,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         },
                     );
                 } else if let Some((request, next, hit_count)) = &mut search {
-                    let mut hits = text.search(page, &request.query);
+                    let mut hits = text.search_with(page, &request.query);
                     texts.refresh(page);
                     hits.truncate(10_000_usize.saturating_sub(*hit_count));
                     *hit_count += hits.len();
@@ -545,7 +546,7 @@ mod tests {
             pending.replace_renders(vec![render_key(0)]);
             pending.search = Some(SearchRequest {
                 revision: 1,
-                query: "Rust".into(),
+                query: SearchQuery::new("Rust".into(), SearchOptions::default()),
             });
         });
         assert!(matches!(
@@ -615,7 +616,7 @@ mod tests {
         let worker = Worker::new(egui::Context::default());
         worker.open(7, sample(), String::new());
         assert!(matches!(receive(&worker), Event::Opened { id: 7, .. }));
-        worker.search(12, "rust".into());
+        worker.search(12, "rust".into(), SearchOptions::default());
         worker.copy(0);
         worker.render(vec![RenderKey {
             page: 2,

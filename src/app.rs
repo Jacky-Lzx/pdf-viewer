@@ -1,3 +1,4 @@
+mod shortcuts;
 mod sidebar;
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
     render_plan::RenderView,
     selection::{SelectionUnit, TextSelection},
     state::{self, Library, ReadingMark, ReadingState},
-    text::SearchHit,
+    text::{SearchHit, SearchOptions},
     worker::{Event, Worker},
 };
 use eframe::egui::{self, Color32, Key, RichText, Vec2};
@@ -63,6 +64,7 @@ pub struct Folio {
     search_open: bool,
     search_focus: bool,
     query: String,
+    search_options: SearchOptions,
     search_due: Option<Instant>,
     revision: u64,
     hits: Vec<SearchHit>,
@@ -125,6 +127,7 @@ impl Folio {
             search_open: false,
             search_focus: false,
             query: String::new(),
+            search_options: SearchOptions::default(),
             search_due: None,
             revision: 0,
             hits: Vec::new(),
@@ -242,6 +245,15 @@ impl Folio {
         self.search_complete = self.query.trim().is_empty();
         self.search_limited = false;
         self.search_due = (!self.search_complete).then_some(Instant::now());
+    }
+
+    fn change_search(&mut self) {
+        self.pending_search_jump = None;
+        self.restart_search();
+        self.worker
+            .search(self.revision, String::new(), self.search_options);
+        self.search_due =
+            (!self.search_complete).then_some(Instant::now() + Duration::from_millis(180));
     }
 
     fn page_name(&self, page: usize) -> String {
@@ -702,6 +714,25 @@ impl Folio {
             else {
                 continue;
             };
+            if self.search_open
+                && !self.help
+                && !self.password_open
+                && !self.goto_open
+                && modifiers.alt
+                && !modifiers.command
+                && !modifiers.shift
+                && matches!(key, Key::C | Key::W)
+            {
+                if key == Key::C {
+                    self.search_options.match_case = !self.search_options.match_case;
+                } else {
+                    self.search_options.whole_word = !self.search_options.whole_word;
+                }
+                context
+                    .input_mut(|input| shortcuts::consume_search_shortcut(input, key, modifiers));
+                self.change_search();
+                continue;
+            }
             if key == Key::Escape {
                 self.hints.cancel();
                 self.selection.cancel();
@@ -1131,25 +1162,32 @@ impl Folio {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(egui::Id::new("folio-search-input"))
-                            .desired_width(280.0)
+                            .desired_width((ui.available_width() - 600.0).clamp(100.0, 280.0))
                             .hint_text("Search this document…"),
                     );
                     if self.search_focus {
                         response.request_focus();
                         self.search_focus = false;
                     }
-                    if response.changed() {
-                        self.revision += 1;
-                        self.hits.clear();
-                        self.hit_index = None;
-                        self.reveal_hit = None;
-                        self.pending_search_jump = None;
-                        self.scanned = 0;
-                        self.scan_total = self.nav.count;
-                        self.search_complete = self.query.trim().is_empty();
-                        self.search_limited = false;
-                        self.worker.search(self.revision, String::new());
-                        self.search_due = Some(Instant::now() + Duration::from_millis(180));
+                    let case_changed = ui
+                        .selectable_label(self.search_options.match_case, "Aa")
+                        .on_hover_text("Match case · Alt+C")
+                        .clicked();
+                    let word_changed = ui
+                        .selectable_label(self.search_options.whole_word, "Word")
+                        .on_hover_text("Whole words · Alt+W")
+                        .clicked();
+                    if case_changed {
+                        self.search_options.match_case = !self.search_options.match_case;
+                    }
+                    if word_changed {
+                        self.search_options.whole_word = !self.search_options.whole_word;
+                    }
+                    if case_changed || word_changed {
+                        response.request_focus();
+                    }
+                    if response.changed() || case_changed || word_changed {
+                        self.change_search();
                     }
                     if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                         self.next_hit(ui.input(|input| input.modifiers.shift));
@@ -1168,7 +1206,9 @@ impl Folio {
                     ));
                     if !self.search_complete && !self.query.trim().is_empty() {
                         ui.spinner();
-                        ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
+                        if ui.available_width() > 180.0 {
+                            ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
+                        }
                     }
                     if ui.button("Results").clicked() {
                         self.library.sidebar = true;
@@ -1731,7 +1771,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
-                        ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
+                        ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
@@ -1786,7 +1826,8 @@ impl eframe::App for Folio {
         self.canvas(context);
         if let Some(due) = self.search_due {
             if Instant::now() >= due {
-                self.worker.search(self.revision, self.query.clone());
+                self.worker
+                    .search(self.revision, self.query.clone(), self.search_options);
                 self.search_due = None;
             } else {
                 context.request_repaint_after(due.saturating_duration_since(Instant::now()));
