@@ -462,6 +462,12 @@ impl Folio {
     }
 
     fn find(&mut self) {
+        let selected = self
+            .selection
+            .selected_text()
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && !text.contains(['\n', '\r']))
+            .map(str::to_owned);
         self.recent_picker = None;
         self.nav.clear_prefix();
         self.hints.cancel();
@@ -469,6 +475,10 @@ impl Folio {
         self.mark_action = None;
         self.search_open = true;
         self.search_focus = true;
+        if let Some(query) = selected {
+            self.query = query;
+            self.change_search();
+        }
     }
 
     fn next_hit(&mut self, reverse: bool) {
