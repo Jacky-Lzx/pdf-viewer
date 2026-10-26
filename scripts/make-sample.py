@@ -63,7 +63,10 @@ PAGES = [
 ]
 
 
-def make_pdf(nested_outline=False):
+def make_pdf(nested_outline=False, destination_views=None):
+    def destination(index):
+        view = (destination_views or {}).get(index, "/Fit")
+        return f"[{5 + index * 2} 0 R {view}]"
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
     kids = []
     for index, (title, eyebrow, lines) in enumerate(PAGES):
@@ -78,7 +81,7 @@ def make_pdf(nested_outline=False):
             text(48, 160, 12, "Read the navigation guide", color="0.16 0.45 0.36")
             text(330, 160, 12, "Language website", color="0.16 0.45 0.36")
             page = objects[page_id - 1].decode()
-            links = "/Annots [<< /Type /Annot /Subtype /Link /Rect [48 150 275 178] /Border [0 0 0] /Dest [7 0 R /Fit] >> << /Type /Annot /Subtype /Link /Rect [330 150 505 178] /Border [0 0 0] /A << /S /URI /URI (https://www.rust-lang.org/) >> >>]"
+            links = f"/Annots [<< /Type /Annot /Subtype /Link /Rect [48 150 275 178] /Border [0 0 0] /Dest {destination(1)} >> << /Type /Annot /Subtype /Link /Rect [330 150 505 178] /Border [0 0 0] /A << /S /URI /URI (https://www.rust-lang.org/) >> >>]"
             objects[page_id - 1] = (page[:-2] + links + " >>").encode()
         text(48, 620, 29, title, True)
         for row, line in enumerate(lines):
@@ -92,7 +95,7 @@ def make_pdf(nested_outline=False):
     objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode()
     outline_id = len(objects) + 1
     first_id = outline_id + 1
-    objects[0] = f"<< /Type /Catalog /Pages 2 0 R /Outlines {outline_id} 0 R /Dests << /reading [9 0 R /Fit] >> /Names << /Dests << /Names [(search) [11 0 R /Fit]] >> >> >>".encode()
+    objects[0] = f"<< /Type /Catalog /Pages 2 0 R /Outlines {outline_id} 0 R /Dests << /reading {destination(2)} >> /Names << /Dests << /Names [(search) {destination(3)}] >> >> >>".encode()
     parents = [None, 0, 1, 0, None, 4] if nested_outline else [None] * len(PAGES)
     def count_descendants(parent):
         return sum(1 + count_descendants(child) for child in range(len(PAGES)) if parents[child] == parent)
@@ -106,9 +109,9 @@ def make_pdf(nested_outline=False):
         children = [child for child, parent in enumerate(parents) if parent == index]
         descendants = f" /First {first_id + children[0]} 0 R /Last {first_id + children[-1]} 0 R /Count {count_descendants(index)}" if children else ""
         parent_id = outline_id if parents[index] is None else first_id + parents[index]
-        dest = f"/Dest [{5 + index * 2} 0 R /Fit]"
+        dest = f"/Dest {destination(index)}"
         if index == 1:
-            dest = "/A << /S /GoTo /D [7 0 R /Fit] >>"
+            dest = f"/A << /S /GoTo /D {destination(1)} >>"
         if index == 2:
             dest = "/Dest /reading"
         if index == 3:

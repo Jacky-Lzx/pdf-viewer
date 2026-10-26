@@ -130,7 +130,7 @@ mod tests {
             .enumerate()
             .map(|(page, (depth, title))| OutlineEntry {
                 title: title.into(),
-                page: Some(page),
+                destination: Some(crate::destination::Destination::page(page)),
                 depth,
             })
             .collect(),
@@ -186,7 +186,7 @@ mod tests {
             (0..10_000)
                 .map(|index| OutlineEntry {
                     title: format!("Node {index}"),
-                    page: None,
+                    destination: None,
                     depth: if index == 0 { 0 } else { 20 },
                 })
                 .collect(),

@@ -1,6 +1,7 @@
 mod app;
 mod bitmap;
 mod cache;
+mod destination;
 mod document;
 mod fonts;
 mod geometry;

@@ -30,6 +30,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
           xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
           xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
       - name: Exercise renderer and text extraction
         shell: bash
         run: |

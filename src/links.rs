@@ -10,7 +10,7 @@ use hayro::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LinkTarget {
-    Page(usize),
+    Destination(crate::destination::Destination),
     Url(String),
 }
 
@@ -44,13 +44,13 @@ pub fn read<'a>(page: &Page<'a>, destinations: &DestinationIndex<'a>) -> Vec<Pag
                 return None;
             }
             let target = if let Some(dest) = annotation.get::<Object<'_>>(b"Dest") {
-                LinkTarget::Page(destinations.resolve(dest)?)
+                LinkTarget::Destination(destinations.resolve(dest)?)
             } else {
                 let action = annotation.get::<Dict<'_>>(b"A")?;
                 match action.get::<Name<'_>>(b"S")?.as_ref() {
-                    b"GoTo" => {
-                        LinkTarget::Page(destinations.resolve(action.get::<Object<'_>>(b"D")?)?)
-                    }
+                    b"GoTo" => LinkTarget::Destination(
+                        destinations.resolve(action.get::<Object<'_>>(b"D")?)?,
+                    ),
                     b"URI" => {
                         let uri = action.get::<PdfString<'_>>(b"URI")?;
                         let url = String::from_utf8_lossy(uri.as_bytes()).into_owned();
@@ -157,7 +157,14 @@ mod tests {
         let index = DestinationIndex::new(&pdf);
         let links = read(&pdf.pages()[0], &index);
         assert_eq!(links.len(), 2);
-        assert_eq!(links[0].target, LinkTarget::Page(1));
+        assert!(matches!(
+            links[0].target,
+            LinkTarget::Destination(crate::destination::Destination {
+                page: 1,
+                fit: Some(crate::destination::DestinationFit::Page),
+                ..
+            })
+        ));
         assert_eq!(
             links[1].target,
             LinkTarget::Url("https://www.rust-lang.org/".into())
@@ -176,6 +183,13 @@ mod tests {
         let pdf = Pdf::new(bytes).unwrap();
         let links = read(&pdf.pages()[0], &DestinationIndex::new(&pdf));
         assert_eq!(links.len(), 1);
-        assert_eq!(links[0].target, LinkTarget::Page(1));
+        assert!(matches!(
+            links[0].target,
+            LinkTarget::Destination(crate::destination::Destination {
+                page: 1,
+                fit: Some(crate::destination::DestinationFit::Page),
+                ..
+            })
+        ));
     }
 }

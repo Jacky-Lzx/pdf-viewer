@@ -40,6 +40,7 @@ pub struct Folio {
     mark_action: Option<MarkAction>,
     pending_offset: Option<[f32; 2]>,
     pending_focus: Option<hayro::kurbo::Rect>,
+    pending_destination: Option<(crate::destination::Destination, [f64; 2])>,
     selection: TextSelection,
     cache: TextureCache,
     id: u64,
@@ -98,6 +99,7 @@ impl Folio {
             mark_action: None,
             pending_offset: None,
             pending_focus: None,
+            pending_destination: None,
             selection: TextSelection::default(),
             cache: TextureCache::default(),
             id: 0,
@@ -169,6 +171,7 @@ impl Folio {
         self.pan = Vec2::ZERO;
         self.pending_offset = Some(self.reading.offset);
         self.pending_focus = None;
+        self.pending_destination = None;
         self.hits.clear();
         self.hit_index = None;
         self.reveal_hit = None;
@@ -320,16 +323,19 @@ impl Folio {
     }
 
     fn jump(&mut self, page: usize) {
+        self.pending_destination = None;
         if self.nav.jump(page) {
             self.page_changed();
         }
     }
     fn step(&mut self, delta: isize) {
+        self.pending_destination = None;
         if self.nav.step(delta) {
             self.page_changed();
         }
     }
     fn page_changed(&mut self) {
+        self.pending_destination = None;
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
@@ -1199,7 +1205,8 @@ impl Folio {
                             } else {
                                 ui.allocate_space(Vec2::splat(20.0));
                             }
-                            if let Some(page) = entry.page {
+                            if let Some(destination) = entry.destination {
+                                let page = destination.page;
                                 if ui
                                     .add(
                                         egui::Button::selectable(
@@ -1215,7 +1222,7 @@ impl Folio {
                                     ))
                                     .clicked()
                                 {
-                                    target = Some(page);
+                                    target = Some(destination);
                                 }
                             } else {
                                 ui.add(
@@ -1229,8 +1236,8 @@ impl Folio {
         if let Some(index) = toggle {
             self.outline.toggle(index);
         }
-        if let Some(page) = target {
-            self.jump(page);
+        if let Some(destination) = target {
+            self.follow_destination(destination);
         }
         ui.add_space(20.0);
     }
@@ -1408,6 +1415,17 @@ impl Folio {
                     );
                     self.pan = Vec2::new(offset[0], offset[1]);
                 }
+                if let Some((destination, origin)) = self.pending_destination.take() {
+                    let offset = destination.pan(
+                        dimensions,
+                        self.reading.rotation,
+                        self.scale,
+                        [self.viewport.x, self.viewport.y],
+                        origin,
+                        [self.overflow.x, self.overflow.y],
+                    );
+                    self.pan = Vec2::new(offset[0], offset[1]);
+                }
                 self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 let response = ui.interact(
                     ui.max_rect(),
@@ -1567,10 +1585,35 @@ impl Folio {
         }
     }
 
+    fn follow_destination(&mut self, destination: crate::destination::Destination) {
+        let Some(&dimensions) = self.dimensions.get(destination.page) else {
+            return;
+        };
+        let origin = [
+            f64::from(self.pan.x) / f64::from(self.scale),
+            f64::from(self.pan.y) / f64::from(self.scale),
+        ];
+        self.jump(destination.page);
+        self.nav.clear_prefix();
+        self.hints.cancel();
+        self.selection.cancel();
+        self.pending_search_jump = None;
+        self.pending_focus = None;
+        self.pending_offset = None;
+        self.reading.fit = destination.fit(
+            Fit::Custom(self.scale),
+            dimensions,
+            self.reading.rotation,
+            [self.viewport.x, self.viewport.y],
+        );
+        self.pending_destination = Some((destination, origin));
+        self.dirty = true;
+    }
+
     fn follow_link(&mut self, target: LinkTarget, context: &egui::Context) {
         self.hints.cancel();
         match target {
-            LinkTarget::Page(page) => self.jump(page),
+            LinkTarget::Destination(destination) => self.follow_destination(destination),
             LinkTarget::Url(url) => context.open_url(egui::OpenUrl::new_tab(url)),
         }
         context.request_repaint();
@@ -1626,7 +1669,9 @@ impl Folio {
                 .intersect(page_rect)
                 .intersect(ui.clip_rect());
             let description = match &link.target {
-                LinkTarget::Page(page) => format!("Go to page {}", page + 1),
+                LinkTarget::Destination(destination) => {
+                    format!("Go to page {}", self.page_name(destination.page))
+                }
                 LinkTarget::Url(url) => url.clone(),
             };
             let response = ui

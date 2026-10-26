@@ -1,19 +1,23 @@
+use crate::destination::{Destination, DestinationFit};
+use hayro::hayro_interpret::util::TransformExt;
 use hayro::hayro_syntax::{
     Pdf,
-    object::{Array, Dict, MaybeRef, Object, ObjectIdentifier, String as PdfString},
+    object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier, String as PdfString},
+    page::Page,
 };
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
 pub struct OutlineEntry {
     pub title: String,
-    pub page: Option<usize>,
+    pub destination: Option<Destination>,
     pub depth: usize,
 }
 
 pub struct DestinationIndex<'a> {
     pages: HashMap<ObjectIdentifier, usize>,
     named: HashMap<Vec<u8>, Object<'a>>,
+    page_data: &'a [Page<'a>],
 }
 
 impl<'a> DestinationIndex<'a> {
@@ -29,11 +33,100 @@ impl<'a> DestinationIndex<'a> {
             .get::<Dict<'a>>(pdf.xref().root_id())
             .map(|catalog| named_destinations(&catalog))
             .unwrap_or_default();
-        Self { pages, named }
+        Self {
+            pages,
+            named,
+            page_data: pdf.pages(),
+        }
     }
 
-    pub fn resolve(&self, object: Object<'a>) -> Option<usize> {
-        destination(object, &self.pages, &self.named, 0)
+    pub fn resolve(&self, object: Object<'a>) -> Option<Destination> {
+        self.destination(object, 0)
+    }
+
+    fn destination(&self, object: Object<'a>, depth: usize) -> Option<Destination> {
+        if depth > 8 {
+            return None;
+        }
+        match object {
+            Object::Array(array) => {
+                let page = match array.raw_iter().next()? {
+                    MaybeRef::Ref(reference) => self.pages.get(&reference.into()).copied()?,
+                    MaybeRef::NotRef(Object::Number(number)) => {
+                        usize::try_from(Object::Number(number).into_i32()?).ok()?
+                    }
+                    _ => return None,
+                };
+                let data = self.page_data.get(page)?;
+                let mut destination = Destination::page(page);
+                let mut values = array.iter::<Object<'_>>();
+                values.next();
+                let kind = values.next().and_then(Object::into_name);
+                let number = |value: Option<Object<'a>>| {
+                    value
+                        .and_then(Object::into_f32)
+                        .filter(|value| value.is_finite())
+                };
+                let mut position = [None; 2];
+                match kind.as_deref() {
+                    Some(b"XYZ") => {
+                        position = [number(values.next()), number(values.next())];
+                        destination.zoom = number(values.next()).filter(|&zoom| zoom > 0.0);
+                    }
+                    Some(b"Fit" | b"FitB") => destination.fit = Some(DestinationFit::Page),
+                    Some(b"FitH" | b"FitBH") => {
+                        destination.fit = Some(DestinationFit::Width);
+                        position[1] = number(values.next());
+                    }
+                    Some(b"FitV" | b"FitBV") => {
+                        destination.fit = Some(DestinationFit::Height);
+                        position[0] = number(values.next());
+                    }
+                    Some(b"FitR") => {
+                        if let [Some(left), Some(bottom), Some(right), Some(top)] =
+                            std::array::from_fn::<_, 4, _>(|_| number(values.next()))
+                        {
+                            let rect = data.initial_transform(true).to_kurbo().transform_rect_bbox(
+                                hayro::kurbo::Rect::new(
+                                    f64::from(left),
+                                    f64::from(bottom),
+                                    f64::from(right),
+                                    f64::from(top),
+                                ),
+                            );
+                            if rect.width() > 0.0 && rect.height() > 0.0 {
+                                destination.fit = Some(DestinationFit::Rectangle(rect));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                let [a, b, c, d, e, f] = data.initial_transform(true).to_kurbo().as_coeffs();
+                let transformed = |a: f64, b: f64, offset: f64| {
+                    let first = if a == 0.0 {
+                        0.0
+                    } else {
+                        a * f64::from(position[0]?)
+                    };
+                    let second = if b == 0.0 {
+                        0.0
+                    } else {
+                        b * f64::from(position[1]?)
+                    };
+                    Some(first + second + offset)
+                };
+                destination.position = [transformed(a, c, e), transformed(b, d, f)];
+                Some(destination)
+            }
+            Object::Dict(dict) => self.destination(dict.get::<Object<'_>>(b"D")?, depth + 1),
+            Object::Name(name) => {
+                self.destination(self.named.get(name.as_ref())?.clone(), depth + 1)
+            }
+            Object::String(name) => {
+                self.destination(self.named.get(name.as_bytes())?.clone(), depth + 1)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -61,13 +154,17 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
             .unwrap_or_default();
         let dest = item.get::<Object<'_>>(b"Dest").or_else(|| {
             let action = item.get::<Dict<'_>>(b"A")?;
-            let kind = action.get::<hayro::hayro_syntax::object::Name<'_>>(b"S")?;
+            let kind = action.get::<Name<'_>>(b"S")?;
             (kind.as_ref() == b"GoTo")
                 .then(|| action.get::<Object<'_>>(b"D"))
                 .flatten()
         });
-        let page = dest.and_then(|dest| destinations.resolve(dest));
-        entries.push(OutlineEntry { title, page, depth });
+        let destination = dest.and_then(|dest| destinations.resolve(dest));
+        entries.push(OutlineEntry {
+            title,
+            destination,
+            depth,
+        });
         if let Some(next) = item.get::<Dict<'_>>(b"Next") {
             stack.push((next, depth));
         }
@@ -78,35 +175,6 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
         }
     }
     entries
-}
-
-fn destination<'a>(
-    object: Object<'a>,
-    pages: &HashMap<ObjectIdentifier, usize>,
-    named: &HashMap<Vec<u8>, Object<'a>>,
-    depth: usize,
-) -> Option<usize> {
-    if depth > 8 {
-        return None;
-    }
-    match object {
-        Object::Array(array) => match array.raw_iter().next()? {
-            MaybeRef::Ref(reference) => pages.get(&reference.into()).copied(),
-            MaybeRef::NotRef(Object::Number(number)) => {
-                let page = Object::Number(number).into_i32()?;
-                (page >= 0 && (page as usize) < pages.len()).then_some(page as usize)
-            }
-            _ => None,
-        },
-        Object::Dict(dict) => destination(dict.get::<Object<'_>>(b"D")?, pages, named, depth + 1),
-        Object::Name(name) => {
-            destination(named.get(name.as_ref())?.clone(), pages, named, depth + 1)
-        }
-        Object::String(name) => {
-            destination(named.get(name.as_bytes())?.clone(), pages, named, depth + 1)
-        }
-        _ => None,
-    }
 }
 
 fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
@@ -185,6 +253,96 @@ pub fn decode_string(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn destination_pdf(view: &str, page_settings: &str) -> Pdf {
+        let objects = [
+            format!(
+                "<< /Type /Catalog /Pages 2 0 R /Dests << /test {view} /alias /test /loop /loop >> /Target /alias >>"
+            ),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] {page_settings} >>"),
+        ];
+        let mut bytes = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0];
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes(),
+        );
+        for offset in &offsets[1..] {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                offsets.len()
+            )
+            .as_bytes(),
+        );
+        Pdf::new(bytes).unwrap()
+    }
+
+    fn resolve_test(pdf: &Pdf) -> Destination {
+        let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        DestinationIndex::new(pdf)
+            .resolve(catalog.get::<Object<'_>>(b"Target").unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn named_destinations_preserve_xyz_zoom_nulls_crop_and_intrinsic_rotation() {
+        let plain = destination_pdf("[3 0 R /XYZ 48 500 2]", "");
+        let target = resolve_test(&plain);
+        assert_eq!(target.page, 0);
+        assert_eq!(target.position, [Some(48.0), Some(300.0)]);
+        assert_eq!(target.zoom, Some(2.0));
+        let cropped = destination_pdf(
+            "[3 0 R /XYZ 48 500 2]",
+            "/CropBox [10 20 590 780] /Rotate 90",
+        );
+        assert_eq!(resolve_test(&cropped).position, [Some(480.0), Some(38.0)]);
+        let nullable = destination_pdf(
+            "[3 0 R /XYZ 48 null 0]",
+            "/CropBox [10 20 590 780] /Rotate 90",
+        );
+        assert_eq!(resolve_test(&nullable).position, [None, Some(38.0)]);
+        assert_eq!(resolve_test(&nullable).zoom, None);
+        let catalog = plain
+            .xref()
+            .get::<Dict<'_>>(plain.xref().root_id())
+            .unwrap();
+        let named = catalog.get::<Dict<'_>>(b"Dests").unwrap();
+        assert!(
+            DestinationIndex::new(&plain)
+                .resolve(named.get::<Object<'_>>(b"loop").unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fit_destinations_retain_axes_and_transform_bounded_rectangles() {
+        for (view, position, fit) in [
+            ("/FitH 600", [None, Some(200.0)], DestinationFit::Width),
+            ("/FitBH 600", [None, Some(200.0)], DestinationFit::Width),
+            ("/FitV 250", [Some(250.0), None], DestinationFit::Height),
+            ("/FitBV 250", [Some(250.0), None], DestinationFit::Height),
+            ("/Fit", [None; 2], DestinationFit::Page),
+            ("/FitB", [None; 2], DestinationFit::Page),
+            (
+                "/FitR 100 100 300 300",
+                [None; 2],
+                DestinationFit::Rectangle(hayro::kurbo::Rect::new(100.0, 500.0, 300.0, 700.0)),
+            ),
+        ] {
+            let pdf = destination_pdf(&format!("[3 0 R {view}]"), "");
+            let destination = resolve_test(&pdf);
+            assert_eq!(destination.position, position);
+            assert_eq!(destination.fit, Some(fit));
+        }
+    }
     #[test]
     fn outline_resolves_direct_action_and_named_destinations() {
         let pdf = Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap();
@@ -193,7 +351,7 @@ mod tests {
         assert_eq!(
             outline
                 .iter()
-                .map(|entry| entry.page.unwrap())
+                .map(|entry| entry.destination.unwrap().page)
                 .collect::<Vec<_>>(),
             vec![0, 1, 2, 3, 4, 5]
         );
