@@ -4,7 +4,7 @@
 
 用 Rust 编写的原生 PDF 阅读器，支持 Linux（Wayland / X11）和 macOS。使用 eframe / egui 构建界面，hayro 在后台进行纯 Rust PDF 渲染，无需安装 PDFium 或 Poppler。
 
-<img src="assets/screenshot.png" width="1000" alt="Folio：文档目录、中文文件名和键盘链接提示">
+<img src="assets/screenshot.png" width="1000" alt="Folio：目录筛选、缩略图、中文文件名和 Vim 链接提示">
 
 ## 运行
 

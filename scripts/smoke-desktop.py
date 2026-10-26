@@ -42,7 +42,7 @@ class Keyboard:
         self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         self.xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
 
-    def focus(self):
+    def focus(self, title="folio-smoke.pdf"):
         root, parent = ctypes.c_ulong(), ctypes.c_ulong()
         children, count = ctypes.POINTER(ctypes.c_ulong)(), ctypes.c_uint()
         self.x11.XQueryTree(self.display, self.x11.XDefaultRootWindow(self.display), ctypes.byref(root), ctypes.byref(parent), ctypes.byref(children), ctypes.byref(count))
@@ -51,7 +51,7 @@ class Keyboard:
             for i in range(count.value):
                 name = ctypes.c_char_p()
                 if self.x11.XFetchName(self.display, children[i], ctypes.byref(name)) and name.value:
-                    if b"folio-smoke.pdf" in name.value:
+                    if title.encode("utf-8") in name.value:
                         found = children[i]
                     self.x11.XFree(name)
         finally:
