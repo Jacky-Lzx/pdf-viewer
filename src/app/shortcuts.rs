@@ -1,5 +1,52 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
+pub(super) struct SideButtonFocusGuard {
+    context: eframe::egui::Context,
+    previous: eframe::egui::SurrenderFocusOn,
+}
+
+impl Drop for SideButtonFocusGuard {
+    fn drop(&mut self) {
+        self.context
+            .options_mut(|options| options.input_options.surrender_focus_on = self.previous);
+    }
+}
+
+pub(super) fn preserve_side_button_focus(
+    context: &eframe::egui::Context,
+) -> Option<SideButtonFocusGuard> {
+    let side_buttons_only = context.input(|input| {
+        let mut found = false;
+        for event in &input.events {
+            if let Event::PointerButton { button, .. } = event {
+                if !matches!(
+                    button,
+                    eframe::egui::PointerButton::Extra1 | eframe::egui::PointerButton::Extra2
+                ) {
+                    return false;
+                }
+                found = true;
+            }
+        }
+        found
+    });
+    if !side_buttons_only {
+        return None;
+    }
+    // egui treats every mouse button as a click outside a focused input.
+    // Side buttons belong to history, so preserve focus for this draw only.
+    let previous = context.options_mut(|options| {
+        std::mem::replace(
+            &mut options.input_options.surrender_focus_on,
+            eframe::egui::SurrenderFocusOn::Never,
+        )
+    });
+    Some(SideButtonFocusGuard {
+        context: context.clone(),
+        previous,
+    })
+}
+
 pub(super) fn focus_text_input(
     ui: &Ui,
     id: Id,
@@ -89,6 +136,62 @@ mod tests {
             modifiers,
             pressed,
             repeat: false,
+        }
+    }
+
+    #[test]
+    fn side_button_clicks_preserve_text_focus_but_primary_and_mixed_clicks_release_it() {
+        use eframe::egui::{
+            CentralPanel, Context, PointerButton, Pos2, RawInput, SurrenderFocusOn, TextEdit,
+        };
+
+        for (buttons, keep_focus) in [
+            (vec![PointerButton::Extra1], true),
+            (vec![PointerButton::Extra2], true),
+            (vec![PointerButton::Primary], false),
+            (vec![PointerButton::Extra1, PointerButton::Primary], false),
+        ] {
+            let context = Context::default();
+            let id = Id::new("side-button-input");
+            let mut text = String::new();
+            let _ = context.run(RawInput::default(), |context| {
+                CentralPanel::default().show(context, |ui| {
+                    ui.add(TextEdit::singleline(&mut text).id(id))
+                        .request_focus();
+                });
+            });
+            let pos = Pos2::new(400.0, 400.0);
+            let mut events = vec![Event::PointerMoved(pos)];
+            for button in buttons {
+                for pressed in [true, false] {
+                    events.push(Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+            }
+            events.extend([key(Key::J, Modifiers::NONE, true), Event::Text("j".into())]);
+            let _ = context.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    let guard = preserve_side_button_focus(context);
+                    CentralPanel::default().show(context, |ui| {
+                        ui.add(TextEdit::singleline(&mut text).id(id));
+                    });
+                    drop(guard);
+                    assert_eq!(
+                        context.options(|options| options.input_options.surrender_focus_on),
+                        SurrenderFocusOn::Clicks
+                    );
+                },
+            );
+            assert_eq!(context.memory(|memory| memory.has_focus(id)), keep_focus);
+            assert_eq!(text, if keep_focus { "j" } else { "" });
         }
     }
 

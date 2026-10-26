@@ -899,8 +899,8 @@ impl Folio {
                 }
             }
         }
-        // Snapshot only reader actions. Text, paste, IME and pointer payloads
-        // stay in egui; pointer presses use the hit-tested responses above.
+        // Preserve action order, including side-button history mixed with keys.
+        // Text, paste, IME and primary pointer events stay in egui.
         for event in context.input(|input| {
             input
                 .events
@@ -908,7 +908,13 @@ impl Folio {
                 .filter(|event| {
                     matches!(
                         event,
-                        egui::Event::Copy | egui::Event::Key { pressed: true, .. }
+                        egui::Event::Copy
+                            | egui::Event::Key { pressed: true, .. }
+                            | egui::Event::PointerButton {
+                                button: egui::PointerButton::Extra1 | egui::PointerButton::Extra2,
+                                pressed: true,
+                                ..
+                            }
                     )
                 })
                 .cloned()
@@ -932,6 +938,14 @@ impl Folio {
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
                 });
+            if let egui::Event::PointerButton { button, .. } = event {
+                if !typing && !self.help && !self.properties_open {
+                    self.nav.clear_prefix();
+                    self.mark_action = None;
+                    self.history(button == egui::PointerButton::Extra2);
+                }
+                continue;
+            }
             if matches!(event, egui::Event::Copy) && !typing && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
@@ -2161,6 +2175,7 @@ impl Folio {
                         ("zH / zL", "Scroll left / right half a screen; counts supported"),
                         ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
+                        ("Mouse back / forward", "Restore the previous / next reading view"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
                         ("a", "100% zoom, keeping the viewport center"),
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
@@ -2218,6 +2233,7 @@ impl eframe::App for Folio {
                 input.events = events;
             });
         }
+        let _side_button_focus = shortcuts::preserve_side_button_focus(context);
         self.events(context);
         self.keys(context);
         self.toolbar(context);

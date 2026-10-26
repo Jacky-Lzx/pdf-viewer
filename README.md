@@ -50,6 +50,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `Space` / `Shift+Space` | 下移 / 上移一屏 |
 | `zH` / `zL`，`2zL` | 向左 / 右滚动半屏，支持数字前缀；保留纵向位置，到边缘停住 |
 | `zt` / `zz` / `zb` | 当前页顶部 / 垂直中点 / 底部，保留缩放与横向位置 |
+| 鼠标后退 / 前进侧键 | 恢复上一个 / 下一个阅读位置；文本输入和弹窗内不触发 |
 | `Alt+Left` / `Alt+Right` | 历史返回 / 前进，恢复页码、缩放、旋转和滚动；支持数字前缀 |
 | `+` / `-` | 放大 / 缩小 |
 | `a` | 恢复 100% 缩放并保持视口中心；超大页面仍受尺寸上限约束 |
@@ -175,6 +176,7 @@ xvfb-run -a python3 scripts/smoke-close.py target/release/folio
 xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
+xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
 xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
 ```
