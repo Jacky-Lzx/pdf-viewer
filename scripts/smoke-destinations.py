@@ -117,7 +117,26 @@ def run(binary):
                 expect(lambda book: book["page"] == 0, "reload retains valid previous views")
                 keyboard.key(0xFF53, alt=True)
                 expect(lambda book: book["page"] == 2, "reload prunes missing pages from forward view history")
-                print("PASS: PDF destinations, same-frame link/mark/history snapshots, same/cross-page view history, zoom/rotation/scroll restoration, counts and reload pruning")
+                keyboard.key(0xFF09)
+                burst("ggp")
+                expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "prepare same-frame destination alignment")
+                time.sleep(0.2)
+                burst("fazt")
+                expect(lambda book: book["page"] == 1 and custom(book) == 2
+                       and book["offset"][0] > 0.99 and book["offset"][1] == 0,
+                       "same-frame PDF target and zt retain the target horizontal position")
+                burst("ggp")
+                expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "prepare same-frame destination bottom alignment")
+                time.sleep(0.2)
+                burst("fazb")
+                expect(lambda book: book["page"] == 1 and custom(book) == 2
+                       and book["offset"][0] > 0.99 and book["offset"][1] == 1,
+                       "same-frame PDF target and zb retain the target horizontal position")
+                keyboard.key(0xFF51, alt=True)
+                expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "alignment preserves the existing history entry")
+                keyboard.key(0xFF53, alt=True)
+                expect(lambda book: book["page"] == 1 and book["offset"] == [1, 1], "history restores the aligned PDF target")
+                print("PASS: PDF destinations, same-frame link/mark/history and vertical alignment, same/cross-page view history, zoom/rotation/scroll restoration, counts and reload pruning")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

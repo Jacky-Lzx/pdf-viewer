@@ -472,26 +472,13 @@ impl Folio {
     }
 
     fn align_page(&mut self, vertical: f32) {
-        let Some(&dimensions) = self.dimensions.get(self.nav.page) else {
+        // Apply any saved/search/PDF position before changing only one axis.
+        if self.resolve_view().is_none() {
             return;
-        };
+        }
         self.hints.cancel();
-        self.pending_focus = None;
-        self.pending_destination = None;
         self.pending_search_jump = None;
-        let dimensions = if self.reading.rotation % 2 == 1 {
-            [dimensions[1], dimensions[0]]
-        } else {
-            dimensions
-        };
-        let scale = self
-            .reading
-            .fit
-            .scale(dimensions, [self.viewport.x, self.viewport.y]);
-        let overflow = (Vec2::from(dimensions) * scale - self.viewport).max(Vec2::ZERO);
-        let mut offset = self.pending_offset.unwrap_or_else(|| {
-            state::normalized_offset([self.pan.x, self.pan.y], [overflow.x, overflow.y])
-        });
+        let mut offset = self.current_offset();
         offset[1] = vertical;
         // Apply after this frame's zoom/rotation has established its overflow.
         self.pending_offset = Some(offset);
