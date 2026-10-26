@@ -32,7 +32,7 @@ pub struct Folio {
     reading: ReadingState,
     nav: Navigation,
     dimensions: Vec<[f32; 2]>,
-    outline: Vec<crate::outline::OutlineEntry>,
+    outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: HashMap<usize, Vec<PageLink>>,
     visible_links: Vec<PageLink>,
@@ -90,7 +90,7 @@ impl Folio {
             reading: ReadingState::default(),
             nav: Navigation::default(),
             dimensions: Vec::new(),
-            outline: Vec::new(),
+            outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
             links: HashMap::new(),
             visible_links: Vec::new(),
@@ -157,7 +157,7 @@ impl Folio {
         self.id += 1;
         self.nav = Navigation::default();
         self.dimensions.clear();
-        self.outline.clear();
+        self.outline.set_entries(Vec::new());
         self.labels = crate::page_labels::PageLabels::default();
         self.links.clear();
         self.visible_links.clear();
@@ -500,7 +500,7 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
-                    self.outline = outline;
+                    self.outline.set_entries(outline);
                     self.labels = labels;
                     if reloaded {
                         self.restart_search();
@@ -627,6 +627,7 @@ impl Folio {
                 "folio-search-input",
                 "folio-page-input",
                 "folio-password-input",
+                "folio-outline-input",
             ]
             .iter()
             .any(|name| memory.has_focus(egui::Id::new(name)))
@@ -1096,6 +1097,137 @@ impl Folio {
             });
     }
 
+    fn contents(&mut self, ui: &mut egui::Ui) {
+        if self.outline.is_empty() {
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("CONTENTS").small().strong().color(ACCENT));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(!self.outline.filtering(), |ui| {
+                    if ui
+                        .small_button("−")
+                        .on_hover_text("Collapse all chapters")
+                        .clicked()
+                    {
+                        self.outline.fold_all(true);
+                    }
+                    if ui
+                        .small_button("+")
+                        .on_hover_text("Expand all chapters")
+                        .clicked()
+                    {
+                        self.outline.fold_all(false);
+                    }
+                });
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let clear = ui
+                    .small_button("×")
+                    .on_hover_text("Clear chapter filter")
+                    .clicked();
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.outline.query)
+                        .id(egui::Id::new("folio-outline-input"))
+                        .hint_text("Filter chapters…")
+                        .desired_width(f32::INFINITY),
+                );
+                if clear {
+                    self.outline.query.clear();
+                }
+                if response.changed() || clear {
+                    self.outline.refilter();
+                }
+            });
+        });
+        if self.outline.visible().is_empty() {
+            ui.weak("No matching chapters.");
+        }
+        let mut target = None;
+        let mut toggle = None;
+        let row_height = (ui.text_style_height(&egui::TextStyle::Button)
+            + 2.0 * ui.spacing().button_padding.y)
+            .max(ui.spacing().interact_size.y)
+            .max(20.0);
+        egui::ScrollArea::vertical()
+            .id_salt("contents")
+            .max_height(260.0)
+            .show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
+                for row in range {
+                    let index = self.outline.visible()[row];
+                    let entry = self.outline.entry(index);
+                    ui.push_id(index, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_space(entry.depth.min(8) as f32 * 12.0);
+                            if self.outline.has_children(index) {
+                                let collapsed = self.outline.is_collapsed(index);
+                                let response = ui
+                                    .add_enabled_ui(!self.outline.filtering(), |ui| {
+                                        let response = ui.allocate_response(
+                                            Vec2::splat(20.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let mut icon = response.clone();
+                                        icon.rect = icon.rect.shrink(3.0);
+                                        egui::collapsing_header::paint_default_icon(
+                                            ui,
+                                            if collapsed { 0.0 } else { 1.0 },
+                                            &icon,
+                                        );
+                                        response
+                                    })
+                                    .inner;
+                                if response
+                                    .on_hover_text(if collapsed {
+                                        "Expand chapter"
+                                    } else {
+                                        "Collapse chapter"
+                                    })
+                                    .clicked()
+                                {
+                                    toggle = Some(index);
+                                }
+                            } else {
+                                ui.allocate_space(Vec2::splat(20.0));
+                            }
+                            if let Some(page) = entry.page {
+                                if ui
+                                    .add(
+                                        egui::Button::selectable(
+                                            self.nav.page == page,
+                                            &entry.title,
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(format!(
+                                        "{}\nPage {}",
+                                        entry.title,
+                                        self.page_name(page)
+                                    ))
+                                    .clicked()
+                                {
+                                    target = Some(page);
+                                }
+                            } else {
+                                ui.add(
+                                    egui::Label::new(RichText::new(&entry.title).weak()).truncate(),
+                                );
+                            }
+                        });
+                    });
+                }
+            });
+        if let Some(index) = toggle {
+            self.outline.toggle(index);
+        }
+        if let Some(page) = target {
+            self.jump(page);
+        }
+        ui.add_space(20.0);
+    }
+
     fn sidebar(&mut self, context: &egui::Context) {
         if !self.library.sidebar || self.nav.count == 0 {
             return;
@@ -1109,53 +1241,7 @@ impl Folio {
                 ui.weak(format!("{} pages", self.nav.count));
                 ui.add_space(16.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if !self.outline.is_empty() {
-                        ui.label(RichText::new("CONTENTS").small().strong().color(ACCENT));
-                        let mut target = None;
-                        egui::ScrollArea::vertical()
-                            .id_salt("contents")
-                            .max_height(260.0)
-                            .show_rows(ui, 25.0, self.outline.len(), |ui, range| {
-                                for index in range {
-                                    let entry = &self.outline[index];
-                                    ui.push_id(index, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(entry.depth.min(8) as f32 * 12.0);
-                                            if let Some(page) = entry.page {
-                                                if ui
-                                                    .add(
-                                                        egui::Button::selectable(
-                                                            self.nav.page == page,
-                                                            &entry.title,
-                                                        )
-                                                        .truncate(),
-                                                    )
-                                                    .on_hover_text(format!(
-                                                        "{}\nPage {}",
-                                                        entry.title,
-                                                        page + 1
-                                                    ))
-                                                    .clicked()
-                                                {
-                                                    target = Some(page);
-                                                }
-                                            } else {
-                                                ui.add(
-                                                    egui::Label::new(
-                                                        RichText::new(&entry.title).weak(),
-                                                    )
-                                                    .truncate(),
-                                                );
-                                            }
-                                        });
-                                    });
-                                }
-                            });
-                        if let Some(page) = target {
-                            self.jump(page);
-                        }
-                        ui.add_space(20.0);
-                    }
+                    self.contents(ui);
                     ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
                     if self.reading.bookmarks.is_empty() {
                         ui.weak("Press b to bookmark a page.");

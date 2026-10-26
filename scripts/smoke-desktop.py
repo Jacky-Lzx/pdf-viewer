@@ -81,6 +81,15 @@ class Keyboard:
         self.x11.XFlush(self.display)
         time.sleep(delay)
 
+    def click(self, position):
+        self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeMotionEvent(self.display, -1, *position, 0)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 1, 0)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 0, 0)
+        self.x11.XFlush(self.display)
+        time.sleep(0.15)
+
     def drag(self, start, end):
         self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]

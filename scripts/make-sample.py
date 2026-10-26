@@ -63,7 +63,7 @@ PAGES = [
 ]
 
 
-def make_pdf():
+def make_pdf(nested_outline=False):
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
     kids = []
     for index, (title, eyebrow, lines) in enumerate(PAGES):
@@ -93,10 +93,19 @@ def make_pdf():
     outline_id = len(objects) + 1
     first_id = outline_id + 1
     objects[0] = f"<< /Type /Catalog /Pages 2 0 R /Outlines {outline_id} 0 R /Dests << /reading [9 0 R /Fit] >> /Names << /Dests << /Names [(search) [11 0 R /Fit]] >> >> >>".encode()
-    objects.append(f"<< /Type /Outlines /First {first_id} 0 R /Last {first_id + len(PAGES) - 1} 0 R /Count {len(PAGES)} >>".encode())
+    parents = [None, 0, 1, 0, None, 4] if nested_outline else [None] * len(PAGES)
+    def count_descendants(parent):
+        return sum(1 + count_descendants(child) for child in range(len(PAGES)) if parents[child] == parent)
+    roots = [index for index, parent in enumerate(parents) if parent is None]
+    objects.append(f"<< /Type /Outlines /First {first_id + roots[0]} 0 R /Last {first_id + roots[-1]} 0 R /Count {len(PAGES)} >>".encode())
     for index, (title, _, _) in enumerate(PAGES):
-        previous = f"/Prev {first_id + index - 1} 0 R" if index else ""
-        following = f"/Next {first_id + index + 1} 0 R" if index + 1 < len(PAGES) else ""
+        siblings = [child for child, parent in enumerate(parents) if parent == parents[index]]
+        position = siblings.index(index)
+        previous = f"/Prev {first_id + siblings[position - 1]} 0 R" if position else ""
+        following = f"/Next {first_id + siblings[position + 1]} 0 R" if position + 1 < len(siblings) else ""
+        children = [child for child, parent in enumerate(parents) if parent == index]
+        descendants = f" /First {first_id + children[0]} 0 R /Last {first_id + children[-1]} 0 R /Count {count_descendants(index)}" if children else ""
+        parent_id = outline_id if parents[index] is None else first_id + parents[index]
         dest = f"/Dest [{5 + index * 2} 0 R /Fit]"
         if index == 1:
             dest = "/A << /S /GoTo /D [7 0 R /Fit] >>"
@@ -104,7 +113,7 @@ def make_pdf():
             dest = "/Dest /reading"
         if index == 3:
             dest = "/Dest (search)"
-        objects.append(f"<< /Title ({pdf_string(title)}) /Parent {outline_id} 0 R {previous} {following} {dest} >>".encode())
+        objects.append(f"<< /Title ({pdf_string(title)}) /Parent {parent_id} 0 R {previous} {following} {dest}{descendants} >>".encode())
     labels_id = len(objects) + 1
     objects[0] = objects[0][:-2] + f" /PageLabels {labels_id} 0 R >>".encode()
     objects.extend([
