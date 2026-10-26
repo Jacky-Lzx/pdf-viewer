@@ -74,6 +74,26 @@ struct SearchRequest {
     query: SearchQuery,
 }
 
+struct SearchProgress {
+    request: SearchRequest,
+    page: usize,
+    hits: usize,
+    cursor: text::SearchCursor,
+    text: Option<Arc<PageText>>,
+}
+
+impl SearchProgress {
+    fn new(request: SearchRequest) -> Self {
+        Self {
+            request,
+            page: 0,
+            hits: 0,
+            cursor: text::SearchCursor::default(),
+            text: None,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Pending {
     open: Option<OpenRequest>,
@@ -302,7 +322,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
     let interpreter_cache = InterpreterCache::new();
     let destinations = crate::outline::DestinationIndex::new(pdf);
     let mut texts = crate::text_cache::TextCache::default();
-    let mut search: Option<(SearchRequest, usize, usize)> = None;
+    let mut search: Option<SearchProgress> = None;
     loop {
         let job = {
             let (lock, wake) = &**shared;
@@ -315,7 +335,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     search = if request.query.is_empty() {
                         None
                     } else {
-                        Some((request, 0, 0))
+                        Some(SearchProgress::new(request))
                     };
                 }
                 if let Some(page) = pending.inspect.take() {
@@ -330,8 +350,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if let Some(key) = pending.render.pop_front() {
                     break Job::Render(key, pending.render_revision);
                 }
-                if let Some((_, page, _)) = &search {
-                    break Job::Search(*page);
+                if let Some(progress) = &search {
+                    break Job::Search(progress.page);
                 }
                 if let Some(key) = pending.thumbnails.pop_front() {
                     break Job::Thumbnail(key, pending.thumbnail_revision);
@@ -411,7 +431,11 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     search = None;
                     continue;
                 }
-                let text = if let Some(text) = texts.get(page) {
+                let retained = search
+                    .as_ref()
+                    .filter(|progress| progress.page == page)
+                    .and_then(|progress| progress.text.clone());
+                let text = if let Some(text) = retained.or_else(|| texts.get(page)) {
                     text
                 } else {
                     let text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -444,26 +468,39 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                             text: text.text.clone(),
                         },
                     );
-                } else if let Some((request, next, hit_count)) = &mut search {
-                    let mut hits = text.search_with(page, &request.query);
+                } else if let Some(progress) = &mut search {
+                    let limit = (10_000_usize - progress.hits).min(256);
+                    let batch = text.search_batch(
+                        page,
+                        &progress.request.query,
+                        &mut progress.cursor,
+                        limit,
+                    );
                     texts.refresh(page);
-                    hits.truncate(10_000_usize.saturating_sub(*hit_count));
-                    *hit_count += hits.len();
-                    *next += 1;
+                    progress.hits += batch.hits.len();
+                    if batch.complete {
+                        progress.page += 1;
+                        progress.cursor = text::SearchCursor::default();
+                        progress.text = None;
+                    } else {
+                        // Retain even uncached oversized pages across batches.
+                        progress.text = Some(text);
+                    }
+                    let complete = progress.page >= pdf.pages().len() || progress.hits >= 10_000;
                     emit(
                         tx,
                         context,
                         Event::Search {
                             id,
-                            revision: request.revision,
-                            hits,
-                            scanned: *next,
+                            revision: progress.request.revision,
+                            hits: batch.hits,
+                            scanned: progress.page,
                             total: pdf.pages().len(),
-                            complete: *next >= pdf.pages().len() || *hit_count >= 10_000,
-                            limited: *hit_count >= 10_000,
+                            complete,
+                            limited: progress.hits >= 10_000,
                         },
                     );
-                    if *next >= pdf.pages().len() || *hit_count >= 10_000 {
+                    if complete {
                         search = None;
                     }
                 }
@@ -486,6 +523,169 @@ mod tests {
 
     fn sample() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/folio-guide.pdf")
+    }
+
+    fn dense_sample(count: usize) -> tempfile::NamedTempFile {
+        let stream = format!("BT /F1 6 Tf 10 750 Td ({}) Tj ET", "dense ".repeat(count));
+        let second = "BT /F1 6 Tf 10 750 Td (dense) Tj ET";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>".into(),
+            format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>".into(),
+            format!("<< /Length {} >>\nstream\n{second}\nendstream", second.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        ];
+        let mut data = "%PDF-1.4\n".to_owned();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(data.len());
+            data.push_str(&format!("{} 0 obj\n{object}\nendobj\n", index + 1));
+        }
+        let xref = data.len();
+        data.push_str("xref\n0 8\n0000000000 65535 f \n");
+        for offset in offsets {
+            data.push_str(&format!("{offset:010} 00000 n \n"));
+        }
+        data.push_str(&format!(
+            "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+        ));
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), data).unwrap();
+        file
+    }
+
+    #[test]
+    fn dense_page_search_continues_past_one_thousand_and_advances_pages() {
+        let file = dense_sample(1500);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.search(1, "dense".into(), SearchOptions::default());
+        let mut count = 0;
+        let mut last_page = 0;
+        loop {
+            let Event::Search {
+                hits,
+                complete,
+                limited,
+                scanned,
+                ..
+            } = receive(&worker)
+            else {
+                panic!("Expected search batch")
+            };
+            assert!(hits.len() <= 256 && !limited);
+            for hit in hits {
+                assert!(hit.page >= last_page);
+                last_page = hit.page;
+                count += 1;
+            }
+            if complete {
+                assert_eq!(scanned, 2);
+                break;
+            }
+        }
+        assert_eq!(count, 1501);
+        assert_eq!(last_page, 1);
+    }
+
+    #[test]
+    fn dense_page_batches_yield_to_rendering_and_stop_at_the_global_cap() {
+        let file = dense_sample(12000);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.search(1, "dense".into(), SearchOptions::default());
+        let Event::Search {
+            hits,
+            complete: false,
+            scanned: 0,
+            ..
+        } = receive(&worker)
+        else {
+            panic!("Expected partial first page")
+        };
+        let mut count = hits.len();
+        worker.render(vec![render_key(1)]);
+        let mut rendered = false;
+        let mut before_render = 0;
+        loop {
+            match receive(&worker) {
+                Event::Search {
+                    hits,
+                    complete,
+                    limited,
+                    scanned,
+                    ..
+                } => {
+                    count += hits.len();
+                    assert!(hits.len() <= 256 && hits.iter().all(|hit| hit.page == 0));
+                    if !rendered {
+                        before_render += 1;
+                    }
+                    if complete {
+                        assert!(limited && rendered);
+                        assert_eq!(scanned, 0);
+                        break;
+                    }
+                }
+                Event::Rendered {
+                    key: RenderKey { page: 1, .. },
+                    ..
+                } => rendered = true,
+                _ => panic!("Unexpected worker event"),
+            }
+        }
+        assert!(
+            before_render <= 5,
+            "Rendering waited for unnecessary search batches"
+        );
+        assert_eq!(count, 10000);
+        worker.copy(1);
+        assert!(matches!(receive(&worker), Event::Text { page: 1, .. }));
+    }
+
+    #[test]
+    fn replacing_search_cancels_remaining_batches_of_a_dense_page() {
+        let file = dense_sample(12000);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        worker.search(1, "dense".into(), SearchOptions::default());
+        assert!(matches!(
+            receive(&worker),
+            Event::Search {
+                revision: 1,
+                complete: false,
+                ..
+            }
+        ));
+        worker.search(2, "absent".into(), SearchOptions::default());
+        let mut old_batches = 0;
+        loop {
+            match receive(&worker) {
+                Event::Search {
+                    revision: 1,
+                    complete: false,
+                    ..
+                } => old_batches += 1,
+                Event::Search {
+                    revision: 2,
+                    hits,
+                    complete,
+                    ..
+                } => {
+                    assert!(hits.is_empty());
+                    if complete {
+                        break;
+                    }
+                }
+                _ => panic!("Unexpected result after replacing a dense search"),
+            }
+        }
+        assert!(old_batches <= 5);
     }
 
     fn render_key(page: usize) -> RenderKey {

@@ -91,6 +91,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 - 搜索输入延迟 180 ms 合并请求，复用 Unicode 完整大小写折叠索引，支持 `Straße` / `STRASSE`、`Σ` / `σ` / `ς` 和连字，以二分定位当前页匹配与文本坐标并合并相邻高亮；结果分页面返回，最多保留 10,000 个匹配。侧栏按可见行绘制全部结果，`n` / `N` 同步定位列表；旋转、放大后也会滚到匹配处。
 - 搜索尚未返回时按 `Enter` 会保留跳转请求，等结果就绪后定位；关闭搜索或主动翻页会取消待处理的跳转。
 - 搜索数字前缀直接计算目标匹配，无需逐条跳转；若结果仍在扫描且目标尚未就绪，会等待足够结果再定位，扫描完成后才循环到另一端。
+- 密集页面每批最多返回 256 条匹配，批次间优先处理新的页面渲染、文本操作和搜索请求；不再单独截断每页的第 1,000 条以后结果，统一受全局 10,000 条上限约束。
 - 搜索栏的 `Aa` 和 `Word` 可分别切换区分大小写、Unicode 整词匹配，两项可组合。查询只预处理一次；区分大小写直接搜索原文，整词边界按需建立为每字节一位的位图并计入文本缓存。默认仍为忽略大小写的子串搜索。中文按 Unicode 词边界处理，不进行词典分词。
 - 链接提示按字母前缀直接计算匹配索引范围，最多检查三个字符；只为匹配的提示生成标签。可见链接复用索引数组，重绘时不复制链接目标，悬停后才生成说明文字。
 - 链接元数据使用 **4 MiB、最多 64 页的 LRU 缓存**，计入向量和 URL 容量，容量满时逐页淘汰；过期页面结果不会挤掉当前页。超大当前页的链接临时保留在缓存之外，离开该页即释放。
@@ -125,6 +126,7 @@ xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
 xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
+xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
 ```
 

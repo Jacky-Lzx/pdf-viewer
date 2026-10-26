@@ -67,6 +67,17 @@ pub struct SearchHit {
     pub snippet: String,
 }
 
+#[derive(Default)]
+pub struct SearchCursor {
+    offset: usize,
+    previous: Option<(usize, usize)>,
+}
+
+pub struct SearchBatch {
+    pub hits: Vec<SearchHit>,
+    pub complete: bool,
+}
+
 /// Search batches arrive in page order, so only the visible page needs to be visited.
 pub fn page_hits(hits: &[SearchHit], page: usize) -> Range<usize> {
     let first = hits.partition_point(|hit| hit.page < page);
@@ -220,9 +231,31 @@ impl PageText {
         )
     }
 
+    #[cfg(test)]
     pub fn search_with(&self, page: usize, query: &SearchQuery) -> Vec<SearchHit> {
+        let mut cursor = SearchCursor::default();
+        let mut hits = Vec::new();
+        loop {
+            let batch = self.search_batch(page, query, &mut cursor, 10_000 - hits.len());
+            hits.extend(batch.hits);
+            if batch.complete || hits.len() >= 10_000 {
+                return hits;
+            }
+        }
+    }
+
+    pub fn search_batch(
+        &self,
+        page: usize,
+        query: &SearchQuery,
+        cursor: &mut SearchCursor,
+        limit: usize,
+    ) -> SearchBatch {
         if query.is_empty() {
-            return Vec::new();
+            return SearchBatch {
+                hits: Vec::new(),
+                complete: true,
+            };
         }
         // Case folding can expand one source glyph into several searchable characters.
         let index = (!query.options.match_case).then(|| {
@@ -248,65 +281,72 @@ impl PageText {
                 .get_or_init(|| WordBoundaries::new(&self.text))
         });
         let haystack = index.map_or(self.text.as_str(), |index| &index.folded);
-        let mut previous = None;
-        let mut base = 0;
-        let mut matches = haystack.match_indices(query.needle.as_str());
-        std::iter::from_fn(|| {
-            loop {
-                let (relative, matched) = matches.next()?;
-                let offset = base + relative;
-                let matched_end = offset + matched.len();
-                // A partial case-fold expansion is not an entire word (s != ß).
-                let partial_expansion = boundaries.is_some()
-                    && index.is_some_and(|index| {
-                        (offset > 0 && index.source[offset - 1] == index.source[offset])
-                            || (matched_end < index.source.len()
-                                && index.source[matched_end - 1] == index.source[matched_end])
-                    });
-                let (start, end) = if let Some(index) = index {
-                    let start = index.source[offset];
-                    let last = index.source[matched_end - 1];
-                    (
-                        start,
-                        last + self.text[last..].chars().next().unwrap().len_utf8(),
-                    )
-                } else {
-                    (offset, matched_end)
-                };
-                if partial_expansion
-                    || boundaries.is_some_and(|boundaries| {
-                        !boundaries.contains(start) || !boundaries.contains(end)
-                    })
-                {
-                    // A rejected candidate can overlap a later valid phrase. Only
-                    // restart in that case; ordinary matching keeps its searcher.
-                    base = offset + haystack[offset..].chars().next().unwrap().len_utf8();
-                    matches = haystack[base..].match_indices(query.needle.as_str());
-                    continue;
-                }
-                if previous == Some((start, end)) {
-                    continue;
-                }
-                previous = Some((start, end));
-                let rects = self.rects_for_range(start..end);
-                let before: String = self.text[..start]
-                    .chars()
-                    .rev()
-                    .take(32)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
-                let after: String = self.text[start..].chars().take(80).collect();
-                return Some(SearchHit {
-                    page,
-                    rects,
-                    snippet: format!("{before}{after}").replace('\n', " "),
+        let mut base = cursor.offset;
+        let mut matches = haystack[base..].match_indices(query.needle.as_str());
+        let mut hits = Vec::new();
+        let mut candidates = 0;
+        // Bound both emitted hits and rejected whole-word candidates per job.
+        while hits.len() < limit && candidates < 4096 {
+            let Some((relative, matched)) = matches.next() else {
+                cursor.offset = haystack.len();
+                break;
+            };
+            candidates += 1;
+            let offset = base + relative;
+            let matched_end = offset + matched.len();
+            cursor.offset = matched_end;
+            // A partial case-fold expansion is not an entire word (s != ß).
+            let partial_expansion = boundaries.is_some()
+                && index.is_some_and(|index| {
+                    (offset > 0 && index.source[offset - 1] == index.source[offset])
+                        || (matched_end < index.source.len()
+                            && index.source[matched_end - 1] == index.source[matched_end])
                 });
+            let (start, end) = if let Some(index) = index {
+                let start = index.source[offset];
+                let last = index.source[matched_end - 1];
+                (
+                    start,
+                    last + self.text[last..].chars().next().unwrap().len_utf8(),
+                )
+            } else {
+                (offset, matched_end)
+            };
+            if partial_expansion
+                || boundaries.is_some_and(|boundaries| {
+                    !boundaries.contains(start) || !boundaries.contains(end)
+                })
+            {
+                // Rejected candidates may overlap a later valid phrase.
+                base = offset + haystack[offset..].chars().next().unwrap().len_utf8();
+                cursor.offset = base;
+                matches = haystack[base..].match_indices(query.needle.as_str());
+                continue;
             }
-        })
-        .take(1000)
-        .collect()
+            if cursor.previous == Some((start, end)) {
+                continue;
+            }
+            cursor.previous = Some((start, end));
+            let rects = self.rects_for_range(start..end);
+            let before: String = self.text[..start]
+                .chars()
+                .rev()
+                .take(32)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let after: String = self.text[start..].chars().take(80).collect();
+            hits.push(SearchHit {
+                page,
+                rects,
+                snippet: format!("{before}{after}").replace('\n', " "),
+            });
+        }
+        SearchBatch {
+            hits,
+            complete: cursor.offset >= haystack.len(),
+        }
     }
 }
 
@@ -380,6 +420,85 @@ impl<'a> Device<'a> for TextDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn batches_resume_dense_pages_without_losing_or_duplicating_hits() {
+        let value = "ß Straße ﬃ rust ".repeat(2000);
+        let page = PageText {
+            spans: value
+                .char_indices()
+                .map(|(start, ch)| TextSpan {
+                    range: start..start + ch.len_utf8(),
+                    rect: Rect::new(start as f64, 0.0, (start + ch.len_utf8()) as f64, 10.0),
+                })
+                .collect(),
+            text: value,
+            ..Default::default()
+        };
+        for (needle, whole_word, expected) in [
+            ("s", false, 8000),
+            ("ss", true, 2000),
+            ("rust", true, 2000),
+            ("f", false, 2000),
+        ] {
+            let query = SearchQuery::new(
+                needle.into(),
+                SearchOptions {
+                    match_case: false,
+                    whole_word,
+                },
+            );
+            let reference = page.search_with(4, &query);
+            assert_eq!(reference.len(), expected);
+            for limit in [1, 17, 256] {
+                let mut cursor = SearchCursor::default();
+                let mut actual = Vec::new();
+                loop {
+                    let batch = page.search_batch(4, &query, &mut cursor, limit);
+                    assert!(batch.hits.len() <= limit);
+                    actual.extend(batch.hits);
+                    if batch.complete {
+                        break;
+                    }
+                }
+                assert_eq!(actual.len(), expected, "{needle}, {limit}");
+                for (actual, reference) in actual.iter().zip(&reference) {
+                    assert_eq!(actual.page, reference.page);
+                    assert_eq!(actual.rects, reference.rects);
+                    assert_eq!(actual.snippet, reference.snippet);
+                }
+                assert!(
+                    page.search_batch(4, &query, &mut cursor, limit)
+                        .hits
+                        .is_empty()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_candidates_yield_and_preserve_overlapping_phrase_across_batches() {
+        // Candidate 4096 is rejected; the overlapping candidate after it is valid.
+        let value = format!("{}ba a a", "ba a ".repeat(4095));
+        let page = PageText {
+            text: value,
+            ..Default::default()
+        };
+        let query = SearchQuery::new(
+            "a a".into(),
+            SearchOptions {
+                match_case: false,
+                whole_word: true,
+            },
+        );
+        let mut cursor = SearchCursor::default();
+        let first = page.search_batch(0, &query, &mut cursor, 256);
+        assert!(first.hits.is_empty() && !first.complete);
+        assert!(cursor.offset > 0 && cursor.offset < page.text.len());
+        let last = page.search_batch(0, &query, &mut cursor, 256);
+        assert_eq!(last.hits.len(), 1);
+        assert!(last.complete);
+    }
 
     #[test]
     fn counted_jumps_wrap_only_after_scan_completion_and_handle_large_counts() {
@@ -728,9 +847,9 @@ mod tests {
             ..Default::default()
         };
         let hits = page.search(3, "rust");
-        assert_eq!(hits.len(), 1000);
+        assert_eq!(hits.len(), 2000);
         assert!(hits.iter().all(|hit| hit.rects.len() == 1 && hit.page == 3));
         assert_eq!(hits[10].rects[0], Rect::new(50.0, 0.0, 54.0, 10.0));
-        assert_eq!(page.search(3, "RUST").len(), 1000);
+        assert_eq!(page.search(3, "RUST").len(), 2000);
     }
 }
