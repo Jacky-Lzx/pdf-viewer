@@ -27,6 +27,7 @@ pub struct Navigation {
     pub count: usize,
     pub prefix: String,
     pub pending_g: bool,
+    pub direction: isize,
     back: Vec<usize>,
     forward: Vec<usize>,
 }
@@ -50,6 +51,7 @@ impl Navigation {
             self.back.remove(0);
         }
         self.forward.clear();
+        self.direction = if page > self.page { 1 } else { -1 };
         self.page = page;
         true
     }
@@ -66,6 +68,7 @@ impl Navigation {
         };
         if let Some(page) = from.pop() {
             to.push(self.page);
+            self.direction = if page > self.page { 1 } else { -1 };
             self.page = page;
             true
         } else {
@@ -101,10 +104,13 @@ mod tests {
         assert_eq!(nav.page, 4);
         assert!(!nav.step(1));
         assert!(nav.step(-100));
+        assert_eq!(nav.direction, -1);
         assert_eq!(nav.page, 0);
         assert!(nav.history(false));
+        assert_eq!(nav.direction, 1);
         assert_eq!(nav.page, 4);
         assert!(nav.history(true));
+        assert_eq!(nav.direction, -1);
         assert_eq!(nav.page, 0);
         nav.jump(2);
         assert!(!nav.history(true));

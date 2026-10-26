@@ -60,6 +60,7 @@ pub struct Folio {
     hits: Vec<SearchHit>,
     hit_index: Option<usize>,
     reveal_hit: Option<usize>,
+    pending_search_jump: Option<bool>,
     scanned: usize,
     scan_total: usize,
     search_complete: bool,
@@ -115,6 +116,7 @@ impl Folio {
             hits: Vec::new(),
             hit_index: None,
             reveal_hit: None,
+            pending_search_jump: None,
             scanned: 0,
             scan_total: 0,
             search_complete: true,
@@ -165,6 +167,7 @@ impl Folio {
         self.hits.clear();
         self.hit_index = None;
         self.reveal_hit = None;
+        self.pending_search_jump = None;
         self.query.clear();
         self.search_due = None;
         self.search_open = false;
@@ -224,6 +227,7 @@ impl Folio {
             }
             MarkAction::Jump => {
                 if let Some(mark) = self.reading.marks.get(&name).cloned() {
+                    self.pending_search_jump = None;
                     self.jump(mark.page);
                     self.hints.cancel();
                     self.reading.fit = mark.fit;
@@ -284,6 +288,7 @@ impl Folio {
         self.pending_offset = None;
         self.pending_focus = None;
         self.reading.offset = [0.0; 2];
+        self.pending_search_jump = None;
         self.requested = None;
         self.dirty = true;
     }
@@ -333,25 +338,33 @@ impl Folio {
 
     fn next_hit(&mut self, reverse: bool) {
         if self.hits.is_empty() {
+            self.pending_search_jump =
+                (!self.search_complete || self.search_due.is_some()).then_some(reverse);
             return;
         }
         let index = match self.hit_index {
             Some(index) if reverse => (index + self.hits.len() - 1) % self.hits.len(),
             Some(index) => (index + 1) % self.hits.len(),
-            None if reverse => self
-                .hits
-                .partition_point(|hit| hit.page <= self.nav.page)
-                .checked_sub(1)
-                .unwrap_or(self.hits.len() - 1),
-            None => {
-                let index = self.hits.partition_point(|hit| hit.page < self.nav.page);
-                if index < self.hits.len() { index } else { 0 }
-            }
+            None => match crate::text::initial_match(
+                &self.hits,
+                self.nav.page,
+                reverse,
+                self.scanned,
+                self.search_complete,
+            ) {
+                Some(index) => index,
+                None => {
+                    self.pending_search_jump = (!self.search_complete).then_some(reverse);
+                    return;
+                }
+            },
         };
+        self.pending_search_jump = None;
         self.select_hit(index);
     }
 
     fn select_hit(&mut self, index: usize) {
+        self.pending_search_jump = None;
         self.hit_index = Some(index);
         self.reveal_hit = Some(index);
         let page = self.hits[index].page;
@@ -400,6 +413,26 @@ impl Folio {
                     bitmap,
                     milliseconds,
                 } if id == self.id => {
+                    let wanted = self
+                        .requested
+                        .as_ref()
+                        .is_some_and(|keys| keys.contains(&key));
+                    if (!wanted && key.page != self.nav.page)
+                        || key.rotation != self.reading.rotation
+                        || key.night != self.library.night
+                        || !self.cache.can_insert(key, bitmap.rgba.len())
+                    {
+                        continue;
+                    }
+                    if !wanted
+                        && self
+                            .requested
+                            .as_ref()
+                            .and_then(|keys| keys.first())
+                            .is_some_and(|key| self.cache.contains(key))
+                    {
+                        continue;
+                    }
                     let image =
                         egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba);
                     let texture = context.load_texture(
@@ -426,6 +459,9 @@ impl Folio {
                     self.scan_total = total;
                     self.search_complete = complete;
                     self.search_limited = limited;
+                    if let Some(reverse) = self.pending_search_jump.take() {
+                        self.next_hit(reverse);
+                    }
                 }
                 Event::Text { id, page, text } if id == self.id => {
                     if text.trim().is_empty() {
@@ -508,6 +544,7 @@ impl Folio {
                 self.help = false;
                 self.goto_open = false;
                 self.search_open = false;
+                self.pending_search_jump = None;
                 self.password_open = false;
                 self.nav.clear_prefix();
                 context.memory_mut(|memory| {
@@ -869,6 +906,7 @@ impl Folio {
                         self.hits.clear();
                         self.hit_index = None;
                         self.reveal_hit = None;
+                        self.pending_search_jump = None;
                         self.scanned = 0;
                         self.scan_total = self.nav.count;
                         self.search_complete = self.query.trim().is_empty();
@@ -901,6 +939,7 @@ impl Folio {
                     }
                     if ui.button("×").clicked() {
                         self.search_open = false;
+                        self.pending_search_jump = None;
                     }
                 });
             });
@@ -1098,6 +1137,7 @@ impl Folio {
                     pixels_per_point: context.pixels_per_point(),
                     rotation: self.reading.rotation,
                     night: self.library.night,
+                    backwards: self.nav.direction < 0,
                 };
                 self.scale = view.scale(dimensions);
                 let size = Vec2::new(rotated[0], rotated[1]) * self.scale;

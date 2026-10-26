@@ -40,6 +40,15 @@ impl TextureCache {
     pub fn contains(&self, key: &RenderKey) -> bool {
         self.entries.contains_key(key)
     }
+
+    pub fn can_insert(&self, key: RenderKey, bytes: usize) -> bool {
+        let pinned = self
+            .protected
+            .filter(|protected| *protected != key)
+            .and_then(|protected| self.entries.get(&protected))
+            .map_or(0, |entry| entry.bytes);
+        bytes <= self.budget.saturating_sub(pinned)
+    }
     pub fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
@@ -75,6 +84,9 @@ impl TextureCache {
 
     pub fn insert(&mut self, key: RenderKey, texture: TextureHandle) -> bool {
         let bytes = texture.size()[0] * texture.size()[1] * 4;
+        if !self.can_insert(key, bytes) {
+            return false;
+        }
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
@@ -140,6 +152,31 @@ mod tests {
         cache.protect(key(1));
         assert!(cache.insert(key(1), texture(&ctx)));
         assert!(!cache.contains(&key(0)));
+    }
+
+    #[test]
+    fn impossible_insert_preserves_other_useful_cached_pages() {
+        let ctx = Context::default();
+        let mut cache = TextureCache {
+            budget: 192,
+            ..Default::default()
+        };
+        let large = || {
+            ctx.load_texture(
+                "large",
+                ColorImage::filled([8, 4], Color32::WHITE),
+                TextureOptions::LINEAR,
+            )
+        };
+        cache.protect(key(0));
+        assert!(cache.insert(key(0), large()));
+        assert!(cache.insert(key(1), texture(&ctx)));
+        assert!(!cache.can_insert(key(2), 128));
+        assert!(!cache.insert(key(2), large()));
+        assert!(cache.contains(&key(0)));
+        assert!(cache.contains(&key(1)));
+        assert_eq!(cache.bytes, 192);
+        assert!(cache.can_insert(key(0), 128));
     }
 
     #[test]

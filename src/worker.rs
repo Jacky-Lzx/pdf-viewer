@@ -70,11 +70,31 @@ struct SearchRequest {
 struct Pending {
     open: Option<OpenRequest>,
     render: VecDeque<RenderKey>,
+    render_revision: u64,
     search: Option<SearchRequest>,
     copy: Option<usize>,
     links: Option<usize>,
     inspect: Option<usize>,
     stop: bool,
+}
+
+impl Pending {
+    fn replace_renders(&mut self, keys: Vec<RenderKey>) {
+        self.render_revision = self.render_revision.wrapping_add(1);
+        self.render = keys.into();
+    }
+
+    fn finish_render(&mut self, key: RenderKey, revision: u64) -> bool {
+        if self.stop || self.open.is_some() {
+            return false;
+        }
+        if revision != self.render_revision && !self.render.contains(&key) {
+            return false;
+        }
+        // A view update can request the same page while it is still rendering.
+        self.render.retain(|pending| *pending != key);
+        true
+    }
 }
 
 type Shared = Arc<(Mutex<Pending>, Condvar)>;
@@ -164,7 +184,7 @@ impl Worker {
     }
 
     pub fn render(&self, keys: Vec<RenderKey>) {
-        self.update(|pending| pending.render = keys.into());
+        self.update(|pending| pending.replace_renders(keys));
     }
     pub fn search(&self, revision: u64, query: String) {
         self.update(|pending| pending.search = Some(SearchRequest { revision, query }));
@@ -193,7 +213,7 @@ fn emit(tx: &SyncSender<Event>, context: &egui::Context, event: Event) {
 }
 
 enum Job {
-    Render(RenderKey),
+    Render(RenderKey, u64),
     Search(usize),
     Copy(usize),
     Links(usize),
@@ -232,7 +252,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     break Job::Links(page);
                 }
                 if let Some(key) = pending.render.pop_front() {
-                    break Job::Render(key);
+                    break Job::Render(key, pending.render_revision);
                 }
                 if let Some((_, page, _)) = &search {
                     break Job::Search(*page);
@@ -250,11 +270,15 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     emit(tx, context, Event::Links { id, page, links });
                 }
             }
-            Job::Render(key) => {
+            Job::Render(key, revision) => {
                 let start = Instant::now();
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     document::rasterize(pdf, &render_cache, key)
-                })) {
+                }));
+                if !shared.0.lock().unwrap().finish_render(key, revision) {
+                    continue;
+                }
+                match result {
                     Ok(Ok(bitmap)) => emit(
                         tx,
                         context,
@@ -360,6 +384,51 @@ mod tests {
 
     fn sample() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/folio-guide.pdf")
+    }
+
+    fn render_key(page: usize) -> RenderKey {
+        RenderKey {
+            page,
+            width: 300,
+            rotation: 0,
+            night: false,
+        }
+    }
+
+    #[test]
+    fn superseded_renders_are_discarded_but_still_requested_results_are_reused() {
+        let mut pending = Pending::default();
+        pending.replace_renders(vec![render_key(0)]);
+        let revision = pending.render_revision;
+        let running = pending.render.pop_front().unwrap();
+        pending.replace_renders(vec![render_key(1)]);
+        assert!(!pending.finish_render(running, revision));
+        assert_eq!(pending.render.front(), Some(&render_key(1)));
+
+        let running = pending.render.pop_front().unwrap();
+        let revision = pending.render_revision;
+        pending.replace_renders(vec![running, render_key(2)]);
+        assert!(pending.finish_render(running, revision));
+        assert_eq!(
+            pending.render.into_iter().collect::<Vec<_>>(),
+            [render_key(2)]
+        );
+    }
+
+    #[test]
+    fn document_switches_and_shutdown_discard_inflight_results() {
+        let mut pending = Pending::default();
+        pending.replace_renders(vec![render_key(0)]);
+        let revision = pending.render_revision;
+        pending.open = Some(OpenRequest {
+            id: 2,
+            path: sample(),
+            password: String::new(),
+        });
+        assert!(!pending.finish_render(render_key(0), revision));
+        pending.open = None;
+        pending.stop = true;
+        assert!(!pending.finish_render(render_key(0), revision));
     }
 
     #[test]

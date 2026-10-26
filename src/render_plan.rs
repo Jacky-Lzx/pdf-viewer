@@ -10,6 +10,7 @@ pub struct RenderView {
     pub pixels_per_point: f32,
     pub rotation: u8,
     pub night: bool,
+    pub backwards: bool,
 }
 
 impl RenderView {
@@ -39,7 +40,12 @@ impl RenderView {
     pub fn plan(self, page: usize, dimensions: &[[f32; 2]], budget: usize) -> Vec<RenderKey> {
         let mut remaining = budget;
         let mut keys = Vec::with_capacity(3);
-        for candidate in [Some(page), page.checked_add(1), page.checked_sub(1)]
+        let neighbors = if self.backwards {
+            [page.checked_sub(1), page.checked_add(1)]
+        } else {
+            [page.checked_add(1), page.checked_sub(1)]
+        };
+        for candidate in [Some(page), neighbors[0], neighbors[1]]
             .into_iter()
             .flatten()
         {
@@ -75,6 +81,7 @@ mod tests {
             pixels_per_point: 2.0,
             rotation: 0,
             night: false,
+            backwards: false,
         }
     }
 
@@ -112,6 +119,35 @@ mod tests {
             .map(|key| RasterSize::new(pages[key.page], key.width).unwrap().bytes())
             .sum();
         assert!(bytes <= budget);
+    }
+
+    #[test]
+    fn limited_prefetch_prioritizes_the_reading_direction() {
+        let pages = [[600.0, 800.0]; 3];
+        let forward = view(Fit::Page);
+        let bytes = RasterSize::new(pages[1], forward.key(1, pages[1]).width)
+            .unwrap()
+            .bytes();
+        assert_eq!(
+            forward
+                .plan(1, &pages, bytes * 2)
+                .iter()
+                .map(|key| key.page)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        let backward = RenderView {
+            backwards: true,
+            ..forward
+        };
+        assert_eq!(
+            backward
+                .plan(1, &pages, bytes * 2)
+                .iter()
+                .map(|key| key.page)
+                .collect::<Vec<_>>(),
+            [1, 0]
+        );
     }
 
     #[test]

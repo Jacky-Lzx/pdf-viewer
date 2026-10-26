@@ -44,6 +44,30 @@ pub fn page_hits(hits: &[SearchHit], page: usize) -> Range<usize> {
     first..first + count
 }
 
+pub fn initial_match(
+    hits: &[SearchHit],
+    page: usize,
+    reverse: bool,
+    scanned: usize,
+    complete: bool,
+) -> Option<usize> {
+    if hits.is_empty() || (reverse && !complete && scanned <= page) {
+        return None;
+    }
+    if reverse {
+        hits.partition_point(|hit| hit.page <= page)
+            .checked_sub(1)
+            .or_else(|| complete.then_some(hits.len() - 1))
+    } else {
+        let index = hits.partition_point(|hit| hit.page < page);
+        if index < hits.len() {
+            Some(index)
+        } else {
+            complete.then_some(0)
+        }
+    }
+}
+
 impl PageText {
     pub fn nearest_span(&self, point: Point) -> Option<usize> {
         if !point.x.is_finite() || !point.y.is_finite() {
@@ -232,6 +256,14 @@ mod tests {
         assert_eq!(page_hits(&hits, 7), 5..6);
         assert_eq!(page_hits(&hits, 8), 6..6);
         assert_eq!(page_hits(&[], 0), 0..0);
+        assert_eq!(initial_match(&hits[..2], 2, false, 1, false), None);
+        assert_eq!(initial_match(&hits, 2, false, 8, false), Some(2));
+        assert_eq!(initial_match(&hits, 2, true, 2, false), None);
+        assert_eq!(initial_match(&hits, 2, true, 3, false), Some(4));
+        assert_eq!(initial_match(&hits, 8, false, 8, false), None);
+        assert_eq!(initial_match(&hits, 8, false, 8, true), Some(0));
+        assert_eq!(initial_match(&hits[2..], 0, true, 8, true), Some(3));
+        assert_eq!(initial_match(&[], 0, false, 8, true), None);
     }
     #[test]
     fn search_handles_unicode_case_expansion_and_empty_queries() {

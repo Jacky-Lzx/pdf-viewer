@@ -62,7 +62,7 @@ class Keyboard:
             self.x11.XFlush(self.display)
         return found
 
-    def key(self, symbol, shift=False, ctrl=False):
+    def key(self, symbol, shift=False, ctrl=False, delay=0.08):
         if isinstance(symbol, str):
             symbol = ord(symbol)
         shift_code = self.x11.XKeysymToKeycode(self.display, 0xFFE1)
@@ -79,7 +79,7 @@ class Keyboard:
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 0, 0)
         self.x11.XFlush(self.display)
-        time.sleep(0.08)
+        time.sleep(delay)
 
     def drag(self, start, end):
         self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
@@ -167,6 +167,11 @@ def run(binary):
             selected = keyboard.clipboard()
             assert selected == "A native PDF reader, written in Rust.", repr(selected)
             keyboard.key(0xFF1B); keyboard.key("r", shift=True)
+            keyboard.key("w")
+            for _ in range(8): keyboard.key("+", shift=True, delay=0.015)
+            for letter in "jjjkkkjjk": keyboard.key(letter, shift=True, delay=0.015)
+            keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
+            expect(lambda _, book: book["page"] == 0 and book["fit"] == "Page", "rapid zoom and page changes settle on the latest view")
             keyboard.key("f"); keyboard.key("a")
             expect(lambda _, book: book["page"] == 1, "keyboard link hints")
             keyboard.key("g"); keyboard.key("g")
@@ -195,7 +200,6 @@ def run(binary):
             keyboard.key("/")
             for letter in "native":
                 keyboard.key(letter)
-            time.sleep(0.5)
             keyboard.key(0xFF0D)
             expect(lambda _, book: book["page"] == 0 and book["rotation"] == 1 and book["offset"][0] > 0, "rotated zoomed search scrolls to the match without stealing typing focus")
             keyboard.key(0xFF1B)
@@ -223,6 +227,8 @@ def run(binary):
         except Exception:
             log.flush(); log.seek(0)
             print(log.read(), file=sys.stderr)
+            if config_path.exists():
+                print(config_path.read_text(), file=sys.stderr)
             raise
         finally:
             if application and application.poll() is None:
