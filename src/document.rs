@@ -138,23 +138,70 @@ pub(crate) fn rasterize_pixels<'a>(
 }
 
 pub fn write_png(bitmap: &Bitmap, path: &Path) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = png::Encoder::new(
-        std::io::BufWriter::new(file),
-        bitmap.size[0] as u32,
-        bitmap.size[1] as u32,
-    );
+    let file = std::fs::File::create(path)
+        .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
+    encode_png(bitmap, std::io::BufWriter::new(file))
+        .map_err(|error| format!("Cannot write {}: {error}", path.display()))
+}
+
+fn encode_png(bitmap: &Bitmap, output: impl std::io::Write) -> Result<(), String> {
+    let mut encoder = png::Encoder::new(output, bitmap.size[0] as u32, bitmap.size[1] as u32);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
     writer
         .write_image_data(&bitmap.rgba)
-        .map_err(|e| e.to_string())
+        .map_err(|error| error.to_string())?;
+    // Drop ignores IEND and buffered-write errors; report them before success.
+    writer.finish().map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn png_exports_report_final_flush_errors() {
+        struct FailsOnFlush;
+        impl std::io::Write for FailsOnFlush {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::other("export flush failed"))
+            }
+        }
+
+        let bitmap = Bitmap {
+            size: [1, 1],
+            rgba: vec![255; 4],
+        };
+        let error = encode_png(&bitmap, FailsOnFlush).unwrap_err();
+        assert!(error.contains("export flush failed"), "{error}");
+    }
+
+    #[test]
+    fn png_exports_finish_and_preserve_dimensions_and_pixels() {
+        let bitmap = Bitmap {
+            size: [2, 2],
+            rgba: vec![
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 12, 34, 56, 255,
+            ],
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("page.png");
+        write_png(&bitmap, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.ends_with(b"\0\0\0\0IEND\xaeB`\x82"));
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!([info.width as usize, info.height as usize], bitmap.size);
+        assert_eq!(&pixels[..info.buffer_size()], bitmap.rgba);
+    }
 
     fn sample() -> Pdf {
         Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap()

@@ -51,6 +51,11 @@ def run(binary):
         data = output.read_bytes()
         assert data[:8] == b"\x89PNG\r\n\x1a\n"
         assert struct.unpack(">II", data[16:24]) == (64, 85)
+        assert data.endswith(b"\0\0\0\0IEND\xaeB`\x82")
+        if sys.platform.startswith("linux"):
+            # A tiny image stays inside BufWriter until the final flush.
+            # Dropping the encoder used to swallow ENOSPC and report success.
+            invoke(["--render", document, "/dev/full", "1", "1"], "Cannot write /dev/full")
         assert "6 pages × 1 passes" in invoke(["--benchmark", document, "1"])
 
         keyboard = Keyboard()
@@ -73,7 +78,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert saved_page(1)(), "Vim navigation and final state save work for the special path"
-                print("PASS: argument errors before PDF I/O, version/help, real text/PNG/benchmark output and native -- opening of a relative dash-prefixed Unicode path")
+                print("PASS: argument errors before PDF I/O, version/help, complete PNG and write failure reporting, real text/benchmark output and native -- opening of a relative dash-prefixed Unicode path")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
