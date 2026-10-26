@@ -2,7 +2,7 @@ use crate::{
     cache::TextureCache,
     document::RenderKey,
     links::{LinkHints, LinkTarget, PageLink},
-    navigation::{Fit, MAX_SCALE, MIN_SCALE, Navigation},
+    navigation::{Fit, Navigation},
     render_plan::RenderView,
     selection::TextSelection,
     state::{self, Library, ReadingMark, ReadingState},
@@ -377,7 +377,7 @@ impl Folio {
         };
         let viewport = [self.viewport.x, self.viewport.y];
         let before = self.reading.fit.scale(dimensions, viewport);
-        let after = (before * factor).clamp(MIN_SCALE, MAX_SCALE);
+        let after = Fit::Custom(before * factor).scale(dimensions, viewport);
         let pan = crate::geometry::zoom_pan(
             [self.pan.x, self.pan.y],
             dimensions,
@@ -972,7 +972,14 @@ impl Folio {
                         if ui.button("−").clicked() {
                             self.zoom(1.0 / 1.2);
                         }
-                        ui.label(format!("{:.0}%", self.scale * 100.0));
+                        let percent = self.scale * 100.0;
+                        ui.label(if percent < 0.01 {
+                            "<0.01%".to_owned()
+                        } else if percent < 1.0 {
+                            format!("{percent:.2}%")
+                        } else {
+                            format!("{percent:.0}%")
+                        });
                         if ui.button("+").clicked() {
                             self.zoom(1.2);
                         }
@@ -1452,9 +1459,12 @@ impl Folio {
                         });
                     }
                     let point = |position: egui::Pos2| {
-                        let relative = (position - page_rect.min) / self.scale;
+                        let relative = position - page_rect.min;
                         crate::geometry::unrotate_point(
-                            hayro::kurbo::Point::new(f64::from(relative.x), f64::from(relative.y)),
+                            hayro::kurbo::Point::new(
+                                f64::from(relative.x) / f64::from(self.scale),
+                                f64::from(relative.y) / f64::from(self.scale),
+                            ),
                             dimensions,
                             self.reading.rotation,
                         )
@@ -1586,9 +1596,10 @@ impl Folio {
         dimensions: [f32; 2],
     ) -> egui::Rect {
         let rect = crate::geometry::rotate_rect(rect, dimensions, self.reading.rotation);
+        let scale = f64::from(self.scale);
         egui::Rect::from_min_max(
-            page_rect.min + Vec2::new(rect.x0 as f32, rect.y0 as f32) * self.scale,
-            page_rect.min + Vec2::new(rect.x1 as f32, rect.y1 as f32) * self.scale,
+            page_rect.min + Vec2::new((rect.x0 * scale) as f32, (rect.y0 * scale) as f32),
+            page_rect.min + Vec2::new((rect.x1 * scale) as f32, (rect.y1 * scale) as f32),
         )
     }
 

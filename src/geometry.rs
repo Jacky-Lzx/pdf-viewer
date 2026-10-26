@@ -51,9 +51,10 @@ pub fn focus_offset(
     overflow: [f32; 2],
 ) -> [f32; 2] {
     let rect = rotate_rect(rect, dimensions, rotation);
-    let origin = [rect.x0 as f32, rect.y0 as f32];
+    let origin = [rect.x0, rect.y0];
     std::array::from_fn(|axis| {
-        (origin[axis] * scale - viewport[axis] * 0.3).clamp(0.0, overflow[axis])
+        (origin[axis] * f64::from(scale) - f64::from(viewport[axis]) * 0.3)
+            .clamp(0.0, f64::from(overflow[axis])) as f32
     })
 }
 
