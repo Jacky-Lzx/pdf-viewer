@@ -27,7 +27,7 @@ pub struct PageText {
 #[derive(Clone, Debug)]
 struct SearchIndex {
     folded: String,
-    source: Vec<(usize, usize)>,
+    source: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,9 +117,13 @@ impl PageText {
 
     pub fn memory_bytes(&self) -> usize {
         // Reserve for Unicode lowercase expansion before the lazy index is built.
-        self.text.capacity()
-            + self.spans.capacity() * std::mem::size_of::<TextSpan>()
-            + self.text.len() * 3 * (1 + std::mem::size_of::<(usize, usize)>())
+        let index_bytes = self.index.get().map_or_else(
+            || self.text.len() * 3 * (1 + std::mem::size_of::<usize>()),
+            |index| {
+                index.folded.capacity() + index.source.capacity() * std::mem::size_of::<usize>()
+            },
+        );
+        self.text.capacity() + self.spans.capacity() * std::mem::size_of::<TextSpan>() + index_bytes
     }
 
     pub fn search(&self, page: usize, query: &str) -> Vec<SearchHit> {
@@ -133,10 +137,7 @@ impl PageText {
             for (offset, ch) in self.text.char_indices() {
                 for lower in ch.to_lowercase() {
                     folded.push(lower);
-                    source.extend(std::iter::repeat_n(
-                        (offset, offset + ch.len_utf8()),
-                        lower.len_utf8(),
-                    ));
+                    source.extend(std::iter::repeat_n(offset, lower.len_utf8()));
                 }
             }
             SearchIndex { folded, source }
@@ -147,8 +148,9 @@ impl PageText {
             .match_indices(&needle)
             .take(1000)
             .map(|(offset, matched)| {
-                let start = index.source[offset].0;
-                let end = index.source[offset + matched.len() - 1].1;
+                let start = index.source[offset];
+                let last = index.source[offset + matched.len() - 1];
+                let end = last + self.text[last..].chars().next().unwrap().len_utf8();
                 let rects = self.rects_for_range(start..end);
                 let before: String = self.text[..start]
                     .chars()
@@ -277,6 +279,59 @@ mod tests {
         assert_eq!(text.search(0, "i\u{307}stanbul").len(), 1);
         assert!(text.search(0, " ").is_empty());
         assert!(text.search(0, "missing").is_empty());
+    }
+
+    #[test]
+    fn compact_mapping_preserves_expanded_case_and_multibyte_glyph_ranges() {
+        let value = "İ中İ 文";
+        let spans = value
+            .char_indices()
+            .enumerate()
+            .map(|(index, (start, ch))| TextSpan {
+                range: start..start + ch.len_utf8(),
+                rect: Rect::new(index as f64 * 10.0, 0.0, index as f64 * 10.0 + 10.0, 10.0),
+            })
+            .collect();
+        let page = PageText {
+            text: value.into(),
+            spans,
+            ..Default::default()
+        };
+        let reserve = page.memory_bytes();
+        assert_eq!(
+            page.search(0, "i")[0].rects,
+            [Rect::new(0.0, 0.0, 10.0, 10.0)]
+        );
+        assert_eq!(
+            page.search(0, "\u{307}中i")[0].rects,
+            [Rect::new(0.0, 0.0, 30.0, 10.0)]
+        );
+        assert_eq!(
+            page.search(0, "文")[0].rects,
+            [Rect::new(40.0, 0.0, 50.0, 10.0)]
+        );
+        assert!(page.memory_bytes() <= reserve);
+        let index = page.index.get().unwrap();
+        assert_eq!(index.source.len(), index.folded.len());
+        assert!(
+            index
+                .source
+                .iter()
+                .all(|offset| page.text.is_char_boundary(*offset))
+        );
+    }
+
+    #[test]
+    fn lazy_index_reservation_covers_large_unicode_expansion() {
+        let page = PageText {
+            text: "İȺȾΣ 中文 ".repeat(1000),
+            ..Default::default()
+        };
+        let reserved = page.memory_bytes();
+        assert!(page.search(0, "missing").is_empty());
+        assert!(page.memory_bytes() <= reserved);
+        assert_eq!(page.search(0, "中文").len(), 1000);
+        assert!(page.memory_bytes() <= reserved);
     }
 
     #[test]

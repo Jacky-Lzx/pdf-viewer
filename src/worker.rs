@@ -400,7 +400,13 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         },
                     );
                 } else if let Some((request, next, hit_count)) = &mut search {
+                    let reserved = text.memory_bytes();
                     let mut hits = text.search(page, &request.query);
+                    if uncached.is_none() {
+                        text_bytes = text_bytes
+                            .saturating_sub(reserved)
+                            .saturating_add(text.memory_bytes());
+                    }
                     hits.truncate(10_000_usize.saturating_sub(*hit_count));
                     *hit_count += hits.len();
                     *next += 1;
