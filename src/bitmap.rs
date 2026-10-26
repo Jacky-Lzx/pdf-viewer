@@ -54,6 +54,19 @@ fn transform<const INVERT: bool>(mut bitmap: Bitmap, turns: u8) -> Bitmap {
     let mut rgba = vec![0; bitmap.rgba.len()];
     let source = bitmap.rgba.as_chunks::<4>().0;
     let target = rgba.as_chunks_mut::<4>().0;
+    write_quarter_turn(source, target, w, h, turns, color::<INVERT>);
+    Bitmap { size, rgba }
+}
+
+/// Shared traversal for byte exports and directly prepared texture pixels.
+pub(crate) fn write_quarter_turn<T>(
+    source: &[[u8; 4]],
+    target: &mut [T],
+    w: usize,
+    h: usize,
+    turns: u8,
+    convert: impl Fn([u8; 4]) -> T,
+) {
     if source.len() <= 4_000_000 {
         // Small pages benefit from the simpler sequential source walk.
         for y in 0..h {
@@ -63,7 +76,7 @@ fn transform<const INVERT: bool>(mut bitmap: Bitmap, turns: u8) -> Bitmap {
                 } else {
                     (y, w - 1 - x)
                 };
-                target[ny * h + nx] = color::<INVERT>(source[y * w + x]);
+                target[ny * h + nx] = convert(source[y * w + x]);
             }
         }
     } else {
@@ -77,13 +90,12 @@ fn transform<const INVERT: bool>(mut bitmap: Bitmap, turns: u8) -> Bitmap {
                     let row = &mut target[ny * h..(ny + 1) * h];
                     for y in y0..(y0 + TILE).min(h) {
                         let nx = if turns == 1 { h - 1 - y } else { y };
-                        row[nx] = color::<INVERT>(source[y * w + x]);
+                        row[nx] = convert(source[y * w + x]);
                     }
                 }
             }
         }
     }
-    Bitmap { size, rgba }
 }
 
 #[cfg(test)]

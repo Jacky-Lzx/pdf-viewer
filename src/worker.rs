@@ -434,9 +434,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 let thumbnail = matches!(job, Job::Thumbnail(..));
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    document::rasterize(pdf, &render_cache, key)
+                    document::rasterize_untransformed(pdf, &render_cache, key.page, key.width)
                 }));
-                let milliseconds = start.elapsed().as_secs_f64() * 1000.0;
                 let relevant = {
                     let mut pending = shared.0.lock().unwrap();
                     if thumbnail {
@@ -448,13 +447,14 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if !relevant {
                     continue;
                 }
-                // Discard obsolete raster work before allocating the texture pixels.
-                // Keep conversion off the UI thread; the receiver only uploads images.
+                // Discard obsolete work before rotating/inverting directly into
+                // the final texture allocation. The receiver only uploads images.
                 let result = result.map(|result| {
                     result.map(|bitmap| {
-                        egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba)
+                        crate::texture_pixels::prepare(bitmap, key.rotation, key.night)
                     })
                 });
+                let milliseconds = start.elapsed().as_secs_f64() * 1000.0;
                 if thumbnail {
                     emit(
                         tx,

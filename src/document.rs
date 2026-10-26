@@ -58,10 +58,24 @@ pub fn rasterize<'a>(
     cache: &RenderCache<'a>,
     key: RenderKey,
 ) -> Result<Bitmap, String> {
+    let bitmap = rasterize_untransformed(pdf, cache, key.page, key.width)?;
+    Ok(if key.night {
+        crate::bitmap::rotate_inverted(bitmap, key.rotation)
+    } else {
+        crate::bitmap::rotate(bitmap, key.rotation)
+    })
+}
+
+pub(crate) fn rasterize_untransformed<'a>(
+    pdf: &'a Pdf,
+    cache: &RenderCache<'a>,
+    page: usize,
+    width: u32,
+) -> Result<Bitmap, String> {
     let pages = pdf.pages();
-    let page = pages.get(key.page).ok_or("Page is out of range")?;
+    let page = pages.get(page).ok_or("Page is out of range")?;
     let (w, h) = page.render_dimensions();
-    let raster = RasterSize::new([w, h], key.width)?;
+    let raster = RasterSize::new([w, h], width)?;
     let pixmap = hayro::render(
         page,
         cache,
@@ -73,14 +87,9 @@ pub fn rasterize<'a>(
             bg_color: WHITE,
         },
     );
-    let bitmap = Bitmap {
+    Ok(Bitmap {
         size: [pixmap.width() as usize, pixmap.height() as usize],
         rgba: pixmap.take_rgba8(hayro::vello_cpu::peniko::ImageAlphaType::AlphaPremultiplied),
-    };
-    Ok(if key.night {
-        crate::bitmap::rotate_inverted(bitmap, key.rotation)
-    } else {
-        crate::bitmap::rotate(bitmap, key.rotation)
     })
 }
 

@@ -24,6 +24,7 @@ mod state;
 mod state_writer;
 mod text;
 mod text_cache;
+mod texture_pixels;
 mod thumbnails;
 mod worker;
 
