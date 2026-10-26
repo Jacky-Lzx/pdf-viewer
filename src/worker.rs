@@ -19,6 +19,7 @@ pub enum Event {
         id: u64,
         dimensions: Vec<[f32; 2]>,
         outline: Vec<crate::outline::OutlineEntry>,
+        labels: crate::page_labels::PageLabels,
     },
     Rendered {
         id: u64,
@@ -142,6 +143,7 @@ impl Worker {
                             return Err("This PDF contains invalid page dimensions.".into());
                         }
                         let outline = crate::outline::read(&pdf);
+                        let labels = crate::page_labels::PageLabels::read(&pdf);
                         emit(
                             &tx,
                             &context,
@@ -149,6 +151,7 @@ impl Worker {
                                 id,
                                 dimensions,
                                 outline,
+                                labels,
                             },
                         );
                         session(&pdf, id, &state, &tx, &context);
@@ -442,6 +445,7 @@ mod tests {
                 id,
                 dimensions,
                 outline,
+                ..
             } => {
                 assert_eq!(id, 2);
                 assert_eq!(dimensions.len(), 6);

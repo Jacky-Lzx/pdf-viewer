@@ -85,7 +85,8 @@ def make_pdf():
             text(48, 555 - row * 28, 12, line)
         ops.append("0.82 0.83 0.80 RG 0.5 w 48 80 m 552 80 l S")
         text(48, 55, 10, "FOLIO / A KEYBOARD-DRIVEN PDF READER", color="0.42 0.46 0.43")
-        text(535, 55, 10, f"{index + 1:02}")
+        label = ["i", "ii", "1", "2"][index] if index < 4 else f"A-{index - 3}"
+        text(535, 55, 10, label)
         stream = "\n".join(ops).encode()
         objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
     objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode()
@@ -104,6 +105,13 @@ def make_pdf():
         if index == 3:
             dest = "/Dest (search)"
         objects.append(f"<< /Title ({pdf_string(title)}) /Parent {outline_id} 0 R {previous} {following} {dest} >>".encode())
+    labels_id = len(objects) + 1
+    objects[0] = objects[0][:-2] + f" /PageLabels {labels_id} 0 R >>".encode()
+    objects.extend([
+        f"<< /Kids [{labels_id + 1} 0 R {labels_id + 2} 0 R] >>".encode(),
+        b"<< /Nums [0 << /S /r >>] >>",
+        b"<< /Nums [2 << /S /D >> 4 << /S /D /P (A-) >>] >>",
+    ])
     output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
     for number, obj in enumerate(objects, 1):

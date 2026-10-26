@@ -6,6 +6,7 @@ mod geometry;
 mod links;
 mod navigation;
 mod outline;
+mod page_labels;
 mod render_plan;
 mod selection;
 mod state;

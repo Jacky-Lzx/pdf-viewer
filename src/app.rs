@@ -33,6 +33,7 @@ pub struct Folio {
     nav: Navigation,
     dimensions: Vec<[f32; 2]>,
     outline: Vec<crate::outline::OutlineEntry>,
+    labels: crate::page_labels::PageLabels,
     links: HashMap<usize, Vec<PageLink>>,
     visible_links: Vec<PageLink>,
     hints: LinkHints,
@@ -89,6 +90,7 @@ impl Folio {
             nav: Navigation::default(),
             dimensions: Vec::new(),
             outline: Vec::new(),
+            labels: crate::page_labels::PageLabels::default(),
             links: HashMap::new(),
             visible_links: Vec::new(),
             hints: LinkHints::default(),
@@ -154,6 +156,7 @@ impl Folio {
         self.nav = Navigation::default();
         self.dimensions.clear();
         self.outline.clear();
+        self.labels = crate::page_labels::PageLabels::default();
         self.links.clear();
         self.visible_links.clear();
         self.hints.cancel();
@@ -194,6 +197,20 @@ impl Folio {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Folio".into())
+    }
+
+    fn page_name(&self, page: usize) -> String {
+        let physical = (page + 1).to_string();
+        match self.labels.label(page) {
+            Some(label) if !label.is_empty() && label != physical => {
+                let mut short: String = label.chars().take(12).collect();
+                if label.chars().count() > 12 {
+                    short.push('…');
+                }
+                format!("{short} · {}", page + 1)
+            }
+            _ => physical,
+        }
     }
 
     fn remember(&mut self) {
@@ -420,6 +437,7 @@ impl Folio {
                     id,
                     dimensions,
                     outline,
+                    labels,
                 } if id == self.id => {
                     self.loading = false;
                     self.nav = Navigation::new(dimensions.len(), self.reading.page);
@@ -431,6 +449,7 @@ impl Folio {
                     });
                     self.dimensions = dimensions;
                     self.outline = outline;
+                    self.labels = labels;
                     self.dirty = true;
                 }
                 Event::Rendered {
@@ -831,8 +850,15 @@ impl Folio {
                             self.step(-1);
                         }
                         if ui
-                            .button(format!("{} / {}", self.nav.page + 1, self.nav.count))
-                            .on_hover_text("Go to page · :")
+                            .button(format!(
+                                "{} / {}",
+                                self.page_name(self.nav.page),
+                                self.nav.count
+                            ))
+                            .on_hover_text(format!(
+                                "Go to page · :\n{}",
+                                self.labels.label(self.nav.page).unwrap_or_default()
+                            ))
                             .clicked()
                         {
                             self.goto_open = true;
@@ -1037,7 +1063,10 @@ impl Folio {
                     }
                     for page in self.reading.bookmarks.clone() {
                         if ui
-                            .selectable_label(page == self.nav.page, format!("Page {}", page + 1))
+                            .selectable_label(
+                                page == self.nav.page,
+                                format!("Page {}", self.page_name(page)),
+                            )
                             .clicked()
                         {
                             self.jump(page);
@@ -1099,7 +1128,11 @@ impl Folio {
                                     .add(
                                         egui::Button::selectable(
                                             self.hit_index == Some(index),
-                                            format!("{}   {}", hit.page + 1, hit.snippet),
+                                            format!(
+                                                "{}   {}",
+                                                self.page_name(hit.page),
+                                                hit.snippet
+                                            ),
                                         )
                                         .truncate(),
                                     )
@@ -1124,7 +1157,7 @@ impl Folio {
                                 if ui
                                     .selectable_label(
                                         page == self.nav.page,
-                                        format!("Page {}", page + 1),
+                                        format!("Page {}", self.page_name(page)),
                                     )
                                     .clicked()
                                 {
@@ -1551,7 +1584,8 @@ impl Folio {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
-                    ui.label(format!("Page 1–{}", self.nav.count));
+                    ui.label(format!("Physical page 1–{}", self.nav.count));
+                    ui.weak("Or a PDF label: iv, A-3. Use =1 for label 1.");
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.goto)
                             .id(egui::Id::new("folio-page-input")),
@@ -1564,11 +1598,11 @@ impl Folio {
                         || (response.lost_focus()
                             && ui.input(|input| input.key_pressed(Key::Enter)))
                     {
-                        if let Ok(page) = self.goto.trim().parse::<usize>() {
-                            self.jump(page.saturating_sub(1));
+                        if let Some(page) = self.labels.resolve_input(&self.goto, self.nav.count) {
+                            self.jump(page);
                             self.goto_open = false;
                         } else {
-                            self.notify("Enter a page number");
+                            self.notify("Enter a valid page number or PDF page label");
                         }
                     }
                 });
