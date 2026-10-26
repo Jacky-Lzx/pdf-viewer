@@ -454,7 +454,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 let thumbnail = matches!(job, Job::Thumbnail(..));
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    document::rasterize_untransformed(pdf, &render_cache, key.page, key.width)
+                    document::rasterize_pixels(pdf, &render_cache, key.page, key.width)
                 }));
                 let relevant = {
                     let pending = shared.0.lock().unwrap();
@@ -467,12 +467,11 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if !relevant {
                     continue;
                 }
-                // Discard obsolete work before rotating/inverting directly into
-                // the final texture allocation. The receiver only uploads images.
+                // Discard obsolete work before transforming the raster target.
+                // The receiver only uploads finished texture images.
                 let result = result.map(|result| {
-                    result.map(|bitmap| {
-                        crate::texture_pixels::prepare(bitmap, key.rotation, key.night)
-                    })
+                    result
+                        .map(|image| crate::texture_pixels::prepare(image, key.rotation, key.night))
                 });
                 // Requests can change during pixel preparation too. Consume any
                 // duplicate still-needed job only when its final image is ready.

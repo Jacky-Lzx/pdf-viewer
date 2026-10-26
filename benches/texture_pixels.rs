@@ -1,20 +1,16 @@
 #[path = "../src/bitmap.rs"]
 mod bitmap;
+#[allow(dead_code)]
+#[path = "../src/document.rs"]
+mod document;
+#[path = "support/texture_pixels_previous.rs"]
+mod previous;
 #[path = "../src/texture_pixels.rs"]
 mod texture_pixels;
 
-use bitmap::{Bitmap, rotate, rotate_inverted};
 use eframe::egui::ColorImage;
+use hayro::{RenderCache, hayro_syntax::Pdf};
 use std::{hint::black_box, time::Instant};
-
-fn baseline(bitmap: Bitmap, turns: u8, night: bool) -> ColorImage {
-    let bitmap = if night {
-        rotate_inverted(bitmap, turns)
-    } else {
-        rotate(bitmap, turns)
-    };
-    ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba)
-}
 
 fn main() {
     let passes = std::env::args()
@@ -22,34 +18,36 @@ fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
+    let pdf = Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap();
+    let caches = [RenderCache::new(), RenderCache::new()];
+    let render = |current: usize, width, turns, night| -> ColorImage {
+        if current == 0 {
+            previous::prepare(
+                document::rasterize_untransformed(&pdf, &caches[0], 0, width).unwrap(),
+                turns,
+                night,
+            )
+        } else {
+            texture_pixels::prepare(
+                document::rasterize_pixels(&pdf, &caches[1], 0, width).unwrap(),
+                turns,
+                night,
+            )
+        }
+    };
     println!(
-        "Alternating transform-then-copy/direct texture output, {passes} passes each; medians include output allocations and input release, exclude input cloning."
+        "Alternating bitmap/final-texture raster targets, {passes} passes each. Real PDF first page, warmed separate render caches; medians include rasterization, target allocation and pixel transforms; exclude PDF parsing, final image release, upload and UI drawing."
     );
-    for size @ [w, h] in [[1200, 1600], [3200, 4000]] {
-        let rgba: Vec<_> = (0..w * h * 4)
-            .map(|index| (index * 17 + index / 257) as u8)
-            .collect();
-        let input = || Bitmap {
-            size,
-            rgba: rgba.clone(),
-        };
+    for width in [1200, 3200] {
         for night in [false, true] {
             for turns in 0..4 {
-                assert!(
-                    baseline(input(), turns, night)
-                        == texture_pixels::prepare(input(), turns, night)
-                );
+                assert!(render(0, width, turns, night) == render(1, width, turns, night));
                 let mut times = [Vec::with_capacity(passes), Vec::with_capacity(passes)];
                 for pass in 0..passes {
                     for order in 0..2 {
                         let current = (pass + order) % 2;
-                        let bitmap = input();
                         let start = Instant::now();
-                        let image = if current == 1 {
-                            texture_pixels::prepare(bitmap, turns, night)
-                        } else {
-                            baseline(bitmap, turns, night)
-                        };
+                        let image = render(current, black_box(width), turns, night);
                         times[current].push(start.elapsed().as_secs_f64() * 1000.0);
                         black_box(image);
                     }
@@ -60,7 +58,7 @@ fn main() {
                 let old = times[0][passes / 2];
                 let new = times[1][passes / 2];
                 println!(
-                    "{w}×{h} · {:3}° · night={night:<5} · previous {old:.3} ms · direct {new:.3} ms · {:.2}×",
+                    "width={width} · {:3}° · night={night:<5} · bitmap {old:.3} ms · texture {new:.3} ms · {:.2}×",
                     u16::from(turns) * 90,
                     old / new
                 );

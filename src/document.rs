@@ -93,6 +93,50 @@ pub(crate) fn rasterize_untransformed<'a>(
     })
 }
 
+/// Render premultiplied RGBA directly into the aligned final texture buffer.
+pub(crate) fn rasterize_pixels<'a>(
+    pdf: &'a Pdf,
+    cache: &RenderCache<'a>,
+    page: usize,
+    width: u32,
+) -> Result<eframe::egui::ColorImage, String> {
+    use eframe::egui::{Color32, ColorImage};
+    use hayro::{
+        hayro_interpret::util::TransformExt,
+        kurbo::Affine,
+        vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit},
+    };
+
+    let page = pdf.pages().get(page).ok_or("Page is out of range")?;
+    let (w, h) = page.render_dimensions();
+    let raster = RasterSize::new([w, h], width)?;
+    let [w, h] = raster.size.map(|side| side as u16);
+    let mut context = RenderContext::new(w, h);
+    let transform = Affine::scale_non_uniform(f64::from(raster.scale), f64::from(raster.scale))
+        * page.initial_transform(true).to_kurbo();
+    hayro::render_into(
+        page,
+        cache,
+        &InterpreterSettings::default(),
+        &RenderSettings::default(),
+        &mut context,
+        transform,
+    );
+    context.flush();
+    let mut image = ColorImage::filled(raster.size, Color32::TRANSPARENT);
+    let target = PixmapMut::new(w, h, bytemuck::cast_slice_mut(&mut image.pixels))
+        .expect("texture buffer matches the validated raster size");
+    context.render_with(
+        target,
+        &mut Resources::default(),
+        RasterizerSettings {
+            target_init: TargetInit::Clear(WHITE),
+            ..Default::default()
+        },
+    );
+    Ok(image)
+}
+
 pub fn write_png(bitmap: &Bitmap, path: &Path) -> Result<(), String> {
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut encoder = png::Encoder::new(
@@ -114,6 +158,25 @@ mod tests {
 
     fn sample() -> Pdf {
         Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap()
+    }
+
+    #[test]
+    fn direct_texture_targets_match_rasters_for_cropped_rotated_and_translucent_content() {
+        for pdf in [
+            sample(),
+            Pdf::new(include_bytes!("../tests/fixtures/render-crop.pdf").to_vec()).unwrap(),
+        ] {
+            let cache = RenderCache::new();
+            for page in 0..pdf.pages().len() {
+                for width in [3, 96, 301] {
+                    let expected = rasterize_untransformed(&pdf, &cache, page, width).unwrap();
+                    let actual = rasterize_pixels(&pdf, &cache, page, width).unwrap();
+                    assert_eq!(actual.size, expected.size);
+                    assert_eq!(bytemuck::cast_slice::<_, u8>(&actual.pixels), expected.rgba);
+                }
+            }
+            assert!(rasterize_pixels(&pdf, &cache, usize::MAX, 96).is_err());
+        }
     }
 
     #[test]

@@ -34,16 +34,7 @@ fn transform<const INVERT: bool>(mut bitmap: Bitmap, turns: u8) -> Bitmap {
         // Reverse pixels, preserving channel order and reusing the full allocation.
         let pixels = bitmap.rgba.as_chunks_mut::<4>().0;
         if INVERT {
-            let middle = pixels.len() / 2;
-            let (first, second) = pixels.split_at_mut(middle);
-            for (left, right) in first.iter_mut().zip(second.iter_mut().rev()) {
-                let original = *left;
-                *left = color::<true>(*right);
-                *right = color::<true>(original);
-            }
-            if pixels.len() % 2 == 1 {
-                pixels[middle] = color::<true>(pixels[middle]);
-            }
+            reverse_map(pixels, color::<true>);
         } else {
             pixels.reverse();
         }
@@ -56,6 +47,20 @@ fn transform<const INVERT: bool>(mut bitmap: Bitmap, turns: u8) -> Bitmap {
     let target = rgba.as_chunks_mut::<4>().0;
     write_quarter_turn(source, target, w, h, turns, color::<INVERT>);
     Bitmap { size, rgba }
+}
+
+/// Reverse pixels while applying a transform once to each, including an odd center.
+pub(crate) fn reverse_map<T: Copy>(pixels: &mut [T], convert: impl Fn(T) -> T) {
+    let middle = pixels.len() / 2;
+    let (first, second) = pixels.split_at_mut(middle);
+    for (left, right) in first.iter_mut().zip(second.iter_mut().rev()) {
+        let original = *left;
+        *left = convert(*right);
+        *right = convert(original);
+    }
+    if pixels.len() % 2 == 1 {
+        pixels[middle] = convert(pixels[middle]);
+    }
 }
 
 /// Shared traversal for byte exports and directly prepared texture pixels.
