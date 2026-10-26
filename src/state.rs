@@ -8,6 +8,7 @@ use std::{
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReadingState {
+    #[serde(with = "path_serde")]
     pub path: PathBuf,
     pub page: usize,
     pub fit: Fit,
@@ -15,6 +16,58 @@ pub struct ReadingState {
     pub bookmarks: BTreeSet<usize>,
     pub offset: [f32; 2],
     pub marks: BTreeMap<char, ReadingMark>,
+}
+
+// Keep existing UTF-8 settings readable while preserving every Unix path byte.
+// Linux and macOS both use Unix OsStrings; lossy display text is never a path.
+mod path_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::path::{Path, PathBuf};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum StoredPath {
+        Utf8(String),
+        Unix { unix_bytes: Vec<u8> },
+    }
+
+    pub fn serialize<S: Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+        if let Some(path) = path.to_str() {
+            return serializer.serialize_str(path);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            StoredPath::Unix {
+                unix_bytes: path.as_os_str().as_bytes().to_vec(),
+            }
+            .serialize(serializer)
+        }
+        #[cfg(not(unix))]
+        Err(serde::ser::Error::custom(
+            "path contains invalid UTF-8 characters",
+        ))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<PathBuf, D::Error> {
+        match StoredPath::deserialize(deserializer)? {
+            StoredPath::Utf8(path) => Ok(path.into()),
+            StoredPath::Unix { unix_bytes } => {
+                #[cfg(unix)]
+                {
+                    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+                    Ok(OsString::from_vec(unix_bytes).into())
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = unix_bytes;
+                    Err(serde::de::Error::custom(
+                        "Unix path bytes require a Unix platform",
+                    ))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -124,6 +177,50 @@ mod tests {
         assert_eq!(mark.fit, Fit::Custom(2.0));
         assert_eq!(mark.rotation, 1);
         assert_eq!(mark.offset, [0.4, 0.8]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn library_roundtrip_preserves_non_utf8_paths_without_losing_other_documents() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("library.json");
+        let raw_path = PathBuf::from(OsString::from_vec(b"/docs/\xff\xfe.pdf".to_vec()));
+        let mut library = Library::default();
+        library.remember(ReadingState {
+            path: "ordinary.pdf".into(),
+            page: 2,
+            ..Default::default()
+        });
+        library.remember(ReadingState {
+            path: raw_path.clone(),
+            page: 7,
+            rotation: 3,
+            bookmarks: [1, 7].into(),
+            marks: [(
+                'a',
+                ReadingMark {
+                    page: 4,
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        });
+        library.save(&settings).unwrap();
+        let restored = Library::load(&settings);
+        assert_eq!(restored.recent.len(), 2);
+        assert_eq!(restored.recent[0].path, raw_path);
+        assert_eq!(restored.recent[0].page, 7);
+        assert_eq!(restored.recent[0].rotation, 3);
+        assert_eq!(restored.recent[0].bookmarks, [1, 7].into());
+        assert_eq!(restored.recent[0].marks[&'a'].page, 4);
+        assert_eq!(restored.recent[1].path, PathBuf::from("ordinary.pdf"));
+        assert_eq!(restored.recent[1].page, 2);
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(json["recent"][1]["path"], "ordinary.pdf");
     }
 
     #[test]

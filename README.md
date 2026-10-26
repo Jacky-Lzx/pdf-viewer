@@ -34,6 +34,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 命令行一次打开一份文档。文本导出和图像导出的页码从 1 开始，图像宽度为 1–16384 像素，基准轮数为 1–1000；缺少参数、数值越界或参数过多时，会在读取 PDF 前报告错误。Linux 和 macOS 的非 UTF-8 文件路径按原始路径保留。
 
+非 UTF-8 路径同样支持最近文档、阅读进度、书签和命名位置的保存与恢复；界面显示的替代字符不会改变实际文件路径。
+
 ## 键盘操作
 
 页面导航快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
@@ -179,6 +181,7 @@ xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
+xvfb-run -a python3 scripts/smoke-paths.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-close.py target/release/folio
 xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
