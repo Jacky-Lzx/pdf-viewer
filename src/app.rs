@@ -455,10 +455,13 @@ impl Folio {
         }
     }
 
-    fn rotate_page(&mut self, backwards: bool) {
+    fn rotate_page(&mut self, backwards: bool, count: usize) {
         // Consume saved/search/PDF positions before the explicit pan reset.
         self.resolve_view();
-        self.reading.rotation = (self.reading.rotation + if backwards { 3 } else { 1 }) % 4;
+        self.nav.clear_prefix();
+        let turns = (count % 4) as u8;
+        self.reading.rotation =
+            (self.reading.rotation + if backwards { 4 - turns } else { turns }) % 4;
         self.pan = Vec2::ZERO;
         self.dirty = true;
     }
@@ -1313,7 +1316,10 @@ impl Folio {
                     self.pan = Vec2::ZERO;
                     self.dirty = true;
                 }
-                Key::R => self.rotate_page(modifiers.shift),
+                Key::R => {
+                    let count = self.nav.take_count();
+                    self.rotate_page(modifiers.shift, count);
+                }
                 Key::Slash => self.find(),
                 Key::C => self.focus_contents(),
                 Key::S => self.show_properties(context),
@@ -1484,7 +1490,7 @@ impl Folio {
                                 .on_hover_text("Rotate · r / Shift+R")
                                 .clicked()
                         {
-                            self.rotate_page(false);
+                            self.rotate_page(false, 1);
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2178,6 +2184,7 @@ impl Folio {
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("zH / zL", "Scroll left / right half a screen; counts supported"),
+                        ("3r / 3R", "Rotate clockwise / counterclockwise three quarter turns"),
                         ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Mouse back / forward", "Restore the previous / next reading view"),
