@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -37,9 +38,37 @@ def run(binary):
             def custom(book):
                 return book["fit"].get("Custom", 0) if isinstance(book["fit"], dict) else 0
 
+            def burst(value):
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    for letter in value:
+                        keyboard.key(letter.lower(), shift=letter.isupper(), delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+
             try:
                 wait_for(keyboard.focus, "destination reader window")
                 expect(lambda book: book["page"] == 0, "initial page")
+                burst("famb")
+                expect(lambda book: book["page"] == 1 and custom(book) == 2
+                       and book["marks"].get("b", {}).get("page") == 1
+                       and 0.6 < book["marks"]["b"]["offset"][1] < 0.7,
+                       "same-frame link and mark save the resolved target position")
+                keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
+                keyboard.key("'"); keyboard.key("b")
+                expect(lambda book: book["page"] == 1 and custom(book) == 2 and 0.6 < book["offset"][1] < 0.7,
+                       "saved same-frame destination mark restores its actual location")
+                keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
+                burst("faJ")
+                expect(lambda book: book["page"] == 2 and custom(book) == 2,
+                       "same-frame link then page jump reaches the next page")
+                keyboard.key(0xFF51, alt=True)
+                expect(lambda book: book["page"] == 1 and custom(book) == 2 and 0.6 < book["offset"][1] < 0.7,
+                       "history retains the resolved same-frame PDF target")
+                keyboard.key(0xFF53, alt=True)
+                expect(lambda book: book["page"] == 2 and custom(book) == 2 and book["offset"][1] == 0,
+                       "forward history restores the later page after the batched jump")
+                keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
                 keyboard.key("f"); keyboard.key("a")
                 expect(lambda book: book["page"] == 1 and custom(book) == 2 and 0.6 < book["offset"][1] < 0.7, "Vim link hints apply XYZ target zoom and location")
                 keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
@@ -88,7 +117,7 @@ def run(binary):
                 expect(lambda book: book["page"] == 0, "reload retains valid previous views")
                 keyboard.key(0xFF53, alt=True)
                 expect(lambda book: book["page"] == 2, "reload prunes missing pages from forward view history")
-                print("PASS: PDF destinations, same/cross-page view history, zoom/rotation/scroll restoration, counts and history after shrinking a document")
+                print("PASS: PDF destinations, same-frame link/mark/history snapshots, same/cross-page view history, zoom/rotation/scroll restoration, counts and reload pruning")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -96,6 +125,7 @@ def run(binary):
                     print(config_path.read_text(), file=sys.stderr)
                 raise
             finally:
+                application.send_signal(signal.SIGCONT)
                 application.terminate()
                 application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)

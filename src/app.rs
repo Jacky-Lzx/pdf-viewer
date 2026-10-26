@@ -284,7 +284,9 @@ impl Folio {
 
     fn remember(&mut self) {
         if self.nav.count > 0 {
-            self.reading.page = self.nav.page;
+            let position = self.current_position();
+            self.reading.page = position.page;
+            self.reading.offset = position.offset;
             self.library.remember(self.reading.clone());
         }
     }
@@ -293,18 +295,20 @@ impl Folio {
         state::normalized_offset([self.pan.x, self.pan.y], [self.overflow.x, self.overflow.y])
     }
 
-    fn current_position(&self) -> ReadingMark {
+    fn current_position(&mut self) -> ReadingMark {
+        self.resolve_view();
         ReadingMark {
             page: self.nav.page,
             fit: self.reading.fit,
             rotation: self.reading.rotation,
-            offset: self.pending_offset.unwrap_or_else(|| self.current_offset()),
+            offset: self.current_offset(),
         }
     }
 
     fn restore_position(&mut self, position: ReadingMark, record: bool) {
         if record {
-            self.history.record(self.current_position());
+            let current = self.current_position();
+            self.history.record(current);
         }
         self.nav.jump(position.page);
         self.page_changed();
@@ -329,7 +333,8 @@ impl Folio {
         }
         match action {
             MarkAction::Set => {
-                self.reading.marks.insert(name, self.current_position());
+                let position = self.current_position();
+                self.reading.marks.insert(name, position);
                 self.dirty = true;
                 self.notify(format!("Mark {name} saved · page {}", self.nav.page + 1));
             }
@@ -1716,11 +1721,11 @@ impl Folio {
         let Some(&dimensions) = self.dimensions.get(destination.page) else {
             return;
         };
+        let current = self.current_position();
         let origin = [
             f64::from(self.pan.x) / f64::from(self.scale),
             f64::from(self.pan.y) / f64::from(self.scale),
         ];
-        let current = self.current_position();
         self.jump(destination.page);
         self.history.record(current);
         self.nav.clear_prefix();
