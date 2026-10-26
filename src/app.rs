@@ -45,6 +45,7 @@ pub struct Folio {
     links: crate::link_cache::LinkCache,
     visible_links: Vec<usize>,
     hints: LinkHints,
+    copy_link_hints: bool,
     mark_action: Option<MarkAction>,
     pending_offset: Option<[f32; 2]>,
     pending_focus: Option<hayro::kurbo::Rect>,
@@ -113,6 +114,7 @@ impl Folio {
             links: crate::link_cache::LinkCache::default(),
             visible_links: Vec::new(),
             hints: LinkHints::default(),
+            copy_link_hints: false,
             mark_action: None,
             pending_offset: None,
             pending_focus: None,
@@ -1137,13 +1139,32 @@ impl Folio {
                 let name = key.name().to_ascii_lowercase();
                 if name.len() == 1
                     && let Some(index) = self.hints.press(name.as_bytes()[0] as char)
-                    && let Some(&link_index) = self.visible_links.get(index)
-                    && let Some(link) = self
+                    && let Some(target) = self
                         .links
                         .get(&self.nav.page)
-                        .and_then(|links| links.get(link_index))
+                        .and_then(|links| {
+                            if self.copy_link_hints {
+                                self.visible_links
+                                    .iter()
+                                    .filter_map(|&index| links.get(index))
+                                    .filter(|link| matches!(&link.target, LinkTarget::Url(_)))
+                                    .nth(index)
+                            } else {
+                                self.visible_links
+                                    .get(index)
+                                    .and_then(|&index| links.get(index))
+                            }
+                        })
+                        .map(|link| link.target.clone())
                 {
-                    self.follow_link(link.target.clone(), context);
+                    if self.copy_link_hints {
+                        if let LinkTarget::Url(url) = target {
+                            context.copy_text(url);
+                            self.notify("Copied link address");
+                        }
+                    } else {
+                        self.follow_link(target, context);
+                    }
                 }
                 continue;
             }
@@ -1340,9 +1361,27 @@ impl Folio {
                 Key::C => self.focus_contents(),
                 Key::S => self.show_properties(context),
                 Key::F => {
-                    self.hints.start(self.visible_links.len());
+                    self.copy_link_hints = modifiers.shift;
+                    let count = if self.copy_link_hints {
+                        self.links.get(&self.nav.page).map_or(0, |links| {
+                            self.visible_links
+                                .iter()
+                                .filter_map(|&index| links.get(index))
+                                .filter(|link| matches!(&link.target, LinkTarget::Url(_)))
+                                .count()
+                        })
+                    } else {
+                        self.visible_links.len()
+                    };
+                    self.hints.start(count);
                     if !self.hints.active {
-                        self.notify("No links visible on this page");
+                        self.notify(if self.copy_link_hints {
+                            "No web links visible on this page"
+                        } else {
+                            "No links visible on this page"
+                        });
+                    } else if self.copy_link_hints {
+                        self.notify("Copy link address · type a label · Escape to cancel");
                     }
                 }
                 Key::N | Key::F3 => {
@@ -1949,7 +1988,8 @@ impl Folio {
         let matching = self.hints.matching_range();
         let mut follow = None;
         let mut copied = false;
-        for (index, &link_index) in self.visible_links.iter().enumerate() {
+        let mut hint_index = 0;
+        for &link_index in &self.visible_links {
             let link = &links[link_index];
             let rect = self
                 .link_rect(link.rect, page_rect, dimensions)
@@ -1958,7 +1998,7 @@ impl Folio {
             let response = ui
                 .interact(
                     rect,
-                    ui.id().with(("link", self.nav.page, index)),
+                    ui.id().with(("link", self.nav.page, link_index)),
                     egui::Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -2002,8 +2042,11 @@ impl Folio {
             if response.clicked() {
                 follow = Some(link.target.clone());
             }
-            if matching.contains(&index) {
-                let label = crate::link_hints::label(index, self.visible_links.len());
+            let hint = !self.copy_link_hints || matches!(&link.target, LinkTarget::Url(_));
+            let index = hint_index;
+            hint_index += usize::from(hint);
+            if hint && matching.contains(&index) {
+                let label = crate::link_hints::label(index, self.hints.count);
                 let painter = ui.painter();
                 let text =
                     painter.layout_no_wrap(label, egui::FontId::monospace(14.0), Color32::WHITE);
@@ -2258,7 +2301,9 @@ impl Folio {
                         ("Ctrl/Cmd+w", "Close PDF and save reading position"),
                         ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
-                        ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
+                        ("f, then a label", "Follow a visible PDF link"),
+                        ("F, then a label", "Copy a visible web-link address"),
+                        ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }
                 });
                 ui.add_space(12.0); ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan. Double-click to fit.");

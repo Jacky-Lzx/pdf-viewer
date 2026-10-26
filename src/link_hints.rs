@@ -25,7 +25,7 @@ pub fn label(mut index: usize, count: usize) -> String {
 pub struct LinkHints {
     pub active: bool,
     pub prefix: String,
-    count: usize,
+    pub count: usize,
 }
 
 impl LinkHints {

@@ -65,6 +65,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `Alt+c` / `Alt+w` | 搜索栏打开时切换区分大小写 / 整词匹配 |
 | `n` / `N`，`3n` / `3N` | 下一个 / 上一个搜索匹配，支持数字计数（`F3` / `Shift+F3` 同样生效） |
 | `f`，然后输入标签 | 跟随当前可见的 PDF 链接；`Escape` 取消 |
+| `F`，然后输入标签 | 复制当前可见的网页链接地址；仅给网页链接编号，`Escape` 取消 |
 | `b` | 添加 / 删除当前页书签 |
 | `Alt+j` / `Alt+k`，`3 Alt+j` | 下一个 / 上一个书签，支持数字前缀；到末尾后循环 |
 | `ma`，`'a` 或 `` `a `` | 保存 / 返回命名位置，字母可用 `a`–`z`；同时恢复缩放、旋转和页内滚动 |
@@ -171,6 +172,7 @@ xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
 xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
 xvfb-run -a python3 scripts/smoke-link-menu.py target/release/folio
+xvfb-run -a python3 scripts/smoke-link-copy.py target/release/folio
 xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio

@@ -168,13 +168,20 @@ class Keyboard:
         x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
         x11.XCreateSimpleWindow.restype = ctypes.c_ulong
         x11.XConvertSelection.argtypes = [ctypes.c_void_p] + [ctypes.c_ulong] * 5
+        x11.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        x11.XGetSelectionOwner.restype = ctypes.c_ulong
         x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
         x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         window = x11.XCreateSimpleWindow(self.display, x11.XDefaultRootWindow(self.display), 0, 0, 1, 1, 0, 0, 0)
         atom = lambda name: x11.XInternAtom(self.display, name, 0)
         property_atom = atom(b"FOLIO_SMOKE_CLIPBOARD")
         try:
-            x11.XConvertSelection(self.display, atom(b"CLIPBOARD"), atom(b"UTF8_STRING"), property_atom, window, 0)
+            clipboard = atom(b"CLIPBOARD")
+            # A burst can reach this client before the reader has copied text.
+            # Converting an unowned selection fails once; it is never retried
+            # automatically when the application claims the clipboard later.
+            wait_for(lambda: x11.XGetSelectionOwner(self.display, clipboard), "clipboard owner")
+            x11.XConvertSelection(self.display, clipboard, atom(b"UTF8_STRING"), property_atom, window, 0)
             x11.XFlush(self.display)
             def read():
                 actual, count, remaining = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_ulong()

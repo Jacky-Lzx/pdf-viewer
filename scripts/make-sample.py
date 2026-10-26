@@ -63,7 +63,7 @@ PAGES = [
 ]
 
 
-def make_pdf(nested_outline=False, destination_views=None, hint_links=0):
+def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hints=False):
     def destination(index):
         view = (destination_views or {}).get(index, "/Fit")
         return f"[{5 + index * 2} 0 R {view}]"
@@ -88,7 +88,8 @@ def make_pdf(nested_outline=False, destination_views=None, hint_links=0):
                 for link in range(hint_links):
                     x, y = 20 + (link % 40) * 14, 120 + (link // 40) * 20
                     target = (link % (len(PAGES) - 1)) + 1
-                    annotations.append(f"<< /Type /Annot /Subtype /Link /Rect [{x} {y} {x + 12} {y + 16}] /Border [0 0 0] /Dest {destination(target)} >>")
+                    action = f"/A << /S /URI /URI (https://example.com/link/{link}) >>" if web_hints else f"/Dest {destination(target)}"
+                    annotations.append(f"<< /Type /Annot /Subtype /Link /Rect [{x} {y} {x + 12} {y + 16}] /Border [0 0 0] {action} >>")
                 objects[page_id - 1] = (page[:-2] + "/Annots [" + " ".join(annotations) + "] >>").encode()
         text(48, 620, 29, title, True)
         for row, line in enumerate(lines):
