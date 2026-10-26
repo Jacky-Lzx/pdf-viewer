@@ -1,3 +1,6 @@
+mod span;
+pub use span::TextSpan;
+
 use caseless::Caseless;
 use hayro::{
     hayro_interpret::{
@@ -12,17 +15,12 @@ use hayro::{
 };
 use std::{ops::Range, sync::OnceLock};
 
-#[derive(Clone, Debug)]
-pub struct TextSpan {
-    pub range: Range<usize>,
-    pub rect: Rect,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct PageText {
     pub text: String,
     pub spans: Vec<TextSpan>,
     index: OnceLock<SearchIndex>,
+    selection_index: OnceLock<crate::selection_index::SelectionIndex>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,9 +68,19 @@ pub fn initial_match(
 }
 
 impl PageText {
+    pub fn prepare_selection(&self) {
+        if self.spans.len() >= 256 {
+            self.selection_index
+                .get_or_init(|| crate::selection_index::SelectionIndex::new(&self.spans));
+        }
+    }
+
     pub fn nearest_span(&self, point: Point) -> Option<usize> {
         if !point.x.is_finite() || !point.y.is_finite() {
             return None;
+        }
+        if let Some(index) = self.selection_index.get() {
+            return index.nearest(&self.spans, point);
         }
         self.spans
             .iter()
@@ -127,7 +135,13 @@ impl PageText {
                 index.folded.capacity() + index.source.capacity() * std::mem::size_of::<usize>()
             },
         );
-        self.text.capacity() + self.spans.capacity() * std::mem::size_of::<TextSpan>() + index_bytes
+        self.text.capacity()
+            + self.spans.capacity() * std::mem::size_of::<TextSpan>()
+            + index_bytes
+            + self
+                .selection_index
+                .get()
+                .map_or(0, |index| index.memory_bytes())
     }
 
     pub fn search(&self, page: usize, query: &str) -> Vec<SearchHit> {

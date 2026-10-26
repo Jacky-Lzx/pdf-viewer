@@ -422,6 +422,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     text
                 };
                 if matches!(job, Job::Inspect(_)) {
+                    text.prepare_selection();
+                    texts.refresh(page);
                     emit(
                         tx,
                         context,

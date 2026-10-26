@@ -83,6 +83,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 - 缩略图仅请求可见行，使用独立 **8 MiB LRU 缓存**；滚动或关闭侧栏会取消过期任务，主页面渲染、文本操作和搜索优先执行。
 - 复用文档的解释器和字形缓存；缩放时可先复用同页已有纹理。
 - 搜索、整页复制与文本选择共享按需提取的文本缓存，选择模式通过共享引用接收当前页字形坐标，避免复制整页索引。
+- 密集文本的拖选定位使用后台按需构建的纵向空间索引，先缩小候选范围，再按纵向、横向距离选择字形，保留短行、重叠字形及距离并列时的原有规则；索引容量计入文本缓存。
 - Unicode 搜索映射每个字节只记录一个源位置，索引建成后按实际容量计入文本缓存预算。
 - 按物理像素渲染，宽度以 32 像素分档；单页限制为约 1600 万像素。
 - 搜索输入延迟 180 ms 合并请求，复用 Unicode 完整大小写折叠索引，支持 `Straße` / `STRASSE`、`Σ` / `σ` / `ς` 和连字，以二分定位当前页匹配与文本坐标并合并相邻高亮；结果分页面返回，最多保留 10,000 个匹配。侧栏按可见行绘制全部结果，`n` / `N` 同步定位列表；旋转、放大后也会滚到匹配处。
@@ -107,6 +108,8 @@ cargo run --release -- --benchmark assets/folio-guide.pdf 5
 cargo bench --locked --bench rotation -- 9
 # 链接提示匹配基准，比较逐标签扫描与前缀范围计算
 cargo bench --locked --bench link_hints -- 9
+# 密集页面拖选定位，分别记录查询、建索引耗时和索引容量
+cargo bench --locked --bench selection -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio

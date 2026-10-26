@@ -42,3 +42,7 @@ harness = false
 [[bench]]
 name = "link_hints"
 harness = false
+
+[[bench]]
+name = "selection"
+harness = false

@@ -15,6 +15,7 @@ mod outline_view;
 mod page_labels;
 mod render_plan;
 mod selection;
+mod selection_index;
 mod state;
 mod text;
 mod text_cache;

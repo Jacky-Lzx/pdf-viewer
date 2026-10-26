@@ -182,4 +182,37 @@ mod tests {
         assert!(cache.get(96).is_none() && cache.get(97).is_some());
         assert_eq!(cache.bytes, memory_bytes(&PageText::default()) * 3);
     }
+
+    #[test]
+    fn selection_index_growth_is_accounted_and_held_text_survives_eviction() {
+        let mut dense = PageText::default();
+        dense.text = "a".repeat(1000);
+        dense.spans = (0..1000)
+            .map(|index| crate::text::TextSpan {
+                range: index..index + 1,
+                rect: hayro::kurbo::Rect::new(
+                    (index % 100) as f64 * 8.0,
+                    (index / 100) as f64 * 16.0,
+                    (index % 100) as f64 * 8.0 + 6.0,
+                    (index / 100) as f64 * 16.0 + 10.0,
+                ),
+            })
+            .collect();
+        let dense = Arc::new(dense);
+        let before = memory_bytes(&dense);
+        let mut cache = TextCache {
+            budget: before,
+            ..Default::default()
+        };
+        assert!(cache.insert(0, Arc::clone(&dense)));
+        dense.prepare_selection();
+        assert!(memory_bytes(&dense) > before);
+        cache.refresh(0);
+        assert!(cache.get(0).is_none());
+        assert_eq!(cache.bytes, 0);
+        assert_eq!(
+            dense.nearest_span(hayro::kurbo::Point::new(13.0, 20.0)),
+            Some(101)
+        );
+    }
 }
