@@ -51,10 +51,7 @@ pub struct RenderKey {
     pub night: bool,
 }
 
-pub struct Bitmap {
-    pub size: [usize; 2],
-    pub rgba: Vec<u8>,
-}
+pub use crate::bitmap::Bitmap;
 
 pub fn rasterize<'a>(
     pdf: &'a Pdf,
@@ -88,27 +85,9 @@ pub fn rasterize<'a>(
         }
     }
     if !key.rotation.is_multiple_of(4) {
-        bitmap = rotate(bitmap, key.rotation);
+        bitmap = crate::bitmap::rotate(bitmap, key.rotation);
     }
     Ok(bitmap)
-}
-
-fn rotate(bitmap: Bitmap, turns: u8) -> Bitmap {
-    let [w, h] = bitmap.size;
-    let size = if turns % 2 == 1 { [h, w] } else { [w, h] };
-    let mut rgba = vec![0; bitmap.rgba.len()];
-    for y in 0..h {
-        for x in 0..w {
-            let (nx, ny) = match turns % 4 {
-                1 => (h - 1 - y, x),
-                2 => (w - 1 - x, h - 1 - y),
-                _ => (y, w - 1 - x),
-            };
-            rgba[(ny * size[0] + nx) * 4..(ny * size[0] + nx + 1) * 4]
-                .copy_from_slice(&bitmap.rgba[(y * w + x) * 4..(y * w + x + 1) * 4]);
-        }
-    }
-    Bitmap { size, rgba }
 }
 
 pub fn write_png(bitmap: &Bitmap, path: &Path) -> Result<(), String> {
@@ -246,18 +225,5 @@ mod tests {
         ] {
             assert!(RasterSize::new(dimensions, 1200).is_err());
         }
-    }
-    #[test]
-    fn rotation_preserves_pixels_and_roundtrips() {
-        let bitmap = Bitmap {
-            size: [2, 3],
-            rgba: (0..24).collect(),
-        };
-        let original = bitmap.rgba.clone();
-        let once = rotate(bitmap, 1);
-        assert_eq!(once.size, [3, 2]);
-        let restored = rotate(once, 3);
-        assert_eq!(restored.size, [2, 3]);
-        assert_eq!(restored.rgba, original);
     }
 }

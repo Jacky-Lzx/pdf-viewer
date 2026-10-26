@@ -1,0 +1,138 @@
+pub struct Bitmap {
+    pub size: [usize; 2],
+    pub rgba: Vec<u8>,
+}
+
+pub fn rotate(mut bitmap: Bitmap, turns: u8) -> Bitmap {
+    let turns = turns % 4;
+    if turns == 0 {
+        return bitmap;
+    }
+    if turns == 2 {
+        // Reverse pixels, preserving channel order and reusing the full allocation.
+        bitmap.rgba.as_chunks_mut::<4>().0.reverse();
+        return bitmap;
+    }
+    let [w, h] = bitmap.size;
+    let size = [h, w];
+    let mut rgba = vec![0; bitmap.rgba.len()];
+    let source = bitmap.rgba.as_chunks::<4>().0;
+    let target = rgba.as_chunks_mut::<4>().0;
+    if source.len() <= 4_000_000 {
+        // Small pages benefit from the simpler sequential source walk.
+        for y in 0..h {
+            for x in 0..w {
+                let (nx, ny) = if turns == 1 {
+                    (h - 1 - y, x)
+                } else {
+                    (y, w - 1 - x)
+                };
+                target[ny * h + nx] = source[y * w + x];
+            }
+        }
+    } else {
+        // Large transposes otherwise write a full page stride between each pixel.
+        // Keep source and destination tiles close in cache, writing output rows.
+        const TILE: usize = 64;
+        for y0 in (0..h).step_by(TILE) {
+            for x0 in (0..w).step_by(TILE) {
+                for x in x0..(x0 + TILE).min(w) {
+                    let ny = if turns == 1 { x } else { w - 1 - x };
+                    let row = &mut target[ny * h..(ny + 1) * h];
+                    for y in y0..(y0 + TILE).min(h) {
+                        let nx = if turns == 1 { h - 1 - y } else { y };
+                        row[nx] = source[y * w + x];
+                    }
+                }
+            }
+        }
+    }
+    Bitmap { size, rgba }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn quarter_and_half_turns_keep_pixel_channels_in_the_correct_order() {
+        use super::{Bitmap, rotate};
+
+        let pixels = (1..=6)
+            .flat_map(|value| [value, value + 10, value + 20, 255])
+            .collect::<Vec<_>>();
+        for (turns, size, expected) in [
+            (0, [2, 3], [1, 2, 3, 4, 5, 6]),
+            (1, [3, 2], [5, 3, 1, 6, 4, 2]),
+            (2, [2, 3], [6, 5, 4, 3, 2, 1]),
+            (3, [3, 2], [2, 4, 6, 1, 3, 5]),
+            (4, [2, 3], [1, 2, 3, 4, 5, 6]),
+        ] {
+            let rotated = rotate(
+                Bitmap {
+                    size: [2, 3],
+                    rgba: pixels.clone(),
+                },
+                turns,
+            );
+            assert_eq!(rotated.size, size);
+            for (pixel, value) in rotated.rgba.as_chunks::<4>().0.iter().zip(expected) {
+                assert_eq!(*pixel, [value, value + 10, value + 20, 255]);
+            }
+        }
+    }
+
+    #[test]
+    fn half_turn_reuses_the_original_allocation() {
+        use super::{Bitmap, rotate};
+
+        let bitmap = Bitmap {
+            size: [31, 33],
+            rgba: (0..31 * 33 * 4).map(|value| value as u8).collect(),
+        };
+        let address = bitmap.rgba.as_ptr();
+        let original = bitmap.rgba.clone();
+        let rotated = rotate(bitmap, 2);
+        assert_eq!(rotated.rgba.as_ptr(), address);
+        assert_eq!(rotate(rotated, 2).rgba, original);
+    }
+
+    #[test]
+    fn tiled_rotation_roundtrips_portrait_landscape_and_partial_edge_tiles() {
+        use super::{Bitmap, rotate};
+
+        for size in [[2001, 2000], [2048, 2049], [4097, 977]] {
+            let pixels: Vec<_> = (0..size[0] * size[1] * 4)
+                .map(|value| (value * 17 + value / 257) as u8)
+                .collect();
+            let rotated = rotate(
+                Bitmap {
+                    size,
+                    rgba: pixels.clone(),
+                },
+                1,
+            );
+            assert_eq!(rotated.size, [size[1], size[0]]);
+            let restored = rotate(rotated, 3);
+            assert_eq!(restored.size, size);
+            assert_eq!(restored.rgba, pixels);
+            let twice = rotate(
+                rotate(
+                    Bitmap {
+                        size,
+                        rgba: pixels.clone(),
+                    },
+                    1,
+                ),
+                1,
+            );
+            assert_eq!(twice.size, size);
+            assert!(
+                twice
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .eq(pixels.as_chunks::<4>().0.iter().rev())
+            );
+        }
+    }
+}

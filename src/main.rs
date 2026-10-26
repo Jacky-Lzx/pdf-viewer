@@ -1,4 +1,5 @@
 mod app;
+mod bitmap;
 mod cache;
 mod document;
 mod fonts;

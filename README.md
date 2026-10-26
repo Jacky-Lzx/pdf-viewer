@@ -92,6 +92,8 @@ cargo test --locked
 cargo run --release -- --render assets/folio-guide.pdf /tmp/page.png 1 1200
 cargo run --release -- --text assets/folio-guide.pdf 1
 cargo run --release -- --benchmark assets/folio-guide.pdf 5
+# 像素旋转专项基准，交替比较原实现与当前实现
+cargo bench --locked --bench rotation -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio

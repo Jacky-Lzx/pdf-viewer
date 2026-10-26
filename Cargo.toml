@@ -33,3 +33,7 @@ opt-level = 2
 [[bin]]
 name = "folio"
 path = "src/main.rs"
+
+[[bench]]
+name = "rotation"
+harness = false
