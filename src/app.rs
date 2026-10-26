@@ -306,17 +306,7 @@ impl Folio {
     }
 
     fn page_name(&self, page: usize) -> String {
-        let physical = (page + 1).to_string();
-        match self.labels.label(page) {
-            Some(label) if !label.is_empty() && label != physical => {
-                let mut short: String = label.chars().take(12).collect();
-                if label.chars().count() > 12 {
-                    short.push('…');
-                }
-                format!("{short} · {}", page + 1)
-            }
-            _ => physical,
-        }
+        self.labels.display_name(page)
     }
 
     fn remember(&mut self) {

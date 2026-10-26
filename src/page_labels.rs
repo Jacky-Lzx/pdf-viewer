@@ -3,6 +3,7 @@ use hayro::hayro_syntax::{
     object::{Array, Dict, Name, Object, String as PdfString},
 };
 use std::collections::{BTreeMap, HashSet};
+use std::fmt::Write;
 
 #[derive(Clone, Copy, Debug)]
 enum Style {
@@ -120,11 +121,28 @@ impl PageLabels {
             .partition_point(|range| range.page <= page)
             .checked_sub(1)?;
         let range = &self.ranges[index];
-        Some(format!(
-            "{}{}",
-            range.prefix,
-            number(range.style, range.first + (page - range.page) as u64)
-        ))
+        let suffix = number(range.style, range.first + (page - range.page) as u64);
+        if range.prefix.is_empty() {
+            return Some(suffix);
+        }
+        Some(format!("{}{}", range.prefix, suffix))
+    }
+
+    pub fn display_name(&self, page: usize) -> String {
+        let physical = (page + 1).to_string();
+        match self.label(page) {
+            Some(mut label) if !label.is_empty() && label != physical => {
+                // Only inspect enough characters to decide whether to truncate.
+                // Reuse the label allocation for both its prefix and page number.
+                if let Some((end, _)) = label.char_indices().nth(12) {
+                    label.truncate(end);
+                    label.push('…');
+                }
+                let _ = write!(label, " · {}", page + 1);
+                label
+            }
+            _ => physical,
+        }
     }
 
     /// Physical page numbers remain stable; `=1` explicitly addresses a numeric PDF label.
@@ -306,6 +324,12 @@ mod tests {
         );
         assert_eq!(labels.resolve_input("A-2", 6), Some(5));
         assert_eq!(labels.resolve_input("=1", 6), Some(2));
+        assert_eq!(
+            (0..6)
+                .map(|page| labels.display_name(page))
+                .collect::<Vec<_>>(),
+            ["i · 1", "ii · 2", "1 · 3", "2 · 4", "A-1 · 5", "A-2 · 6"]
+        );
         let mut modified = bytes.to_vec();
         let kids = b"/Kids [25 0 R 26 0 R]";
         let offset = modified
@@ -351,5 +375,32 @@ mod tests {
         assert_eq!(labels.resolve_input("iiii", 8), None);
         assert_eq!(labels.resolve_input("99", 8), None);
         assert_eq!(PageLabels::default().resolve_input("2", 8), Some(1));
+    }
+
+    #[test]
+    fn display_names_truncate_at_unicode_boundaries_without_changing_full_labels() {
+        for (label, displayed) in [
+            ("", "1"),
+            ("1", "1"),
+            ("123456789012", "123456789012 · 1"),
+            ("1234567890123", "123456789012… · 1"),
+            (
+                "中文😀".repeat(100).as_str(),
+                "中文😀中文😀中文😀中文😀… · 1",
+            ),
+        ] {
+            let labels = PageLabels {
+                count: 2,
+                ranges: vec![LabelRange {
+                    page: 0,
+                    first: 1,
+                    prefix: label.to_owned(),
+                    style: Style::None,
+                }],
+            };
+            assert_eq!(labels.display_name(0), displayed);
+            assert_eq!(labels.label(0).as_deref(), Some(label));
+        }
+        assert_eq!(PageLabels::default().display_name(4), "5");
     }
 }
