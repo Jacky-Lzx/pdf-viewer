@@ -50,6 +50,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
 | 搜索输入框中的 `Enter` / `Shift+Enter` | 下一个 / 上一个匹配；结果尚未就绪时等待扫描 |
 | `Ctrl/Cmd+p` | 筛选最近文档；方向键或 `Ctrl+j/k` 选择，回车打开 |
+| `c` | 打开目录并筛选章节；方向键或 `Ctrl+j/k` 选择，回车跳转，`Escape` 返回阅读 |
 | `Alt+c` / `Alt+w` | 搜索栏打开时切换区分大小写 / 整词匹配 |
 | `n` / `N`，`3n` / `3N` | 下一个 / 上一个搜索匹配，支持数字计数（`F3` / `Shift+F3` 同样生效） |
 | `f`，然后输入标签 | 跟随当前可见的 PDF 链接；`Escape` 取消 |
@@ -135,6 +136,7 @@ cargo bench --locked --bench search_snippet -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
+xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio

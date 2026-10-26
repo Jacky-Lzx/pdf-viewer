@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,18 @@ def run(binary):
                 for letter in query:
                     keyboard.key(letter)
                 time.sleep(0.2)
+
+            def burst(keys):
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    for symbol, modifiers in keys:
+                        keyboard.key(symbol, delay=0, **modifiers)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                time.sleep(0.4)
+
+            def chapter_keys(query):
+                return [("c", {}), ("a", {"ctrl": True})] + [(letter, {}) for letter in query]
 
             try:
                 window = wait_for(keyboard.focus, "outline reader window")
@@ -83,7 +96,30 @@ def run(binary):
                 expect(2, "filtered chapter remains usable in the smallest window")
                 keyboard.key("j", shift=True)
                 expect(3, "Vim navigation resumes after leaving chapter filter")
-                print("PASS: nested outline folds, filter focus, ancestor context, fold restoration, expand/collapse all and compact layout")
+                burst(chapter_keys("yourself") + [(0xFF0D, {})])
+                expect(2, "opening-frame query and Enter follow title match instead of its ancestors")
+                keyboard.key("j", shift=True)
+                expect(3, "chapter confirmation returns focus to the reader")
+                keyboard.key(0xFF09)
+                burst(chapter_keys("yourself") + [("k", {"ctrl": True}), (0xFF0D, {})])
+                expect(1, "c reopens a hidden sidebar and Ctrl+K selects a retained ancestor")
+                burst(chapter_keys("yourself") + [(0xFF52, {}), ("j", {"ctrl": True}), (0xFF0D, {})])
+                expect(2, "arrow and Ctrl+J navigation apply after the new filter")
+                burst(chapter_keys("jkgdic") + [(0xFF0D, {})])
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "jkgdic", "opening c must preserve later literal c"
+                expect(2, "unmatched chapter input does not navigate, rotate or change fit")
+                keyboard.key(0xFF1B)
+                keyboard.key("j", shift=True)
+                expect(3, "Escape from an unmatched filter releases keyboard navigation")
+                burst(chapter_keys("yourself") + [("f", {"ctrl": True}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "native"] + [(0xFF0D, {})])
+                expect(0, "global search replaces pending chapter focus in the same burst")
+                keyboard.key(0xFF1B)
+                burst([("c", {}), (0xFF1B, {}), ("j", {"shift": True})])
+                expect(1, "Escape cancels opening chapter focus before the next reader key")
+                print("PASS: nested folds, Unicode-ready filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -91,6 +127,7 @@ def run(binary):
                     print(config_path.read_text(), file=sys.stderr)
                 raise
             finally:
+                application.send_signal(signal.SIGCONT)
                 application.terminate()
                 application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)

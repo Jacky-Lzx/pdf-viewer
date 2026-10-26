@@ -95,6 +95,12 @@ def run(binary):
 
                 burst([("p", {"ctrl": True})] + text("plan-z") + [(ENTER, {})])
                 expect(paths[2], 4, "recent picker filters and opens the latest text in its first frame")
+                burst([("p", {"ctrl": True})] + text("plan-") + [(0xFF54, {})])
+                copy_query("plan-")
+                keyboard.key(ENTER)
+                expect(paths[1], 2, "opening-frame arrow chooses the next recent document and preserves input focus")
+                burst([("p", {"ctrl": True})] + text("plan-z") + [(ENTER, {})])
+                expect(paths[2], 4, "return to the original document after arrow selection")
                 burst([("p", {"ctrl": True})] + text("plan-a"))
                 copy_query("plan-a")
                 keyboard.key(ESCAPE)

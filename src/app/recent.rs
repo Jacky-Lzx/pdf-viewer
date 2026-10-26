@@ -3,6 +3,7 @@ use eframe::egui::{self, Vec2};
 
 impl Folio {
     pub(super) fn toggle_recent(&mut self, context: &egui::Context) {
+        self.outline.cancel_input();
         if self.recent_picker.take().is_some() {
             context
                 .memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-recent-input")));

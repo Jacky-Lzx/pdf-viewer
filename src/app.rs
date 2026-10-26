@@ -494,6 +494,7 @@ impl Folio {
     }
 
     fn find(&mut self) {
+        self.outline.cancel_input();
         let selected = self
             .selection
             .selected_text()
@@ -778,6 +779,7 @@ impl Folio {
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
+                || self.outline.focus
                 || self.goto_open
                 || self.password_open
                 || self.recent_picker.is_some()
@@ -829,6 +831,7 @@ impl Folio {
                 continue;
             }
             if key == Key::Escape {
+                self.outline.cancel_input();
                 self.hints.cancel();
                 self.selection.cancel();
                 self.mark_action = None;
@@ -887,6 +890,33 @@ impl Folio {
                         1
                     };
                     picker.motion = picker.motion.saturating_add(delta);
+                    context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                    context
+                        .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                }
+                continue;
+            }
+            if !self.search_focus
+                && !self.goto_open
+                && !self.password_open
+                && !self.help
+                && (self.outline.focus
+                    || context
+                        .memory(|memory| memory.has_focus(egui::Id::new("folio-outline-input"))))
+            {
+                if key == Key::Enter {
+                    self.outline.confirm = true;
+                    context.input_mut(|input| input.consume_key(modifiers, key));
+                } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
+                    || (modifiers.ctrl && matches!(key, Key::J | Key::K))
+                {
+                    let delta = if matches!(key, Key::ArrowUp | Key::K) {
+                        -1
+                    } else {
+                        1
+                    };
+                    self.outline.motion = self.outline.motion.saturating_add(delta);
+                    context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
                     context
                         .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 }
@@ -1091,6 +1121,7 @@ impl Folio {
                     self.dirty = true;
                 }
                 Key::Slash => self.find(),
+                Key::C => self.focus_contents(),
                 Key::F => {
                     self.hints.start(self.visible_links.len());
                     if !self.hints.active {
@@ -1963,6 +1994,7 @@ impl Folio {
                         ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
+                        ("c", "Find chapter · ↑/↓ or Ctrl+j/k · Enter to follow"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
                         ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),

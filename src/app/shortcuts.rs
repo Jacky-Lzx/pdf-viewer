@@ -29,7 +29,12 @@ pub(super) fn focus_text_input(
         return false;
     }
     *requested = false;
-    ui.memory_mut(|memory| memory.request_focus(id));
+    ui.memory_mut(|memory| {
+        memory.request_focus(id);
+        // egui scheduled arrow/Tab focus movement before shortcut dispatch.
+        // Explicitly opening an input must also cancel that pending movement.
+        memory.move_focus(eframe::egui::FocusDirection::None);
+    });
     true
 }
 
@@ -95,6 +100,37 @@ mod tests {
             .collect();
         assert_eq!(text, "/u");
         assert_eq!(input.num_presses(Key::Slash), 1);
+    }
+
+    #[test]
+    fn opening_input_cancels_previously_scheduled_arrow_focus_movement() {
+        use eframe::egui::{CentralPanel, Context, RawInput, TextEdit};
+
+        let context = Context::default();
+        let id = Id::new("opening-input");
+        let mut requested = false;
+        let mut text = String::new();
+        let mut deferred = Vec::new();
+        // Establish the geometry of a focusable button below the text field.
+        for events in [Vec::new(), vec![key(Key::ArrowDown, Modifiers::NONE, true)]] {
+            let _ = context.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    CentralPanel::default().show(context, |ui| {
+                        focus_text_input(ui, id, &mut requested, &mut deferred);
+                        ui.add(TextEdit::singleline(&mut text).id(id));
+                        let _ = ui.button("Focusable result below the input");
+                    });
+                },
+            );
+            // The second pass opens the input while ArrowDown has already
+            // scheduled egui focus movement at the beginning of that pass.
+            requested = true;
+        }
+        assert!(context.memory(|memory| memory.has_focus(id)));
     }
 
     #[test]

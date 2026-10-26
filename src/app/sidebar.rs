@@ -3,10 +3,31 @@ use crate::navigation::Fit;
 use eframe::egui::{self, Color32, RichText, Vec2};
 
 impl Folio {
+    pub(super) fn focus_contents(&mut self) {
+        if self.outline.is_empty() {
+            self.notify("This document has no chapter outline");
+            return;
+        }
+        self.nav.clear_prefix();
+        self.hints.cancel();
+        self.selection.cancel();
+        self.mark_action = None;
+        self.search_open = false;
+        self.search_focus = false;
+        self.pending_search_jump = None;
+        self.library.sidebar = true;
+        self.outline.focus = true;
+        self.outline.reveal = true;
+        self.dirty = true;
+    }
+
     fn contents(&mut self, ui: &mut egui::Ui) {
         if self.outline.is_empty() {
             return;
         }
+        let mut target = None;
+        let mut toggle = None;
+        let mut keyboard_focus = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("CONTENTS").small().strong().color(ACCENT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -34,10 +55,16 @@ impl Folio {
                     .small_button("×")
                     .on_hover_text("Clear chapter filter")
                     .clicked();
+                super::shortcuts::focus_text_input(
+                    ui,
+                    egui::Id::new("folio-outline-input"),
+                    &mut self.outline.focus,
+                    &mut self.deferred_input,
+                );
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.outline.query)
                         .id(egui::Id::new("folio-outline-input"))
-                        .hint_text("Filter chapters…")
+                        .hint_text("Filter chapters · c")
                         .desired_width(f32::INFINITY),
                 );
                 if clear {
@@ -46,83 +73,124 @@ impl Folio {
                 if response.changed() || clear {
                     self.outline.refilter();
                 }
+                keyboard_focus = response.has_focus() || response.lost_focus();
+                if !ui.is_sizing_pass() {
+                    let motion = std::mem::take(&mut self.outline.motion);
+                    if motion != 0 {
+                        self.outline.step(motion);
+                    }
+                    if std::mem::take(&mut self.outline.confirm)
+                        && let Some(index) = self.outline.selected()
+                    {
+                        if let Some(destination) = self.outline.entry(index).destination {
+                            target = Some(destination);
+                            response.surrender_focus();
+                        } else {
+                            toggle = Some(index);
+                            response.request_focus();
+                        }
+                    }
+                }
             });
         });
         if self.outline.visible().is_empty() {
             ui.weak("No matching chapters.");
         }
-        let mut target = None;
-        let mut toggle = None;
         let row_height = Self::sidebar_row_height(ui);
-        egui::ScrollArea::vertical()
+        let mut scroll = egui::ScrollArea::vertical()
             .id_salt("contents")
-            .max_height(260.0)
-            .show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
-                for row in range {
-                    let index = self.outline.visible()[row];
-                    let entry = self.outline.entry(index);
-                    ui.push_id(index, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add_space(entry.depth.min(8) as f32 * 12.0);
-                            if self.outline.has_children(index) {
-                                let collapsed = self.outline.is_collapsed(index);
-                                let response = ui
-                                    .add_enabled_ui(!self.outline.filtering(), |ui| {
-                                        let response = ui.allocate_response(
-                                            Vec2::splat(20.0),
-                                            egui::Sense::click(),
-                                        );
-                                        let mut icon = response.clone();
-                                        icon.rect = icon.rect.shrink(3.0);
-                                        egui::collapsing_header::paint_default_icon(
-                                            ui,
-                                            if collapsed { 0.0 } else { 1.0 },
-                                            &icon,
-                                        );
-                                        response
-                                    })
-                                    .inner;
-                                if response
-                                    .on_hover_text(if collapsed {
-                                        "Expand chapter"
-                                    } else {
-                                        "Collapse chapter"
-                                    })
-                                    .clicked()
-                                {
-                                    toggle = Some(index);
-                                }
-                            } else {
-                                ui.allocate_space(Vec2::splat(20.0));
+            .max_height(260.0);
+        if keyboard_focus
+            && std::mem::take(&mut self.outline.reveal)
+            && let Some(row) = self.outline.selected_row()
+        {
+            scroll = scroll.vertical_scroll_offset(
+                row.saturating_sub(3) as f32 * (row_height + ui.spacing().item_spacing.y),
+            );
+        }
+        let mut selected = None;
+        scroll.show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
+            for row in range {
+                let index = self.outline.visible()[row];
+                let entry = self.outline.entry(index);
+                ui.push_id(index, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space(entry.depth.min(8) as f32 * 12.0);
+                        if self.outline.has_children(index) {
+                            let collapsed = self.outline.is_collapsed(index);
+                            let response = ui
+                                .add_enabled_ui(!self.outline.filtering(), |ui| {
+                                    let response = ui
+                                        .allocate_response(Vec2::splat(20.0), egui::Sense::click());
+                                    let mut icon = response.clone();
+                                    icon.rect = icon.rect.shrink(3.0);
+                                    egui::collapsing_header::paint_default_icon(
+                                        ui,
+                                        if collapsed { 0.0 } else { 1.0 },
+                                        &icon,
+                                    );
+                                    response
+                                })
+                                .inner;
+                            if response
+                                .on_hover_text(if collapsed {
+                                    "Expand chapter"
+                                } else {
+                                    "Collapse chapter"
+                                })
+                                .clicked()
+                            {
+                                toggle = Some(index);
                             }
-                            if let Some(destination) = entry.destination {
-                                let page = destination.page;
-                                if ui
-                                    .add(
-                                        egui::Button::selectable(
-                                            self.nav.page == page,
-                                            &entry.title,
-                                        )
-                                        .truncate(),
+                        } else {
+                            ui.allocate_space(Vec2::splat(20.0));
+                        }
+                        if let Some(destination) = entry.destination {
+                            let page = destination.page;
+                            if ui
+                                .add(
+                                    egui::Button::selectable(
+                                        if keyboard_focus {
+                                            self.outline.selected() == Some(index)
+                                        } else {
+                                            self.nav.page == page
+                                        },
+                                        &entry.title,
                                     )
-                                    .on_hover_text(format!(
-                                        "{}\nPage {}",
-                                        entry.title,
-                                        self.page_name(page)
-                                    ))
-                                    .clicked()
-                                {
-                                    target = Some(destination);
-                                }
-                            } else {
-                                ui.add(
-                                    egui::Label::new(RichText::new(&entry.title).weak()).truncate(),
-                                );
+                                    .truncate(),
+                                )
+                                .on_hover_text(format!(
+                                    "{}\nPage {}",
+                                    entry.title,
+                                    self.page_name(page)
+                                ))
+                                .clicked()
+                            {
+                                selected = Some(index);
+                                target = Some(destination);
                             }
-                        });
+                        } else {
+                            if ui
+                                .add(
+                                    egui::Button::selectable(
+                                        keyboard_focus && self.outline.selected() == Some(index),
+                                        RichText::new(&entry.title).weak(),
+                                    )
+                                    .truncate(),
+                                )
+                                .clicked()
+                            {
+                                selected = Some(index);
+                                toggle = Some(index);
+                            }
+                        }
                     });
-                }
-            });
+                });
+            }
+        });
+        if let Some(index) = selected {
+            self.outline.select(index);
+        }
         if let Some(index) = toggle {
             self.outline.toggle(index);
         }
@@ -269,7 +337,11 @@ impl Folio {
                 ui.label(RichText::new(self.filename()).strong());
                 ui.weak(format!("{} pages", self.nav.count));
                 ui.add_space(16.0);
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut sidebar_scroll = egui::ScrollArea::vertical();
+                if self.outline.focus {
+                    sidebar_scroll = sidebar_scroll.vertical_scroll_offset(0.0);
+                }
+                sidebar_scroll.show(ui, |ui| {
                     self.contents(ui);
                     ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
                     if self.reading.bookmarks.is_empty() {

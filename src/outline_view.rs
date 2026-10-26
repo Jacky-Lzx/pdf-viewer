@@ -10,7 +10,12 @@ pub struct OutlineView {
     subtree_end: Vec<usize>,
     collapsed: HashSet<usize>,
     visible: Vec<usize>,
+    selected: Option<usize>,
     pub query: String,
+    pub focus: bool,
+    pub motion: isize,
+    pub confirm: bool,
+    pub reveal: bool,
 }
 
 impl OutlineView {
@@ -44,6 +49,39 @@ impl OutlineView {
 
     pub fn entry(&self, index: usize) -> &OutlineEntry {
         &self.entries[index]
+    }
+
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    pub fn selected_row(&self) -> Option<usize> {
+        self.visible.binary_search(&self.selected?).ok()
+    }
+
+    pub fn select(&mut self, index: usize) {
+        if self.visible.binary_search(&index).is_ok() {
+            self.selected = Some(index);
+        }
+    }
+
+    pub fn step(&mut self, motion: isize) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let row = self
+            .selected_row()
+            .unwrap_or(0)
+            .saturating_add_signed(motion)
+            .min(self.visible.len() - 1);
+        self.selected = Some(self.visible[row]);
+        self.reveal = true;
+    }
+
+    pub fn cancel_input(&mut self) {
+        self.focus = false;
+        self.motion = 0;
+        self.confirm = false;
     }
 
     pub fn has_children(&self, index: usize) -> bool {
@@ -87,6 +125,11 @@ impl OutlineView {
                 .iter()
                 .map(|title| title.contains(&query))
                 .collect();
+            // Ancestors provide context, but Enter should initially follow a
+            // title match rather than the first retained parent.
+            if !self.selected.is_some_and(|index| keep[index]) {
+                self.selected = keep.iter().position(|&matches| matches);
+            }
             // Keep ancestors as context, temporarily revealing matches in folded chapters.
             for index in (0..keep.len()).rev() {
                 if keep[index]
@@ -107,7 +150,19 @@ impl OutlineView {
                     index + 1
                 };
             }
+            // Folding a selected descendant moves selection to its visible
+            // ancestor, preserving the reader's place in the tree.
+            while let Some(index) = self.selected {
+                if self.visible.binary_search(&index).is_ok() {
+                    break;
+                }
+                self.selected = self.parents[index];
+            }
+            if self.selected.is_none() {
+                self.selected = self.visible.first().copied();
+            }
         }
+        self.reveal = true;
     }
 }
 
@@ -196,5 +251,54 @@ mod tests {
         tree.query = "Node 9999".into();
         tree.refilter();
         assert_eq!(tree.visible(), [0, 9999]);
+    }
+
+    #[test]
+    fn keyboard_selection_uses_title_matches_and_visible_rows() {
+        let mut tree = tree();
+        tree.fold_all(true);
+        tree.query = "STRASSE".into();
+        tree.refilter();
+        assert_eq!(tree.selected(), Some(2), "skip context-only ancestors");
+        assert_eq!(tree.selected_row(), Some(2));
+        tree.step(-1);
+        assert_eq!(tree.selected(), Some(1), "ancestors can still be selected");
+        tree.step(isize::MIN);
+        assert_eq!(tree.selected(), Some(0));
+        tree.step(isize::MAX);
+        assert_eq!(tree.selected(), Some(2));
+        tree.query = "ος".into();
+        tree.refilter();
+        assert_eq!(tree.selected(), Some(5));
+        tree.query = "missing".into();
+        tree.refilter();
+        tree.step(1);
+        assert_eq!(tree.selected(), None);
+        tree.query.clear();
+        tree.refilter();
+        assert_eq!(tree.selected(), Some(0));
+        tree.step(1);
+        assert_eq!(tree.selected(), Some(4), "folded children are skipped");
+    }
+
+    #[test]
+    fn folding_moves_selection_to_visible_parent_and_reset_cancels_commands() {
+        let mut tree = tree();
+        tree.select(2);
+        tree.toggle(1);
+        assert_eq!(tree.selected(), Some(1));
+        tree.toggle(0);
+        assert_eq!(tree.selected(), Some(0));
+        tree.select(2);
+        assert_eq!(tree.selected(), Some(0), "hidden rows cannot be selected");
+        tree.focus = true;
+        tree.motion = 5;
+        tree.confirm = true;
+        tree.cancel_input();
+        assert!(!tree.focus && !tree.confirm);
+        assert_eq!(tree.motion, 0);
+        assert_eq!(tree.selected(), Some(0));
+        tree.set_entries(Vec::new());
+        assert_eq!(tree.selected(), None);
     }
 }
