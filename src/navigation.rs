@@ -5,6 +5,13 @@ pub const MAX_SCALE: f32 = 8.0;
 // Single-precision UI coordinates retain pixel precision up to this extent.
 pub const MAX_PAGE_EXTENT: f32 = 16_000_000.0;
 
+/// Zero-based page at a percentage of the physical page count, rounded up.
+pub fn percentage_page(pages: usize, percentage: usize) -> usize {
+    let percentage = percentage.min(100);
+    // Split the multiplication so even usize::MAX pages cannot overflow.
+    (pages / 100 * percentage + (pages % 100 * percentage).div_ceil(100)).saturating_sub(1)
+}
+
 /// Find a counted next/previous bookmark in a sorted, unique page list.
 /// Skip the current page, wrap at either end, and avoid intermediate jumps.
 pub fn bookmark_target(
@@ -129,6 +136,23 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percentage_navigation_rounds_up_clamps_and_handles_extreme_page_counts() {
+        for pages in [0, 1, 2, 3, 6, 99, 100, 101, usize::MAX] {
+            for percentage in [0, 1, 10, 25, 50, 75, 99, 100, 101, usize::MAX] {
+                let expected = ((pages as u128 * percentage.min(100) as u128).div_ceil(100)
+                    as usize)
+                    .saturating_sub(1);
+                assert_eq!(percentage_page(pages, percentage), expected);
+            }
+        }
+        assert_eq!(percentage_page(6, 50), 2);
+        assert_eq!(percentage_page(6, 51), 3);
+        assert_eq!(percentage_page(1000, 0), 0);
+        assert_eq!(percentage_page(1000, 1), 9);
+        assert_eq!(percentage_page(1000, 100), 999);
+    }
 
     #[test]
     fn bookmark_jumps_skip_current_wrap_and_handle_large_counts() {

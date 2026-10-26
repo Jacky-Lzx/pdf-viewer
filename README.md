@@ -44,6 +44,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `J` / `K`，`]` / `[` | 下一页 / 上一页 |
 | `gg` / `G` | 首页 / 末页 |
 | `42G`，`42 Enter`，`42gg` | 跳到第 42 页 |
+| `50%`，`25%`，`100%` | 按物理页数跳到文档的 50%、25% 或末页；`0%` 到首页 |
 | `5j`，`2l`，`3J`，`3]`，`2 Space` | 带数字前缀的四向滚动、翻页和整屏滚动；数字与按键之间无需空格 |
 | `Ctrl+d` / `Ctrl+u` | 下移 / 上移半屏 |
 | `Ctrl+e` / `Ctrl+y`，`3 Ctrl+e` | 当前页内向下 / 向上滚动，到边缘停住；支持数字前缀 |
@@ -85,6 +86,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。键盘缩放保持视口中心；`Ctrl`+滚轮或触控板捏合缩放保持指针下的位置。`v` 进入文本选择模式，拖选会高亮选区，支持反向、跨行和旋转后的文字；文本顺序取决于 PDF 的文本层。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。命名位置显示在侧栏，可点击返回或删除。重启后恢复页码与页内滚动，窗口尺寸变化时按相对滚动位置恢复。侧栏目录支持逐章节折叠、全部展开/折叠和 Unicode 标题筛选；筛选会显示命中条目的祖先，清空后恢复原来的折叠状态。目录支持 GoTo 动作和命名目标；内部链接和目录会应用 `XYZ` 的页内位置与缩放，以及 `Fit`、`FitH`、`FitV` 和 `FitR` 目标视图，支持裁剪框、文档自带旋转、阅读旋转及同页重新定位；网页链接在系统浏览器中打开；右键点击网页链接可复制地址，菜单内按回车复制、`Escape` 关闭，选择文字时保留文本操作。
 
 支持 PDF 的文档页码标签，如前言 `i`、`ii` 和附录 `A-1`，同时显示对应的物理页码。按 `:` 后可以输入标签跳转；普通数字和 `42G` 始终表示物理页码，要跳到文档标签“1”可输入 `=1`。标签按区间保存，查找无需遍历整本文档。
+
+百分比跳页按物理页数向上取整，例如 6 页文档的 `50%` 到第 3 页，`51%` 到第 4 页；超过 100% 到末页。跳转保留缩放和旋转，并可用历史返回；已经处于目标页时保留页内滚动。单独按 `%` 会提示先输入数字，搜索等输入框内的 `%` 仍作为文字输入。
 
 横向图纸可按 `e` 适合高度，再用 `h/l` 横向阅读；旋转、窗口调整、标记、历史和重新打开都会保留自动适配模式。PDF 的 `FitV` / `FitBV` 目标同样使用该模式，窗口高度变化后继续适配。输入框内的字母 `e` 仍作为文字输入。
 
@@ -181,6 +184,7 @@ xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
 xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
+xvfb-run -a python3 scripts/smoke-percentage.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

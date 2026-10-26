@@ -51,6 +51,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
           xvfb-run -a python3 scripts/smoke-password.py target/release/folio
           xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-percentage.py target/release/folio
       - name: Exercise renderer and text extraction
         shell: bash
         run: |

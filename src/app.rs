@@ -893,25 +893,9 @@ impl Folio {
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
-        for event in context.input(|input| {
-            input
-                .events
-                .iter()
-                .filter(|event| {
-                    matches!(
-                        event,
-                        egui::Event::Copy
-                            | egui::Event::Key { pressed: true, .. }
-                            | egui::Event::PointerButton {
-                                button: egui::PointerButton::Extra1 | egui::PointerButton::Extra2,
-                                pressed: true,
-                                ..
-                            }
-                    )
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        }) {
+        for (event, percentage) in
+            context.input(|input| shortcuts::reader_actions(input).collect::<Vec<_>>())
+        {
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
@@ -1225,6 +1209,19 @@ impl Folio {
                         Key::B => self.align_page(1.0),
                         _ => {}
                     }
+                }
+                continue;
+            }
+            if percentage {
+                let percentage = self.nav.prefix.parse::<usize>().ok();
+                self.nav.clear_prefix();
+                if let Some(percentage) = percentage {
+                    self.jump(crate::navigation::percentage_page(
+                        self.nav.count,
+                        percentage,
+                    ));
+                } else {
+                    self.notify("Type a percentage first, e.g. 50%");
                 }
                 continue;
             }
@@ -2240,6 +2237,7 @@ impl Folio {
                     for (keys, action) in [
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
+                        ("50%", "Jump to a percentage of the document's pages"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
                         ("zH / zL", "Scroll left / right half a screen; counts supported"),
                         ("3r / 3R", "Rotate clockwise / counterclockwise three quarter turns"),

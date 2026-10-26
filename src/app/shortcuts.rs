@@ -1,5 +1,33 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
+pub(super) fn reader_actions(input: &InputState) -> impl Iterator<Item = (Event, bool)> + '_ {
+    input
+        .events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            let action = matches!(
+                event,
+                Event::Copy
+                    | Event::Key { pressed: true, .. }
+                    | Event::PointerButton {
+                        button: eframe::egui::PointerButton::Extra1
+                            | eframe::egui::PointerButton::Extra2,
+                        pressed: true,
+                        ..
+                    }
+            );
+            if !action {
+                return None;
+            }
+            // egui has no Percent key. Match the actual text paired with this
+            // press, since its fallback key varies with the keyboard layout.
+            let percentage = matches!(event, Event::Key { .. })
+                && matches!(input.events.get(index + 1), Some(Event::Text(text)) if text == "%");
+            Some((event.clone(), percentage))
+        })
+}
+
 pub(super) struct SideButtonFocusGuard {
     context: eframe::egui::Context,
     previous: eframe::egui::SurrenderFocusOn,
@@ -136,6 +164,36 @@ mod tests {
             modifiers,
             pressed,
             repeat: false,
+        }
+    }
+
+    #[test]
+    fn percentage_key_text_preserves_action_order_without_treating_paste_as_navigation() {
+        for symbol_key in [Key::Num5, Key::Quote, Key::D] {
+            let mut input = InputState::default();
+            input.events = vec![
+                key(Key::Num5, Modifiers::NONE, true),
+                Event::Text("5".into()),
+                key(Key::Num5, Modifiers::NONE, false),
+                key(Key::Num0, Modifiers::NONE, true),
+                Event::Text("0".into()),
+                key(symbol_key, Modifiers::SHIFT, true),
+                Event::Text("%".into()),
+                key(symbol_key, Modifiers::SHIFT, false),
+                Event::Paste("25%".into()),
+                Event::Text("%".into()),
+                key(Key::J, Modifiers::SHIFT, true),
+            ];
+            let actions: Vec<_> = reader_actions(&input).collect();
+            assert_eq!(actions.len(), 4);
+            assert_eq!(
+                actions
+                    .iter()
+                    .map(|(_, percent)| *percent)
+                    .collect::<Vec<_>>(),
+                [false, false, true, false]
+            );
+            assert!(matches!(&actions[2].0, Event::Key { key, .. } if *key == symbol_key));
         }
     }
 
