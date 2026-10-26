@@ -33,6 +33,10 @@ impl Default for TextureCache {
 }
 
 impl TextureCache {
+    pub fn budget(&self) -> usize {
+        self.budget
+    }
+
     pub fn contains(&self, key: &RenderKey) -> bool {
         self.entries.contains_key(key)
     }

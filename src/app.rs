@@ -3,6 +3,7 @@ use crate::{
     document::RenderKey,
     links::{LinkHints, LinkTarget, PageLink},
     navigation::{Fit, Navigation},
+    render_plan::RenderView,
     state::{self, Library, ReadingState},
     text::SearchHit,
     worker::{Event, Worker},
@@ -37,7 +38,7 @@ pub struct Folio {
     overflow: Vec2,
     viewport: Vec2,
     scale: f32,
-    requested: Option<RenderKey>,
+    requested: Option<Vec<RenderKey>>,
     render_ms: f64,
     dialog: Option<Receiver<Option<PathBuf>>>,
     search_open: bool,
@@ -919,10 +920,14 @@ impl Folio {
                 } else {
                     dimensions
                 };
-                self.scale = self
-                    .reading
-                    .fit
-                    .scale(rotated, [rect.width(), rect.height()]);
+                let view = RenderView {
+                    fit: self.reading.fit,
+                    viewport: [rect.width(), rect.height()],
+                    pixels_per_point: context.pixels_per_point(),
+                    rotation: self.reading.rotation,
+                    night: self.library.night,
+                };
+                self.scale = view.scale(dimensions);
                 let size = Vec2::new(rotated[0], rotated[1]) * self.scale;
                 self.overflow = (size - rect.size()).max(Vec2::ZERO);
                 self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
@@ -950,39 +955,19 @@ impl Folio {
                 }
                 let origin = rect.min + (rect.size() - size).max(Vec2::ZERO) * 0.5 - self.pan;
                 let page_rect = egui::Rect::from_min_size(origin, size);
-                let width = ((dimensions[0] * self.scale * context.pixels_per_point()).ceil()
-                    as u32)
-                    .div_ceil(32)
-                    * 32;
-                let key = RenderKey {
-                    page: self.nav.page,
-                    width: width.clamp(32, 16384),
-                    rotation: self.reading.rotation,
-                    night: self.library.night,
-                };
+                let key = view.key(self.nav.page, dimensions);
                 self.cache.protect(key);
-                if self.requested != Some(key) {
+                let plan = view.plan(self.nav.page, &self.dimensions, self.cache.budget());
+                if self.requested.as_ref() != Some(&plan) {
                     if !self.links.contains_key(&self.nav.page) {
                         self.worker.links(self.nav.page);
                     }
-                    self.requested = Some(key);
-                    let mut keys = Vec::new();
-                    for page in [
-                        Some(self.nav.page),
-                        self.nav
-                            .page
-                            .checked_add(1)
-                            .filter(|page| *page < self.nav.count),
-                        self.nav.page.checked_sub(1),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        let candidate = RenderKey { page, ..key };
-                        if !self.cache.contains(&candidate) {
-                            keys.push(candidate);
-                        }
-                    }
+                    let keys = plan
+                        .iter()
+                        .copied()
+                        .filter(|key| !self.cache.contains(key))
+                        .collect();
+                    self.requested = Some(plan);
                     self.worker.render(keys);
                 }
                 let texture = self.cache.get(&key).or_else(|| self.cache.fallback(key));

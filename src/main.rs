@@ -5,6 +5,7 @@ mod fonts;
 mod links;
 mod navigation;
 mod outline;
+mod render_plan;
 mod state;
 mod text;
 mod worker;

@@ -4,7 +4,33 @@ use hayro::{
 };
 use std::path::Path;
 
-pub const MAX_PIXELS: f32 = 16_000_000.0;
+pub const MAX_PIXELS: f64 = 16_000_000.0;
+
+pub struct RasterSize {
+    pub scale: f32,
+    pub size: [usize; 2],
+}
+
+impl RasterSize {
+    pub fn new([w, h]: [f32; 2], width: u32) -> Result<Self, String> {
+        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+            return Err("Invalid PDF page dimensions".into());
+        }
+        let scale = (width.max(1) as f32 / w)
+            .min((MAX_PIXELS / f64::from(w) / f64::from(h)).sqrt() as f32)
+            .min(16384.0 / w.max(h));
+        // Match hayro's truncation when allocating the raster, including its size limits.
+        let size = [(w * scale) as usize, (h * scale) as usize];
+        if size.contains(&0) {
+            return Err("Page aspect ratio exceeds supported rendering limits".into());
+        }
+        Ok(Self { scale, size })
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.size[0] * self.size[1] * 4
+    }
+}
 
 pub fn load(path: &Path, password: &str) -> Result<Pdf, String> {
     let data =
@@ -38,23 +64,15 @@ pub fn rasterize<'a>(
     let pages = pdf.pages();
     let page = pages.get(key.page).ok_or("Page is out of range")?;
     let (w, h) = page.render_dimensions();
-    if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
-        return Err("Invalid PDF page dimensions".into());
-    }
-    let scale = (key.width.max(1) as f32 / w)
-        .min((MAX_PIXELS / (w * h)).sqrt())
-        .min(16384.0 / w.max(h));
-    if (w * scale) < 1.0 || (h * scale) < 1.0 {
-        return Err("Page aspect ratio exceeds supported rendering limits".into());
-    }
+    let raster = RasterSize::new([w, h], key.width)?;
     let pixmap = hayro::render(
         page,
         cache,
         &InterpreterSettings::default(),
         &RenderSettings::default(),
         &PixmapSettings {
-            x_scale: scale,
-            y_scale: scale,
+            x_scale: raster.scale,
+            y_scale: raster.scale,
             bg_color: WHITE,
         },
     );
@@ -133,6 +151,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(bitmap.size, [300, 400]);
+        let raster = RasterSize::new([600.0, 800.0], 300).unwrap();
+        assert_eq!(raster.size, bitmap.size);
+        assert_eq!(raster.bytes(), bitmap.rgba.len());
         assert_eq!(bitmap.rgba.len(), 300 * 400 * 4);
         assert!(
             bitmap
@@ -202,6 +223,29 @@ mod tests {
         let path = dir.path().join("invalid.pdf");
         std::fs::write(&path, b"not a PDF").unwrap();
         assert!(load(&path, "").is_err());
+    }
+
+    #[test]
+    fn raster_limits_handle_large_and_invalid_page_dimensions() {
+        for dimensions in [
+            [600.0, 800.0],
+            [800.0, 600.0],
+            [10000.0, 100.0],
+            [f32::MAX, f32::MAX],
+        ] {
+            let raster = RasterSize::new(dimensions, 16384).unwrap();
+            assert!(raster.size.iter().all(|size| (1..=16384).contains(size)));
+            assert!(raster.size[0] * raster.size[1] <= MAX_PIXELS as usize);
+            assert_eq!(raster.bytes(), raster.size[0] * raster.size[1] * 4);
+        }
+        for dimensions in [
+            [0.0, 100.0],
+            [f32::NAN, 1.0],
+            [f32::INFINITY, 1.0],
+            [1.0, 1e30],
+        ] {
+            assert!(RasterSize::new(dimensions, 1200).is_err());
+        }
     }
     #[test]
     fn rotation_preserves_pixels_and_roundtrips() {
