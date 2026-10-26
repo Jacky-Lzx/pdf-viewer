@@ -41,6 +41,7 @@ PAGES = [
         "ma / 'a           Save / restore named position a.",
         "Tab               Show the sidebar.",
         "y                 Copy all text on the page.",
+        "v, drag, then y   Select and copy part of the text.",
         "", "Try searching for Rust. Matches are highlighted on the page.",
         "Search is case-insensitive and understands Unicode text.",
     ]),

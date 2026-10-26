@@ -45,6 +45,52 @@ pub fn page_hits(hits: &[SearchHit], page: usize) -> Range<usize> {
 }
 
 impl PageText {
+    pub fn nearest_span(&self, point: Point) -> Option<usize> {
+        if !point.x.is_finite() || !point.y.is_finite() {
+            return None;
+        }
+        self.spans
+            .iter()
+            .enumerate()
+            .filter(|(_, span)| span.rect.is_finite() && !span.range.is_empty())
+            .min_by(|(_, a), (_, b)| {
+                let distance = |rect: Rect| {
+                    let dx = (rect.x0 - point.x).max(0.0).max(point.x - rect.x1);
+                    let dy = (rect.y0 - point.y).max(0.0).max(point.y - rect.y1);
+                    (dy, dx)
+                };
+                let (ay, ax) = distance(a.rect);
+                let (by, bx) = distance(b.rect);
+                // Keep drags beyond a short line on that line, even if the next is longer.
+                ay.total_cmp(&by).then_with(|| ax.total_cmp(&bx))
+            })
+            .map(|(index, _)| index)
+    }
+
+    pub fn rects_for_range(&self, range: Range<usize>) -> Vec<Rect> {
+        let first = self
+            .spans
+            .partition_point(|span| span.range.end <= range.start);
+        let mut rects: Vec<Rect> = Vec::new();
+        for rect in self.spans[first..]
+            .iter()
+            .take_while(|span| span.range.start < range.end)
+            .map(|span| span.rect)
+            .filter(|rect| rect.is_finite())
+        {
+            if let Some(last) = rects.last_mut()
+                && (last.y0 - rect.y0).abs() < rect.height() * 0.2
+                && rect.x0 >= last.x0
+                && rect.x0 - last.x1 < rect.height() * 0.3
+            {
+                *last = last.union(rect);
+            } else {
+                rects.push(rect);
+            }
+        }
+        rects
+    }
+
     pub fn memory_bytes(&self) -> usize {
         // Reserve for Unicode lowercase expansion before the lazy index is built.
         self.text.capacity()
@@ -79,23 +125,7 @@ impl PageText {
             .map(|(offset, matched)| {
                 let start = index.source[offset].0;
                 let end = index.source[offset + matched.len() - 1].1;
-                let first = self.spans.partition_point(|span| span.range.end <= start);
-                let mut rects: Vec<Rect> = Vec::new();
-                for rect in self.spans[first..]
-                    .iter()
-                    .take_while(|span| span.range.start < end)
-                    .map(|span| span.rect)
-                {
-                    if let Some(last) = rects.last_mut()
-                        && (last.y0 - rect.y0).abs() < rect.height() * 0.2
-                        && rect.x0 >= last.x0
-                        && rect.x0 - last.x1 < rect.height() * 0.3
-                    {
-                        *last = last.union(rect);
-                    } else {
-                        rects.push(rect);
-                    }
-                }
+                let rects = self.rects_for_range(start..end);
                 let before: String = self.text[..start]
                     .chars()
                     .rev()

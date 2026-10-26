@@ -40,6 +40,11 @@ pub enum Event {
         page: usize,
         text: String,
     },
+    PageText {
+        id: u64,
+        page: usize,
+        text: Arc<PageText>,
+    },
     Links {
         id: u64,
         page: usize,
@@ -68,6 +73,7 @@ struct Pending {
     search: Option<SearchRequest>,
     copy: Option<usize>,
     links: Option<usize>,
+    inspect: Option<usize>,
     stop: bool,
 }
 
@@ -153,6 +159,7 @@ impl Worker {
             pending.search = None;
             pending.copy = None;
             pending.links = None;
+            pending.inspect = None;
         });
     }
 
@@ -167,6 +174,9 @@ impl Worker {
     }
     pub fn links(&self, page: usize) {
         self.update(|pending| pending.links = Some(page));
+    }
+    pub fn inspect(&self, page: usize) {
+        self.update(|pending| pending.inspect = Some(page));
     }
 }
 
@@ -187,13 +197,14 @@ enum Job {
     Search(usize),
     Copy(usize),
     Links(usize),
+    Inspect(usize),
 }
 
 fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context: &egui::Context) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
     let destinations = crate::outline::DestinationIndex::new(pdf);
-    let mut texts: HashMap<usize, PageText> = HashMap::new();
+    let mut texts: HashMap<usize, Arc<PageText>> = HashMap::new();
     let mut text_bytes = 0;
     let mut search: Option<(SearchRequest, usize, usize)> = None;
     loop {
@@ -211,14 +222,17 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         Some((request, 0, 0))
                     };
                 }
-                if let Some(key) = pending.render.pop_front() {
-                    break Job::Render(key);
+                if let Some(page) = pending.inspect.take() {
+                    break Job::Inspect(page);
                 }
                 if let Some(page) = pending.copy.take() {
                     break Job::Copy(page);
                 }
                 if let Some(page) = pending.links.take() {
                     break Job::Links(page);
+                }
+                if let Some(key) = pending.render.pop_front() {
+                    break Job::Render(key);
                 }
                 if let Some((_, page, _)) = &search {
                     break Job::Search(*page);
@@ -260,7 +274,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     }
                 }
             }
-            Job::Search(page) | Job::Copy(page) => {
+            Job::Search(page) | Job::Copy(page) | Job::Inspect(page) => {
                 if page >= pdf.pages().len() {
                     search = None;
                     continue;
@@ -272,6 +286,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     }))
                     .unwrap_or_default();
                     let bytes = text.memory_bytes();
+                    let text = Arc::new(text);
                     if bytes > 32 * 1024 * 1024 {
                         uncached = Some(text);
                     } else {
@@ -284,7 +299,17 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     }
                 }
                 let text = uncached.as_ref().unwrap_or_else(|| &texts[&page]);
-                if matches!(job, Job::Copy(_)) {
+                if matches!(job, Job::Inspect(_)) {
+                    emit(
+                        tx,
+                        context,
+                        Event::PageText {
+                            id,
+                            page,
+                            text: Arc::clone(text),
+                        },
+                    );
+                } else if matches!(job, Job::Copy(_)) {
                     emit(
                         tx,
                         context,
@@ -407,5 +432,43 @@ mod tests {
             }
         }
         assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn text_inspection_reuses_the_cached_page_and_survives_document_switches() {
+        let worker = Worker::new(egui::Context::default());
+        worker.open(9, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 9, .. }));
+        worker.inspect(0);
+        let first = match receive(&worker) {
+            Event::PageText {
+                id: 9,
+                page: 0,
+                text,
+            } => text,
+            _ => panic!("Expected selectable text"),
+        };
+        assert!(first.text.contains("native"));
+        worker.inspect(0);
+        match receive(&worker) {
+            Event::PageText {
+                id: 9,
+                page: 0,
+                text,
+            } => assert!(Arc::ptr_eq(&first, &text)),
+            _ => panic!("Expected cached selectable text"),
+        }
+        worker.open(10, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 10, .. }));
+        worker.inspect(1);
+        match receive(&worker) {
+            Event::PageText {
+                id: 10,
+                page: 1,
+                text,
+            } => assert!(text.text.contains("NAVIGATION")),
+            _ => panic!("Expected the new document's text"),
+        }
+        assert!(first.text.contains("native"));
     }
 }

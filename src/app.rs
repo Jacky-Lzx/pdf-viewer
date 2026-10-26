@@ -4,6 +4,7 @@ use crate::{
     links::{LinkHints, LinkTarget, PageLink},
     navigation::{Fit, Navigation},
     render_plan::RenderView,
+    selection::TextSelection,
     state::{self, Library, ReadingMark, ReadingState},
     text::SearchHit,
     worker::{Event, Worker},
@@ -38,6 +39,7 @@ pub struct Folio {
     mark_action: Option<MarkAction>,
     pending_offset: Option<[f32; 2]>,
     pending_focus: Option<hayro::kurbo::Rect>,
+    selection: TextSelection,
     cache: TextureCache,
     id: u64,
     loading: bool,
@@ -92,6 +94,7 @@ impl Folio {
             mark_action: None,
             pending_offset: None,
             pending_focus: None,
+            selection: TextSelection::default(),
             cache: TextureCache::default(),
             id: 0,
             loading: false,
@@ -152,6 +155,7 @@ impl Folio {
         self.links.clear();
         self.visible_links.clear();
         self.hints.cancel();
+        self.selection.cancel();
         self.mark_action = None;
         self.cache.clear();
         self.requested = None;
@@ -274,6 +278,7 @@ impl Folio {
     }
     fn page_changed(&mut self) {
         self.hints.cancel();
+        self.selection.cancel();
         self.visible_links.clear();
         self.pan = Vec2::ZERO;
         self.pending_offset = None;
@@ -320,6 +325,7 @@ impl Folio {
 
     fn find(&mut self) {
         self.hints.cancel();
+        self.selection.cancel();
         self.mark_action = None;
         self.search_open = true;
         self.search_focus = true;
@@ -357,6 +363,14 @@ impl Folio {
     fn events(&mut self, context: &egui::Context) {
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
+                Event::PageText { id, page, text }
+                    if id == self.id && page == self.nav.page && self.selection.active =>
+                {
+                    if text.spans.is_empty() {
+                        self.notify("This page has no selectable text");
+                    }
+                    self.selection.set_text(text);
+                }
                 Event::Links { id, page, links } if id == self.id => {
                     if self.links.len() >= 64 {
                         self.links.retain(|page, _| *page == self.nav.page);
@@ -469,6 +483,15 @@ impl Folio {
             .any(|name| memory.has_focus(egui::Id::new(name)))
         });
         for event in context.input(|input| input.events.clone()) {
+            if matches!(event, egui::Event::Copy) && !typing && self.selection.active {
+                self.copy_selection(context);
+                context.input_mut(|input| {
+                    input
+                        .events
+                        .retain(|event| !matches!(event, egui::Event::Copy))
+                });
+                continue;
+            }
             let egui::Event::Key {
                 key,
                 pressed: true,
@@ -480,6 +503,7 @@ impl Folio {
             };
             if key == Key::Escape {
                 self.hints.cancel();
+                self.selection.cancel();
                 self.mark_action = None;
                 self.help = false;
                 self.goto_open = false;
@@ -502,6 +526,13 @@ impl Folio {
                 continue;
             }
             if typing || self.help || self.password_open || self.goto_open {
+                continue;
+            }
+            if modifiers.command && key == Key::C && self.selection.active {
+                self.copy_selection(context);
+                context.input_mut(|input| {
+                    input.consume_key(modifiers, key);
+                });
                 continue;
             }
             context.input_mut(|input| {
@@ -673,6 +704,19 @@ impl Folio {
                     self.library.night = !self.library.night;
                     self.dirty = true;
                 }
+                Key::V if self.nav.count > 0 => {
+                    self.hints.cancel();
+                    if self.selection.active {
+                        self.selection.cancel();
+                    } else {
+                        self.selection.start();
+                        self.worker.inspect(self.nav.page);
+                        self.notify(
+                            "Drag to select text · y or Ctrl/Cmd+C to copy · Escape to exit",
+                        );
+                    }
+                }
+                Key::Y if self.selection.active => self.copy_selection(context),
                 Key::Y => self.worker.copy(self.nav.page),
                 Key::O => self.choose_file(),
                 Key::Colon => {
@@ -1079,7 +1123,7 @@ impl Folio {
                     ui.id().with("canvas"),
                     egui::Sense::click_and_drag(),
                 );
-                if response.dragged() {
+                if response.dragged() && !self.selection.active {
                     self.pan = (self.pan - response.drag_delta()).clamp(Vec2::ZERO, self.overflow);
                 }
                 if response.hovered() {
@@ -1103,6 +1147,41 @@ impl Folio {
                 }
                 let origin = rect.min + (rect.size() - size).max(Vec2::ZERO) * 0.5 - self.pan;
                 let page_rect = egui::Rect::from_min_size(origin, size);
+                if self.selection.active {
+                    if response.hovered() || response.dragged() {
+                        context.set_cursor_icon(if self.selection.ready() {
+                            egui::CursorIcon::Text
+                        } else {
+                            egui::CursorIcon::Progress
+                        });
+                    }
+                    let point = |position: egui::Pos2| {
+                        let relative = (position - page_rect.min) / self.scale;
+                        crate::geometry::unrotate_point(
+                            hayro::kurbo::Point::new(f64::from(relative.x), f64::from(relative.y)),
+                            dimensions,
+                            self.reading.rotation,
+                        )
+                    };
+                    if response.drag_started_by(egui::PointerButton::Primary)
+                        || response.clicked_by(egui::PointerButton::Primary)
+                    {
+                        let pressed = ui
+                            .input(|input| input.pointer.press_origin())
+                            .or(response.interact_pointer_pos());
+                        if let Some(position) =
+                            pressed.filter(|position| page_rect.contains(*position))
+                        {
+                            self.selection.begin(point(position));
+                        }
+                    }
+                    if (response.dragged_by(egui::PointerButton::Primary)
+                        || response.drag_stopped_by(egui::PointerButton::Primary))
+                        && let Some(position) = response.interact_pointer_pos()
+                    {
+                        self.selection.extend(point(position));
+                    }
+                }
                 let key = view.key(self.nav.page, dimensions);
                 self.cache.protect(key);
                 let plan = view.plan(self.nav.page, &self.dimensions, self.cache.budget());
@@ -1142,6 +1221,14 @@ impl Folio {
                         Color32::WHITE,
                     );
                     self.highlights(&painter, page_rect, dimensions);
+                    for rect in &self.selection.rects {
+                        painter.rect_filled(
+                            self.link_rect(*rect, page_rect, dimensions)
+                                .intersect(page_rect),
+                            1.0,
+                            Color32::from_rgba_unmultiplied(74, 145, 230, 95),
+                        );
+                    }
                     self.link_overlays(ui, page_rect, dimensions);
                 } else {
                     painter.text(
@@ -1183,6 +1270,19 @@ impl Folio {
         context.request_repaint();
     }
 
+    fn copy_selection(&mut self, context: &egui::Context) {
+        if let Some(text) = self
+            .selection
+            .selected_text()
+            .filter(|text| !text.is_empty())
+        {
+            context.copy_text(text.to_owned());
+            self.notify("Selected text copied");
+        } else {
+            self.notify("Drag over text to select it first");
+        }
+    }
+
     fn link_rect(
         &self,
         rect: hayro::kurbo::Rect,
@@ -1197,6 +1297,10 @@ impl Folio {
     }
 
     fn link_overlays(&mut self, ui: &mut egui::Ui, page_rect: egui::Rect, dimensions: [f32; 2]) {
+        if self.selection.active {
+            self.visible_links.clear();
+            return;
+        }
         self.visible_links = self
             .links
             .get(&self.nav.page)
@@ -1313,6 +1417,7 @@ impl Folio {
                             Some(MarkAction::Set) => "SET MARK · a–z",
                             Some(MarkAction::Jump) => "GO TO MARK · a–z",
                             None if self.hints.active => "LINKS",
+                            None if self.selection.active => "VISUAL",
                             None => "NORMAL",
                         })
                         .small()
@@ -1427,6 +1532,7 @@ impl Folio {
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N", "Next / previous search match"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
+                        ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
                         ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
                         ("f, then a label", "Follow a visible PDF link"), ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
                     ] { ui.monospace(keys); ui.label(action); ui.end_row(); }

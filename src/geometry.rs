@@ -1,5 +1,16 @@
 use hayro::kurbo::{Point, Rect};
 
+pub fn unrotate_point(point: Point, dimensions: [f32; 2], rotation: u8) -> Point {
+    let [w, h] = dimensions.map(f64::from);
+    let Point { x, y } = point;
+    match rotation % 4 {
+        1 => Point::new(y, h - x),
+        2 => Point::new(w - x, h - y),
+        3 => Point::new(w - y, x),
+        _ => point,
+    }
+}
+
 pub fn rotate_rect(rect: Rect, dimensions: [f32; 2], rotation: u8) -> Rect {
     let rotate = |x: f64, y: f64| {
         let [w, h] = dimensions.map(f64::from);
@@ -66,5 +77,14 @@ mod tests {
         let rotated = rotate_rect(rect, [600.0, 800.0], 1);
         assert_eq!(rotated, Rect::new(710.0, 25.0, 730.0, 125.0));
         assert_eq!(rotate_rect(rotated, [800.0, 600.0], 3), rect);
+        let original = Point::new(120.0, 250.0);
+        for (rotation, point) in [
+            (0, original),
+            (1, Point::new(550.0, 120.0)),
+            (2, Point::new(480.0, 550.0)),
+            (3, Point::new(250.0, 480.0)),
+        ] {
+            assert_eq!(unrotate_point(point, [600.0, 800.0], rotation), original);
+        }
     }
 }

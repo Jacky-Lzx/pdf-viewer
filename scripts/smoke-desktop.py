@@ -62,19 +62,70 @@ class Keyboard:
             self.x11.XFlush(self.display)
         return found
 
-    def key(self, symbol, shift=False):
+    def key(self, symbol, shift=False, ctrl=False):
         if isinstance(symbol, str):
             symbol = ord(symbol)
         shift_code = self.x11.XKeysymToKeycode(self.display, 0xFFE1)
+        ctrl_code = self.x11.XKeysymToKeycode(self.display, 0xFFE3)
         code = self.x11.XKeysymToKeycode(self.display, symbol)
+        if ctrl:
+            self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 1, 0)
         if shift:
             self.xtst.XTestFakeKeyEvent(self.display, shift_code, 1, 0)
         self.xtst.XTestFakeKeyEvent(self.display, code, 1, 0)
         self.xtst.XTestFakeKeyEvent(self.display, code, 0, 0)
         if shift:
             self.xtst.XTestFakeKeyEvent(self.display, shift_code, 0, 0)
+        if ctrl:
+            self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 0, 0)
         self.x11.XFlush(self.display)
         time.sleep(0.08)
+
+    def drag(self, start, end):
+        self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeMotionEvent(self.display, -1, *start, 0)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 1, 0)
+        self.x11.XFlush(self.display)
+        time.sleep(0.1)
+        for step in range(1, 11):
+            x, y = [round(a + (b - a) * step / 10) for a, b in zip(start, end)]
+            self.xtst.XTestFakeMotionEvent(self.display, -1, x, y, 0)
+            self.x11.XFlush(self.display)
+            time.sleep(0.03)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 0, 0)
+        self.x11.XFlush(self.display)
+        time.sleep(0.1)
+
+    def clipboard(self):
+        x11 = self.x11
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
+        x11.XCreateSimpleWindow.restype = ctypes.c_ulong
+        x11.XConvertSelection.argtypes = [ctypes.c_void_p] + [ctypes.c_ulong] * 5
+        x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
+        x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        window = x11.XCreateSimpleWindow(self.display, x11.XDefaultRootWindow(self.display), 0, 0, 1, 1, 0, 0, 0)
+        atom = lambda name: x11.XInternAtom(self.display, name, 0)
+        property_atom = atom(b"FOLIO_SMOKE_CLIPBOARD")
+        try:
+            x11.XConvertSelection(self.display, atom(b"CLIPBOARD"), atom(b"UTF8_STRING"), property_atom, window, 0)
+            x11.XFlush(self.display)
+            def read():
+                actual, count, remaining = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_ulong()
+                format_bits, data = ctypes.c_int(), ctypes.c_void_p()
+                x11.XGetWindowProperty(self.display, window, property_atom, 0, 65536, 0, 0, ctypes.byref(actual), ctypes.byref(format_bits), ctypes.byref(count), ctypes.byref(remaining), ctypes.byref(data))
+                try:
+                    if actual.value and format_bits.value == 8 and data.value:
+                        return ctypes.string_at(data, count.value).decode("utf-8")
+                finally:
+                    if data.value:
+                        x11.XFree(data)
+                return None
+            return wait_for(read, "selected text in clipboard")
+        finally:
+            x11.XDestroyWindow(self.display, window)
 
 
 def run(binary):
@@ -107,6 +158,15 @@ def run(binary):
         try:
             application = launch()
             expect(lambda _, book: book["page"] == 0, "initial page")
+            keyboard.key("v"); time.sleep(0.3)
+            keyboard.drag((374, 290), (570, 290)); keyboard.key("y")
+            selected = keyboard.clipboard()
+            assert selected == "A native PDF reader, written in Rust.", repr(selected)
+            keyboard.key("r"); time.sleep(0.3)
+            keyboard.drag((768, 135), (768, 424)); keyboard.key("c", ctrl=True)
+            selected = keyboard.clipboard()
+            assert selected == "A native PDF reader, written in Rust.", repr(selected)
+            keyboard.key(0xFF1B); keyboard.key("r", shift=True)
             keyboard.key("f"); keyboard.key("a")
             expect(lambda _, book: book["page"] == 1, "keyboard link hints")
             keyboard.key("g"); keyboard.key("g")
@@ -159,7 +219,7 @@ def run(binary):
             time.sleep(0.5)
             keyboard.key("m"); keyboard.key("z")
             expect(lambda _, book: book["marks"].get("z", {}).get("offset", [0, 0])[1] > 0, "page scroll restored on restart")
-            print("PASS: native Vim navigation, keyboard links, bookmarks, named marks, scroll restore, rotation, themes, search, page dialog, sidebar and session restore")
+            print("PASS: native Vim navigation, keyboard links, text selection and clipboard, bookmarks, named marks, scroll restore, rotation, themes, search, page dialog, sidebar and session restore")
         except Exception:
             log.flush(); log.seek(0)
             print(log.read(), file=sys.stderr)
