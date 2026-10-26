@@ -117,9 +117,12 @@ impl PageText {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        // Reserve for Unicode case-fold expansion before the lazy index is built.
+        // Unicode folding expands by at most 3×; growing vectors can reserve 4×.
         let index_bytes = self.index.get().map_or_else(
-            || self.text.len() * 3 * (1 + std::mem::size_of::<usize>()),
+            || {
+                let growth = if self.text.is_ascii() { 1 } else { 4 };
+                self.text.len() * growth * (1 + std::mem::size_of::<usize>())
+            },
             |index| {
                 index.folded.capacity() + index.source.capacity() * std::mem::size_of::<usize>()
             },
@@ -334,6 +337,29 @@ mod tests {
 
     #[test]
     fn lazy_index_reservation_covers_large_unicode_expansion() {
+        let ascii = PageText {
+            text: "Rust ".repeat(100),
+            ..Default::default()
+        };
+        let reserved = ascii.memory_bytes();
+        ascii.search(0, "missing");
+        assert_eq!(
+            ascii.memory_bytes(),
+            reserved,
+            "ASCII indexes need no growth allowance"
+        );
+        for value in ["ΐ", "İ", "Ⱥ", "ῗ", "ΐİ", "中ΐ", "ﬃ"] {
+            let page = PageText {
+                text: value.into(),
+                ..Default::default()
+            };
+            let reserved = page.memory_bytes();
+            page.search(0, "missing");
+            assert!(
+                page.memory_bytes() <= reserved,
+                "vector growth exceeded reservation for {value}"
+            );
+        }
         let page = PageText {
             text: "İȺȾΣΐ 中文 ".repeat(1000),
             ..Default::default()

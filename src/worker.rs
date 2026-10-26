@@ -5,7 +5,7 @@ use crate::{
 use eframe::egui;
 use hayro::{RenderCache, hayro_interpret::InterpreterCache, hayro_syntax::Pdf};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex,
@@ -272,8 +272,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
     let destinations = crate::outline::DestinationIndex::new(pdf);
-    let mut texts: HashMap<usize, Arc<PageText>> = HashMap::new();
-    let mut text_bytes = 0;
+    let mut texts = crate::text_cache::TextCache::default();
     let mut search: Option<(SearchRequest, usize, usize)> = None;
     loop {
         let job = {
@@ -359,26 +358,17 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                     search = None;
                     continue;
                 }
-                let mut uncached = None;
-                if !texts.contains_key(&page) {
+                let text = if let Some(text) = texts.get(page) {
+                    text
+                } else {
                     let text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         text::extract(&pdf.pages()[page], &interpreter_cache)
                     }))
                     .unwrap_or_default();
-                    let bytes = text.memory_bytes();
                     let text = Arc::new(text);
-                    if bytes > 32 * 1024 * 1024 {
-                        uncached = Some(text);
-                    } else {
-                        if text_bytes + bytes > 32 * 1024 * 1024 {
-                            texts.clear();
-                            text_bytes = 0;
-                        }
-                        text_bytes += bytes;
-                        texts.insert(page, text);
-                    }
-                }
-                let text = uncached.as_ref().unwrap_or_else(|| &texts[&page]);
+                    texts.insert(page, Arc::clone(&text));
+                    text
+                };
                 if matches!(job, Job::Inspect(_)) {
                     emit(
                         tx,
@@ -386,7 +376,7 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         Event::PageText {
                             id,
                             page,
-                            text: Arc::clone(text),
+                            text: Arc::clone(&text),
                         },
                     );
                 } else if matches!(job, Job::Copy(_)) {
@@ -400,13 +390,8 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                         },
                     );
                 } else if let Some((request, next, hit_count)) = &mut search {
-                    let reserved = text.memory_bytes();
                     let mut hits = text.search(page, &request.query);
-                    if uncached.is_none() {
-                        text_bytes = text_bytes
-                            .saturating_sub(reserved)
-                            .saturating_add(text.memory_bytes());
-                    }
+                    texts.refresh(page);
                     hits.truncate(10_000_usize.saturating_sub(*hit_count));
                     *hit_count += hits.len();
                     *next += 1;

@@ -15,6 +15,7 @@ mod render_plan;
 mod selection;
 mod state;
 mod text;
+mod text_cache;
 mod worker;
 
 use std::{path::PathBuf, time::Instant};
