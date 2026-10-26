@@ -1,6 +1,6 @@
 use eframe::egui::{Event, InputState, Key, Modifiers};
 
-pub(super) fn consume_search_shortcut(input: &mut InputState, key: Key, modifiers: Modifiers) {
+pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers: Modifiers) {
     // Option shortcuts can also generate a text event on macOS. Preserve text
     // typed before/after the shortcut, even when a busy frame batches both.
     let mut shortcut_text = false;
@@ -55,8 +55,8 @@ mod tests {
             key(Key::C, plain, true),
             Event::Text("c".into()),
         ];
-        consume_search_shortcut(&mut input, Key::C, alt);
-        consume_search_shortcut(&mut input, Key::W, alt);
+        consume_text_shortcut(&mut input, Key::C, alt);
+        consume_text_shortcut(&mut input, Key::W, alt);
         let text: String = input
             .events
             .iter()

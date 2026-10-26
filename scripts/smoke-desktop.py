@@ -21,6 +21,22 @@ def wait_for(predicate, description, timeout=12):
     raise AssertionError(f"Timed out: {description}")
 
 
+class WindowAttributes(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_int) for name in ("x", "y", "width", "height", "border_width", "depth")
+    ] + [
+        ("visual", ctypes.c_void_p), ("root", ctypes.c_ulong),
+        ("window_class", ctypes.c_int), ("bit_gravity", ctypes.c_int),
+        ("win_gravity", ctypes.c_int), ("backing_store", ctypes.c_int),
+        ("backing_planes", ctypes.c_ulong), ("backing_pixel", ctypes.c_ulong),
+        ("save_under", ctypes.c_int), ("colormap", ctypes.c_ulong),
+        ("map_installed", ctypes.c_int), ("map_state", ctypes.c_int),
+        ("all_event_masks", ctypes.c_long), ("your_event_mask", ctypes.c_long),
+        ("do_not_propagate_mask", ctypes.c_long), ("override_redirect", ctypes.c_int),
+        ("screen", ctypes.c_void_p),
+    ]
+
+
 class Keyboard:
     def __init__(self):
         self.x11 = ctypes.CDLL("libX11.so.6")
@@ -34,6 +50,7 @@ class Keyboard:
         self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
         self.x11.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
         self.x11.XFetchName.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_char_p)]
+        self.x11.XGetWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(WindowAttributes)]
         self.x11.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
         self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         self.x11.XKeysymToKeycode.restype = ctypes.c_uint
@@ -52,7 +69,9 @@ class Keyboard:
                 name = ctypes.c_char_p()
                 if self.x11.XFetchName(self.display, children[i], ctypes.byref(name)) and name.value:
                     if title.encode("utf-8") in name.value:
-                        found = children[i]
+                        attributes = WindowAttributes()
+                        if self.x11.XGetWindowAttributes(self.display, children[i], ctypes.byref(attributes)) and attributes.map_state == 2:
+                            found = children[i]
                     self.x11.XFree(name)
         finally:
             if children:

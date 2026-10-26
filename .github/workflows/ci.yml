@@ -38,6 +38,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
           xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
           xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
       - name: Exercise renderer and text extraction
         shell: bash
         run: |

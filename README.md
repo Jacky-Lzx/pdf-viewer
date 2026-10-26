@@ -47,6 +47,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 | `p` / `w` | 适合整页 / 适合宽度 |
 | `r` / `Shift+r` | 顺时针 / 逆时针旋转 |
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
+| `Ctrl/Cmd+p` | 筛选最近文档；方向键或 `Ctrl+j/k` 选择，回车打开 |
 | `Alt+c` / `Alt+w` | 搜索栏打开时切换区分大小写 / 整词匹配 |
 | `n` / `N`，`3n` / `3N` | 下一个 / 上一个搜索匹配，支持数字计数（`F3` / `Shift+F3` 同样生效） |
 | `f`，然后输入标签 | 跟随当前可见的 PDF 链接；`Escape` 取消 |
@@ -76,6 +77,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 `v` 选择模式中双击按 Unicode 词边界选词，三击选中当前文本行；之后拖动会按相同单位扩展，单击恢复按字形选择。双击选择时保留缩放，退出选择模式后双击仍恢复适合整页。组合重音和 emoji 不会在词选择中被拆开；中文按 Unicode 默认词边界处理，整行范围取决于 PDF 提取出的文本换行。
 
 重新编译或更新 PDF 后，按 `Ctrl/Cmd+r` 可重新加载，保留页码、缩放、旋转、相对滚动位置和有效标记，并重新搜索当前查询。只有解析成功才切换文档；若文件暂时写入不完整，原文档仍可阅读，文件恢复后再次重新加载即可。
+
+`Ctrl/Cmd+p` 从最近 24 份文档中按文件名或完整路径筛选，支持 Unicode 大小写折叠与空格分隔的多个关键词。方向键或 `Ctrl+j/k` 选择，回车、双击或 Open 按钮打开并恢复该文档的阅读位置。再次按快捷键、`Escape` 或 Cancel 关闭；筛选时输入不会触发页面导航。欢迎界面也提供入口。
 
 ## 性能设计
 
@@ -131,6 +134,7 @@ xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
 xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
 xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
+xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

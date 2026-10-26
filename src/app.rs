@@ -1,3 +1,4 @@
+mod recent;
 mod shortcuts;
 mod sidebar;
 
@@ -79,6 +80,7 @@ pub struct Folio {
     goto_open: bool,
     goto_focus: bool,
     help: bool,
+    recent_picker: Option<crate::recent::RecentPicker>,
     password: String,
     password_open: bool,
     saved: Instant,
@@ -142,6 +144,7 @@ impl Folio {
             goto_open: false,
             goto_focus: false,
             help: false,
+            recent_picker: None,
             password: String::new(),
             password_open: false,
             saved: Instant::now(),
@@ -154,6 +157,8 @@ impl Folio {
     }
 
     fn open(&mut self, path: PathBuf, context: &egui::Context) {
+        context.memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-recent-input")));
+        self.recent_picker = None;
         self.remember();
         let path = std::fs::canonicalize(&path).unwrap_or(path);
         self.reading = self
@@ -343,6 +348,7 @@ impl Folio {
     }
 
     fn choose_file(&mut self) {
+        self.recent_picker = None;
         self.nav.clear_prefix();
         if self.dialog.is_some() {
             return;
@@ -456,6 +462,7 @@ impl Folio {
     }
 
     fn find(&mut self) {
+        self.recent_picker = None;
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
@@ -702,6 +709,7 @@ impl Folio {
         let typing = context.memory(|memory| {
             [
                 "folio-search-input",
+                "folio-recent-input",
                 "folio-page-input",
                 "folio-password-input",
                 "folio-outline-input",
@@ -742,8 +750,7 @@ impl Folio {
                 } else {
                     self.search_options.whole_word = !self.search_options.whole_word;
                 }
-                context
-                    .input_mut(|input| shortcuts::consume_search_shortcut(input, key, modifiers));
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 self.change_search();
                 continue;
             }
@@ -752,6 +759,7 @@ impl Folio {
                 self.selection.cancel();
                 self.mark_action = None;
                 self.help = false;
+                self.recent_picker = None;
                 self.goto_open = false;
                 self.search_open = false;
                 self.pending_search_jump = None;
@@ -772,6 +780,11 @@ impl Folio {
                 self.find();
                 continue;
             }
+            if modifiers.command && key == Key::P {
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                self.toggle_recent(context);
+                continue;
+            }
             if modifiers.command && key == Key::R {
                 self.reload();
                 continue;
@@ -781,6 +794,24 @@ impl Folio {
                     input.consume_key(modifiers, key);
                 });
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
+                continue;
+            }
+            if let Some(picker) = &mut self.recent_picker {
+                if key == Key::Enter {
+                    picker.confirm = true;
+                    context.input_mut(|input| input.consume_key(modifiers, key));
+                } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
+                    || (modifiers.ctrl && matches!(key, Key::J | Key::K))
+                {
+                    let delta = if matches!(key, Key::ArrowUp | Key::K) {
+                        -1
+                    } else {
+                        1
+                    };
+                    picker.motion = picker.motion.saturating_add(delta);
+                    context
+                        .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                }
                 continue;
             }
             if typing || self.help || self.password_open || self.goto_open {
@@ -1663,6 +1694,9 @@ impl Folio {
                 if let Some(path) = open {
                     self.open(path, ui.ctx());
                 }
+                if ui.button("Find recent documents · Ctrl/Cmd+P").clicked() {
+                    self.toggle_recent(ui.ctx());
+                }
             }
         });
     }
@@ -1679,6 +1713,7 @@ impl Folio {
                             Some(MarkAction::Jump) => "GO TO MARK · a–z",
                             None if self.hints.active => "LINKS",
                             None if self.selection.active => "VISUAL",
+                            None if self.recent_picker.is_some() => "RECENT",
                             None => "NORMAL",
                         })
                         .small()
@@ -1731,6 +1766,7 @@ impl Folio {
     }
 
     fn dialogs(&mut self, context: &egui::Context) {
+        self.recent_dialog(context);
         if self.goto_open {
             egui::Window::new("Go to page")
                 .collapsible(false)
@@ -1798,7 +1834,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w", "Fit page / fit width"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
-                        ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
+                        ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
                         ("ma   /   'a or `a", "Save / restore named position a–z"),
                         ("t", "Toggle page previews and open sidebar"),
                         ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
