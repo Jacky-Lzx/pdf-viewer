@@ -100,7 +100,7 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 ## 性能设计
 
-- PDF 加载、渲染、文本提取和搜索均放在后台线程，UI 通过事件唤醒。
+- PDF 加载、渲染、文本提取和搜索均放在后台线程，UI 通过事件唤醒。目录标题和页码前缀直接从 UTF-16 字节解码，避免为每个字符串先创建临时码元数组。
 - 优先渲染当前页，再沿翻页方向优先预取相邻页；按各页尺寸、旋转和屏幕 DPI 计算分辨率，混合横竖版文档切页时可直接命中缓存。视图变化会替换尚未执行的渲染请求；已过期的在途结果会丢弃，仍需要的相同任务直接复用。
 - GPU 页面纹理使用 **96 MiB LRU 缓存**，预取不会淘汰当前页；高倍缩放时跳过无法与当前页同时放入缓存的预取任务，纹理上传前再次检查容量。文本索引使用 32 MiB LRU 缓存，最多保留 512 页，容量不足时只逐出最近最少使用的页面。
 - 缩略图仅请求可见行，使用独立 **8 MiB LRU 缓存**；滚动或关闭侧栏会取消过期任务，主页面渲染、文本操作和搜索优先执行。
@@ -148,6 +148,8 @@ cargo bench --locked --bench word_selection -- 9
 cargo bench --locked --bench search_index -- 9
 # 搜索摘要，比较临时字符串拼接与直接截取上下文
 cargo bench --locked --bench search_snippet -- 9
+# PDF UTF-16 标题解码，对比临时数组与直接解码
+cargo bench --locked --bench pdf_strings -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-cli.py target/release/folio

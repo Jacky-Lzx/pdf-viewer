@@ -75,7 +75,7 @@ impl PageLabels {
                         .get::<PdfString<'_>>(b"P")
                         .map(|value| {
                             let bytes = value.as_bytes();
-                            crate::outline::decode_string(&bytes[..bytes.len().min(1024)])
+                            crate::pdf_string::decode(&bytes[..bytes.len().min(1024)])
                                 .chars()
                                 .take(256)
                                 .collect()

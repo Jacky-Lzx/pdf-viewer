@@ -58,3 +58,7 @@ harness = false
 [[bench]]
 name = "search_snippet"
 harness = false
+
+[[bench]]
+name = "pdf_strings"
+harness = false

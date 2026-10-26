@@ -119,7 +119,25 @@ def run(binary):
                 keyboard.key(0xFF1B)
                 burst([("c", {}), (0xFF1B, {}), ("j", {"shift": True})])
                 expect(1, "Escape cancels opening chapter focus before the next reader key")
-                print("PASS: nested folds, Unicode-ready filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
+                # Real UTF-16 PDF metadata, preserving every xref byte offset.
+                source = document.read_bytes()
+                for original, replacement in [
+                    (b"/Title (A little room to read.)", b"/Title (" + b"\xfe\xff" + "Straße".encode("utf-16-be") + b")"),
+                    (b"/S /D /P (A-)", b"/S/D/P(" + b"\xfe\xff" + "Z".encode("utf-16-be") + b")"),
+                ]:
+                    assert original in source and len(replacement) <= len(original)
+                    source = source.replace(original, replacement.ljust(len(original)), 1)
+                document.write_bytes(source)
+                keyboard.key("r", ctrl=True)
+                time.sleep(0.5)
+                burst(chapter_keys("strasse") + [(0xFF0D, {})])
+                expect(0, "UTF-16 title decodes before Unicode case-folded filtering")
+                keyboard.key(":", shift=True)
+                for letter in "Z2":
+                    keyboard.key(letter.lower(), shift=letter.isupper())
+                keyboard.key(0xFF0D)
+                expect(5, "UTF-16 page-label prefix decodes before label navigation")
+                print("PASS: nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

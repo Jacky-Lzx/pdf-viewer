@@ -14,6 +14,7 @@ mod navigation;
 mod outline;
 mod outline_view;
 mod page_labels;
+mod pdf_string;
 mod recent;
 mod render_plan;
 mod selection;

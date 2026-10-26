@@ -150,7 +150,7 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
         }
         let title = item
             .get::<PdfString<'_>>(b"Title")
-            .map(|s| decode_string(s.as_bytes()))
+            .map(|s| crate::pdf_string::decode(s.as_bytes()))
             .unwrap_or_default();
         let dest = item.get::<Object<'_>>(b"Dest").or_else(|| {
             let action = item.get::<Dict<'_>>(b"A")?;
@@ -217,37 +217,6 @@ fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
         }
     }
     named
-}
-
-pub fn decode_string(bytes: &[u8]) -> String {
-    if bytes.starts_with(&[0xfe, 0xff]) {
-        let units: Vec<_> = bytes[2..]
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
-            .collect();
-        return String::from_utf16_lossy(&units);
-    }
-    if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    // PDFDocEncoding differs from Latin-1 in these two ranges and at 0xA0.
-    const DIACRITICS: [char; 8] = ['˘', 'ˇ', 'ˆ', '˙', '˝', '˛', '˚', '˜'];
-    const SPECIAL: [char; 32] = [
-        '•', '†', '‡', '…', '—', '–', 'ƒ', '⁄', '‹', '›', '−', '‰', '„', '“', '”', '‘', '’', '‚',
-        '™', 'ﬁ', 'ﬂ', 'Ł', 'Œ', 'Š', 'Ÿ', 'Ž', 'ı', 'ł', 'œ', 'š', 'ž', '�',
-    ];
-    bytes
-        .iter()
-        .map(|byte| match byte {
-            0x18..=0x1f => DIACRITICS[(byte - 0x18) as usize],
-            0x80..=0x9f => SPECIAL[(byte - 0x80) as usize],
-            0xa0 => '€',
-            0x7f | 0xad => '�',
-            _ => char::from(*byte),
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -356,13 +325,6 @@ mod tests {
             vec![0, 1, 2, 3, 4, 5]
         );
         assert_eq!(outline[0].title, "A little room to read.");
-    }
-
-    #[test]
-    fn pdf_titles_decode_utf16_and_pdf_doc_encoding() {
-        assert_eq!(decode_string(&[0xfe, 0xff, 0x4e, 0x2d, 0x65, 0x87]), "中文");
-        assert_eq!(decode_string(b"Hello\x84world\xa0"), "Hello—world€");
-        assert_eq!(decode_string(b"\xef\xbb\xbfUTF8"), "UTF8");
     }
 
     #[test]
