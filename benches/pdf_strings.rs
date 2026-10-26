@@ -3,16 +3,36 @@ mod pdf_string;
 
 use std::{hint::black_box, time::Instant};
 
-// Previous UTF-16BE path, including the temporary array of native-endian units.
+// Previous PDF text-string decoder, before direct UTF-16 and ASCII paths.
 fn baseline(bytes: &[u8]) -> String {
-    let bytes = bytes.strip_prefix(&[0xfe, 0xff]).unwrap();
-    let units: Vec<_> = bytes
-        .as_chunks::<2>()
-        .0
+    if let Some(bytes) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        let units: Vec<_> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_be_bytes(*pair))
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    // PDFDocEncoding differs from Latin-1 in these two ranges and at 0xA0.
+    const DIACRITICS: [char; 8] = ['˘', 'ˇ', 'ˆ', '˙', '˝', '˛', '˚', '˜'];
+    const SPECIAL: [char; 32] = [
+        '•', '†', '‡', '…', '—', '–', 'ƒ', '⁄', '‹', '›', '−', '‰', '„', '“', '”', '‘', '’', '‚',
+        '™', 'ﬁ', 'ﬂ', 'Ł', 'Œ', 'Š', 'Ÿ', 'Ž', 'ı', 'ł', 'œ', 'š', 'ž', '�',
+    ];
+    bytes
         .iter()
-        .map(|pair| u16::from_be_bytes(*pair))
-        .collect();
-    String::from_utf16_lossy(&units)
+        .map(|byte| match byte {
+            0x18..=0x1f => DIACRITICS[(byte - 0x18) as usize],
+            0x80..=0x9f => SPECIAL[(byte - 0x80) as usize],
+            0xa0 => '€',
+            0x7f | 0xad => '�',
+            _ => char::from(*byte),
+        })
+        .collect()
 }
 
 fn main() {
@@ -27,7 +47,7 @@ fn main() {
     println!(
         "Alternating baseline/current, {passes} passes, 10,000 decodes per pass; medians include output allocation and drop."
     );
-    for (name, text) in [
+    let mut cases: Vec<_> = [
         (
             "Latin title",
             "Chapter 4. Performance and concurrency".to_owned(),
@@ -39,9 +59,29 @@ fn main() {
             "Long Chinese title",
             "第四章：设计高效的跨平台阅读器".repeat(32),
         ),
-    ] {
+    ]
+    .into_iter()
+    .map(|(name, text)| {
         let mut bytes = vec![0xfe, 0xff];
         bytes.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        (name, bytes)
+    })
+    .collect();
+    cases.extend([
+        (
+            "ASCII title",
+            b"Chapter 4. Performance and concurrency".to_vec(),
+        ),
+        (
+            "Long ASCII title",
+            b"Chapter 4. Performance and concurrency".repeat(32),
+        ),
+        (
+            "PDF control accents",
+            b"title \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f \x7f\x84\xa0".to_vec(),
+        ),
+    ]);
+    for (name, bytes) in cases {
         let expected = baseline(&bytes);
         let actual = pdf_string::decode(&bytes);
         assert_eq!(actual, expected);
@@ -71,7 +111,11 @@ fn main() {
             bytes.len(),
             capacities[0],
             capacities[1],
-            bytes.len() - 2,
+            if bytes.starts_with(&[0xfe, 0xff]) {
+                bytes.len() - 2
+            } else {
+                0
+            },
             times[0][passes / 2],
             times[1][passes / 2]
         );

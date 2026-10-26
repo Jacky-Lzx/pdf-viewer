@@ -14,6 +14,14 @@ pub fn decode(bytes: &[u8]) -> String {
     if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
         return String::from_utf8_lossy(bytes).into_owned();
     }
+    // PDFDocEncoding's ASCII control accents and DEL need the table below.
+    // All other ASCII bytes can be copied without re-encoding each character.
+    if bytes
+        .iter()
+        .all(|&byte| byte < 0x18 || (0x20..=0x7e).contains(&byte))
+    {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
     // PDFDocEncoding differs from Latin-1 in these two ranges and at 0xA0.
     const DIACRITICS: [char; 8] = ['˘', 'ˇ', 'ˆ', '˙', '˝', '˛', '˚', '˜'];
     const SPECIAL: [char; 32] = [
@@ -71,5 +79,26 @@ mod tests {
             assert_eq!(decode(&bytes), expected);
         }
         assert_eq!(decode(b"\xef\xbb\xbf\xff"), "�");
+    }
+
+    #[test]
+    fn ascii_copy_preserves_pdf_control_accents_and_encoding_boundaries() {
+        use super::decode;
+
+        for byte in 0..0x7f {
+            if !(0x18..=0x1f).contains(&byte) {
+                assert_eq!(decode(&[byte]), char::from(byte).to_string());
+            }
+        }
+        assert_eq!(decode(b""), "");
+        assert_eq!(
+            decode(b"Chapter 4\tPerformance\n"),
+            "Chapter 4\tPerformance\n"
+        );
+        assert_eq!(decode(b"\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"), "˘ˇˆ˙˝˛˚˜");
+        assert_eq!(decode(b"before\x7fafter"), "before�after");
+        assert_eq!(decode(b"before\x84after\xa0"), "before—after€");
+        // A UTF-8-looking byte sequence without its BOM is still PDFDocEncoding.
+        assert_eq!(decode(b"\xc3\xa9"), "Ã©");
     }
 }
