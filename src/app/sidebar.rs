@@ -444,18 +444,20 @@ impl Folio {
                             );
                         }
                         results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
+                            let mut previous_page = None;
+                            let mut page_name = String::new();
                             for index in range {
                                 let hit = &self.hits[index];
+                                if previous_page != Some(hit.page) {
+                                    page_name = self.page_name(hit.page);
+                                    previous_page = Some(hit.page);
+                                }
                                 if ui
                                     .add_sized(
                                         Vec2::new(ui.available_width(), row_height),
                                         egui::Button::selectable(
                                             self.hit_index == Some(index),
-                                            format!(
-                                                "{}   {}",
-                                                self.page_name(hit.page),
-                                                hit.snippet
-                                            ),
+                                            format!("{page_name}   {}", hit.snippet),
                                         )
                                         .truncate(),
                                     )
