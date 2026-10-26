@@ -1,5 +1,6 @@
 mod boundaries;
 mod search_index;
+mod snippet;
 mod span;
 pub use span::TextSpan;
 
@@ -310,19 +311,10 @@ impl PageText {
             }
             cursor.previous = Some((start, end));
             let rects = self.rects_for_range(start..end);
-            let before: String = self.text[..start]
-                .chars()
-                .rev()
-                .take(32)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
-            let after: String = self.text[start..].chars().take(80).collect();
             hits.push(SearchHit {
                 page,
                 rects,
-                snippet: format!("{before}{after}").replace('\n', " "),
+                snippet: snippet::snippet(&self.text, start),
             });
         }
         SearchBatch {
