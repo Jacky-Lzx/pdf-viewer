@@ -1174,8 +1174,14 @@ impl Folio {
                 continue;
             }
             if self.nav.pending_z {
-                self.nav.clear_prefix();
-                if !modifiers.shift {
+                let count = self.nav.take_count() as f32;
+                if modifiers.shift && matches!(key, Key::H | Key::L) {
+                    let direction = if key == Key::H { -1.0 } else { 1.0 };
+                    self.scroll(
+                        Vec2::new(self.viewport.x * 0.5 * count * direction, 0.0),
+                        false,
+                    );
+                } else if !modifiers.shift {
                     match key {
                         Key::T => self.align_page(0.0),
                         Key::Z => self.align_page(0.5),
@@ -2152,6 +2158,7 @@ impl Folio {
                         ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
                         ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
                         ("zt / zz / zb", "Current page top / vertical center / bottom"),
+                        ("zH / zL", "Scroll left / right half a screen; counts supported"),
                         ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
                         ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
                         ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
