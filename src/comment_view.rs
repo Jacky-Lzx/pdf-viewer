@@ -1,0 +1,304 @@
+//! Cached comment navigation, independent of widget layout and PDF writing.
+use crate::annotations::{Comments, ReviewStatus};
+use std::collections::HashMap;
+
+const SEARCH_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommentFilter {
+    pub query: String,
+    pub current_page: bool,
+    pub review: Option<ReviewStatus>,
+    pub marked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommentRow {
+    pub index: usize,
+    pub depth: usize,
+    /// Ancestors retained for context need not match the filters themselves.
+    pub matched: bool,
+}
+
+#[derive(Default)]
+pub struct CommentView {
+    pub filter: CommentFilter,
+    threads: Vec<(usize, usize)>,
+    parents: Vec<Option<usize>>,
+    visible: Vec<CommentRow>,
+    overlays: HashMap<usize, Vec<usize>>,
+    folded: Vec<Option<[String; 2]>>,
+    folded_bytes: usize,
+    applied: Option<(CommentFilter, Option<usize>)>,
+    matches: usize,
+}
+
+impl CommentView {
+    pub fn set_comments(&mut self, comments: &Comments) {
+        self.threads = comments.thread_rows();
+        self.parents.clear();
+        let mut ancestors = Vec::new();
+        for &(index, depth) in &self.threads {
+            ancestors.truncate(depth);
+            self.parents.push(ancestors.last().copied());
+            ancestors.push(index);
+        }
+        self.overlays.clear();
+        for (index, comment) in comments.items.iter().enumerate() {
+            if comment.parent.is_none() && !comment.rects.is_empty() {
+                self.overlays.entry(comment.page).or_default().push(index);
+            }
+        }
+        self.folded = (0..comments.items.len()).map(|_| None).collect();
+        self.folded_bytes = 0;
+        self.applied = None;
+        self.visible.clear();
+        self.matches = 0;
+    }
+
+    /// Returns true only when the visible list changed and should scroll to top.
+    pub fn update(&mut self, comments: &Comments, page: usize) -> bool {
+        let page = self.filter.current_page.then_some(page);
+        if self
+            .applied
+            .as_ref()
+            .is_some_and(|(filter, previous)| filter == &self.filter && *previous == page)
+        {
+            return false;
+        }
+        let query = caseless::default_case_fold_str(&self.filter.query);
+        let words: Vec<_> = query.split_whitespace().collect();
+        let mut matched = vec![false; comments.items.len()];
+        for (index, comment) in comments.items.iter().enumerate() {
+            if page.is_some_and(|p| p != comment.page)
+                || self.filter.review.is_some_and(|r| r != comment.review)
+                || (self.filter.marked && !comment.marked)
+            {
+                continue;
+            }
+            matched[index] = if words.is_empty() {
+                true
+            } else if let Some(fields) = &self.folded[index] {
+                words
+                    .iter()
+                    .all(|word| fields.iter().any(|s| s.contains(word)))
+            } else {
+                let fields = [
+                    caseless::default_case_fold_str(&comment.author),
+                    caseless::default_case_fold_str(&comment.contents),
+                ];
+                let found = words
+                    .iter()
+                    .all(|word| fields.iter().any(|s| s.contains(word)));
+                let bytes = fields.iter().map(String::capacity).sum::<usize>();
+                if bytes <= SEARCH_BYTES - self.folded_bytes {
+                    self.folded_bytes += bytes;
+                    self.folded[index] = Some(fields);
+                }
+                found
+            };
+        }
+        self.matches = matched.iter().filter(|&&m| m).count();
+        let mut keep = matched.clone();
+        // The preorder is already cycle-safe; one reverse pass retains every
+        // ancestor even for very deep threads, without walking each chain.
+        for (row, &(index, _)) in self.threads.iter().enumerate().rev() {
+            if keep[index]
+                && let Some(parent) = self.parents[row]
+            {
+                keep[parent] = true;
+            }
+        }
+        self.visible.clear();
+        self.visible
+            .extend(self.threads.iter().filter_map(|&(index, depth)| {
+                keep[index].then_some(CommentRow {
+                    index,
+                    depth,
+                    matched: matched[index],
+                })
+            }));
+        self.applied = Some((self.filter.clone(), page));
+        true
+    }
+
+    pub fn rows(&self) -> &[CommentRow] {
+        &self.visible
+    }
+
+    pub fn matches(&self) -> usize {
+        self.matches
+    }
+
+    /// Page painting is independent of the sidebar's filters.
+    pub fn overlays(&self, page: usize) -> &[usize] {
+        self.overlays.get(&page).map_or(&[], Vec::as_slice)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::annotations::{Comment, CommentId};
+
+    fn comment(page: usize, slot: usize, parent: Option<CommentId>, text: &str) -> Comment {
+        Comment {
+            page,
+            slot: Some(slot),
+            parent,
+            review: ReviewStatus::None,
+            marked: false,
+            states: Vec::new(),
+            kind: "Highlight".into(),
+            contents: text.into(),
+            author: "Reviewer".into(),
+            rects: vec![hayro::kurbo::Rect::new(10., 10., 30., 20.)],
+            has_appearance: false,
+            truncated: false,
+            locked: false,
+        }
+    }
+
+    #[test]
+    fn combined_unicode_filters_retain_ancestors_but_not_unmatched_siblings() {
+        // Replies arrive out of thread order and may live on another page.
+        let root = comment(0, 0, None, "Original question");
+        let reply = comment(1, 0, root.id(), "Straße Σ 中文");
+        let mut nested = comment(1, 1, reply.id(), "STRASSE ς 中文");
+        nested.author = "审阅者".into();
+        nested.review = ReviewStatus::Completed;
+        nested.marked = true;
+        let sibling = comment(0, 1, root.id(), "Unrelated reply");
+        let comments = Comments {
+            items: vec![nested, root, sibling, reply],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        view.filter = CommentFilter {
+            query: " strasse σ 审阅者 中文 ".into(),
+            current_page: true,
+            review: Some(ReviewStatus::Completed),
+            marked: true,
+        };
+        assert!(view.update(&comments, 1));
+        assert_eq!(view.matches(), 1);
+        assert_eq!(
+            view.rows(),
+            [
+                CommentRow {
+                    index: 1,
+                    depth: 0,
+                    matched: false
+                },
+                CommentRow {
+                    index: 3,
+                    depth: 1,
+                    matched: false
+                },
+                CommentRow {
+                    index: 0,
+                    depth: 2,
+                    matched: true
+                },
+            ]
+        );
+        assert!(
+            !view.update(&comments, 1),
+            "unchanged draws reuse their rows"
+        );
+        assert_eq!(view.overlays(0), [1], "filters do not remove PDF overlays");
+        assert!(
+            view.overlays(1).is_empty(),
+            "replies do not duplicate overlays"
+        );
+        assert!(view.update(&comments, 0));
+        assert!(view.rows().is_empty());
+        view.filter = CommentFilter::default();
+        assert!(view.update(&comments, 0));
+        assert_eq!(view.matches(), 4);
+        assert!(
+            !view.update(&comments, 99),
+            "all-pages filter ignores navigation"
+        );
+    }
+
+    #[test]
+    fn deep_threads_cycles_and_missing_parents_remain_stack_safe_and_unique() {
+        let mut items = Vec::new();
+        for slot in 0..10_000 {
+            let parent = (slot > 0).then(|| CommentId {
+                page: 0,
+                slot: slot - 1,
+            });
+            items.push(comment(
+                0,
+                slot,
+                parent,
+                if slot == 9_999 { "needle" } else { "ancestor" },
+            ));
+        }
+        let mut comments = Comments {
+            items,
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        view.filter.query = "needle".into();
+        view.update(&comments, 0);
+        assert_eq!(view.matches(), 1);
+        assert_eq!(view.rows().len(), 10_000);
+        assert_eq!(view.rows().last().unwrap().depth, 9_999);
+        comments.items[0].parent = comments.items[9_999].id();
+        view.set_comments(&comments);
+        view.update(&comments, 0);
+        assert_eq!(view.rows().len(), 10_000);
+        comments.items[0].parent = Some(CommentId { page: 99, slot: 0 });
+        view.set_comments(&comments);
+        view.update(&comments, 0);
+        assert_eq!(view.rows().len(), 10_000);
+    }
+
+    #[test]
+    fn replacing_comments_invalidates_search_and_page_indices_and_keeps_filter() {
+        let mut comments = Comments {
+            items: vec![comment(3, 0, None, "needle")],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        view.filter.query = "needle".into();
+        view.update(&comments, 0);
+        assert_eq!(view.matches(), 1);
+        comments.items[0].contents = "Changed externally".into();
+        comments.items[0].page = 4;
+        view.set_comments(&comments);
+        view.update(&comments, 0);
+        assert_eq!(view.matches(), 0);
+        assert!(view.overlays(3).is_empty());
+        assert_eq!(view.overlays(4), [0]);
+        comments.items.clear();
+        view.set_comments(&comments);
+        view.update(&comments, 0);
+        assert!(view.rows().is_empty());
+        assert!(view.overlays(4).is_empty());
+    }
+
+    #[test]
+    fn search_cache_budget_never_truncates_matching() {
+        let contents = format!("{}needle", "a".repeat(SEARCH_BYTES + 1));
+        let comments = Comments {
+            items: vec![comment(0, 0, None, &contents)],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        for query in ["needle", "reviewer needle", "missing"] {
+            view.filter.query = query.into();
+            view.update(&comments, 0);
+            assert_eq!(view.matches(), usize::from(query != "missing"));
+            assert!(view.folded_bytes <= SEARCH_BYTES);
+            assert!(view.folded[0].is_none());
+        }
+    }
+}

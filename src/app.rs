@@ -943,8 +943,7 @@ impl Pagewing {
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
                 Event::Comments { id, comments } if id == self.id => {
-                    self.comments.comments = comments;
-                    self.comments.loaded = true;
+                    self.comments.set_comments(comments);
                 }
                 Event::CommentChanged {
                     id,
@@ -1032,9 +1031,7 @@ impl Pagewing {
                     self.continuous_layout = crate::continuous::Layout::default();
                     self.continuous_link_request = None;
                     self.info = info;
-                    let comments_open = reloaded && self.comments.open;
-                    self.comments = comments::CommentUi::default();
-                    self.comments.open = comments_open;
+                    self.comments.reset(reloaded);
                     self.worker.comments();
                     self.reveal_page = Some(self.nav.page);
                     self.outline.set_entries(outline);
@@ -1225,6 +1222,7 @@ impl Pagewing {
                     self.comments.open && self.comments.editor.is_some(),
                     "pagewing-comment-input",
                 ),
+                (self.comments.open, "pagewing-comment-filter"),
                 (
                     self.library.sidebar && self.nav.count > 0 && !self.outline.is_empty(),
                     "pagewing-outline-input",
@@ -1267,6 +1265,7 @@ impl Pagewing {
                         "pagewing-help-input",
                         "pagewing-outline-input",
                         "pagewing-comment-input",
+                        "pagewing-comment-filter",
                     ]
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
@@ -1402,7 +1401,8 @@ impl Pagewing {
                 self.comments.open = false;
                 self.comments.focus = false;
                 context.memory_mut(|memory| {
-                    memory.surrender_focus(egui::Id::new("pagewing-comment-input"))
+                    memory.surrender_focus(egui::Id::new("pagewing-comment-input"));
+                    memory.surrender_focus(egui::Id::new("pagewing-comment-filter"));
                 });
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;

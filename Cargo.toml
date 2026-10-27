@@ -115,3 +115,7 @@ harness = false
 [[bench]]
 name = "metadata_trees"
 harness = false
+
+[[bench]]
+name = "comments"
+harness = false

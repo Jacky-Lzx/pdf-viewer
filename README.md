@@ -107,7 +107,9 @@ require('tex-tools').setup({
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
 
-打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，包含页码、作者、状态与完整 comment 内容；列表可滚动，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
+打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，以固定高度卡片显示页码、作者、状态与正文摘要；悬停或打开编辑器可查看全文。列表只绘制可见条目，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
+
+批注筛选：面板顶部可按正文与作者搜索，支持 Unicode 大小写折叠和空格分隔的多个关键词；各词可分别匹配作者或正文。可叠加 **All statuses** 状态选择、**Marked only** 勾选标记及 **Current page** 当前页筛选。命中回复时保留它的父批注作为上下文，并区分实际命中数与展示条数；**Clear filters** 清除全部条件。筛选不会改变 PDF 上的批注显示或丢弃编辑草稿；保存批注及重载当前文档后保留条件，切换文档时重置。小窗口中整个面板也可滚动。
 
 嵌套回复：选中已保存的批注，点击 **Reply**，输入回复后使用 **Save comment**（或 `Ctrl/Cmd+Enter`）保存。回复也可以继续回复，支持多层嵌套；深层回复的缩进会限制宽度，保留可读空间。回复以标准 PDF Text 批注及 `IRT` / `RT=R` 关系保存在原文件中，不会再创建文字高亮。已有 Acrobat 回复会自动组成线程。
 
@@ -335,6 +337,8 @@ cargo bench --locked --bench document_bytes -- 9
 cargo bench --locked --bench outline_filter -- 9
 # 首次链接读取，包含目标索引初始化和无链接、网页、内部跳转三种页面
 cargo bench --locked --bench link_reading -- 9
+# 批注导航与页面绘制索引，比较逐帧重建、全表扫描和缓存命中
+cargo bench --locked --bench comments -- 7
 # 名称与页码标签树，覆盖共享无效/重复数组及跨节点扫描上限
 cargo bench --locked --bench metadata_trees -- 9
 # 文本缓存命中、少量和批量逐出，包含真实页面费用记账
@@ -370,6 +374,7 @@ xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-properties.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-file-watch.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-help.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-comments.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/pagewing
 xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/pagewing

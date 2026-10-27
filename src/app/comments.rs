@@ -1,12 +1,72 @@
 use super::{Pagewing, shortcuts};
 use crate::annotations::{Comment, Comments, ReviewStatus};
+use crate::comment_view::{CommentFilter, CommentView};
 use eframe::egui::{self, Color32, Vec2};
+
+fn preview_text(text: &str, limit: usize) -> String {
+    let mut chars = text.chars();
+    let mut result: String = chars
+        .by_ref()
+        .take(limit)
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .collect();
+    if chars.next().is_some() {
+        result.push('…');
+    }
+    result
+}
+
+fn comment_card(
+    ui: &mut egui::Ui,
+    lines: &[String; 3],
+    active: bool,
+    matched: bool,
+    height: f32,
+) -> egui::Response {
+    let response = ui.add_sized(
+        egui::vec2(ui.available_width(), height),
+        egui::Button::selectable(active, ""),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), lines.join("\n"))
+    });
+    let inner = response.rect.shrink2(ui.spacing().button_padding);
+    let line_height = ui.text_style_height(&egui::TextStyle::Button);
+    for (line, text) in lines.iter().enumerate() {
+        let color = if matched && line == 1 {
+            ui.visuals().text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        let galley = egui::WidgetText::from(text.as_str()).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            inner.width().max(0.0),
+            egui::TextStyle::Button,
+        );
+        ui.painter().galley(
+            inner.min + Vec2::new(0.0, line as f32 * line_height),
+            galley,
+            color,
+        );
+    }
+    response
+}
+
+#[derive(Default)]
+struct CommentActions {
+    save: bool,
+    delete: bool,
+    reply: bool,
+    discard: bool,
+}
 
 #[derive(Default)]
 pub(super) struct CommentUi {
     pub open: bool,
     pub loaded: bool,
     pub comments: Comments,
+    pub view: CommentView,
     pub editor: Option<Comment>,
     original: String,
     original_review: ReviewStatus,
@@ -16,6 +76,24 @@ pub(super) struct CommentUi {
 }
 
 impl CommentUi {
+    pub fn set_comments(&mut self, comments: Comments) {
+        self.view.set_comments(&comments);
+        self.comments = comments;
+        self.loaded = true;
+    }
+
+    pub fn reset(&mut self, reloaded: bool) {
+        let open = reloaded && self.open;
+        let filter = if reloaded {
+            std::mem::take(&mut self.view.filter)
+        } else {
+            CommentFilter::default()
+        };
+        *self = Self::default();
+        self.open = open;
+        self.view.filter = filter;
+    }
+
     pub fn unsaved(&self) -> bool {
         self.editor.as_ref().is_some_and(|c| {
             c.slot.is_none()
@@ -158,10 +236,7 @@ impl Pagewing {
         }
         let mut open = true;
         let mut selected = None;
-        let mut save = false;
-        let mut delete = false;
-        let mut reply = false;
-        let mut discard = false;
+        let mut actions = CommentActions::default();
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
         egui::SidePanel::right("pagewing-comments-sidebar")
             .frame(super::appearance::panel(context, 14))
@@ -169,185 +244,315 @@ impl Pagewing {
             .width_range(220.0_f32.min(maximum)..=maximum)
             .resizable(true)
             .show(context, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.heading("Comments");
-                    ui.weak(format!("{} total", self.comments.comments.items.len()));
-                    if ui
-                        .small_button("×")
-                        .on_hover_text("Hide comments · Ctrl/Cmd+Shift+M")
-                        .clicked()
-                    {
-                        open = false;
-                    }
-                });
-                ui.label("All pages");
-                if ui
-                    .add_enabled(
-                        !self.comments.busy() && !self.selection.rects.is_empty(),
-                        egui::Button::new("Add comment to selection").wrap(),
-                    )
-                    .clicked()
-                {
-                    self.add_comment();
-                }
-                ui.separator();
-                if !self.comments.loaded {
-                    ui.spinner();
-                    ui.label("Reading PDF comments…");
-                } else if self.comments.comments.items.is_empty() {
-                    ui.label("No existing comments.");
-                }
-                if self.comments.comments.limited {
-                    ui.colored_label(Color32::YELLOW, "Showing a limited number of annotations.");
-                }
-                let list_height = if self.comments.editor.is_some() {
-                    (ui.available_height() * 0.5).max(40.0)
-                } else {
-                    ui.available_height()
-                };
+                let panel_height = ui.available_height();
                 egui::ScrollArea::vertical()
-                    .id_salt("pagewing-comment-list")
-                    .auto_shrink([false, false])
-                    .max_height(list_height)
+                    .id_salt("pagewing-comments-panel")
                     .show(ui, |ui| {
-                        for (index, depth) in self.comments.comments.thread_rows() {
-                            let comment = &self.comments.comments.items[index];
-                            let label = format!(
-                                "Page {} · {}{}{}{}\n{}",
-                                comment.page + 1,
-                                if comment.parent.is_some() { "Reply" } else { &comment.kind },
-                                if comment.author.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" · {}", comment.author)
-                                },
-                                if comment.review == ReviewStatus::None { String::new() } else { format!(" · {}", comment.review.label()) },
-                                if comment.marked { " · ✓ Marked" } else { "" },
-                                if comment.contents.is_empty() {
-                                    "(no comment)"
-                                } else {
-                                    &comment.contents
-                                }
-                            );
-                            let active = self.comments.editor.as_ref().is_some_and(|current| {
-                                current.page == comment.page && current.slot == comment.slot
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_space(depth.min(6) as f32 * 14.0);
-                                if ui
-                                    .add_enabled(
-                                        !self.loading && !self.comments.busy(),
-                                        egui::Button::selectable(active, label)
-                                            .wrap()
-                                            .min_size(egui::vec2(ui.available_width(), 0.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    selected = Some(index);
-                                }
-                            });
-                        }
-                    });
-                if self.comments.editor.is_some() {
-                    egui::ScrollArea::vertical()
-                        .id_salt("pagewing-comment-editor")
-                        .show(ui, |ui| {
-                            ui.separator();
-                            let busy = self.comments.busy();
-                            if let Some(comment) = &mut self.comments.editor {
-                                ui.label(format!(
-                                    "{} · page {}",
-                                    if comment.slot.is_none() {
-                                        if comment.parent.is_some() { "New reply" } else { "New highlight" }
-                                    } else {
-                                        "Edit comment"
-                                    },
-                                    comment.page + 1
-                                ));
-                                let read_only = !comment.editable();
-                                if read_only {
-                                    ui.label(if comment.locked { "This annotation is read-only." } else { "Comment text is read-only." });
-                                }
-                                ui.add_enabled_ui(!busy && !read_only, |ui| {
-                                    shortcuts::text_input(
-                                        ui,
-                                        egui::Id::new("pagewing-comment-input"),
-                                        &mut self.comments.focus,
-                                        &mut self.deferred_input,
-                                        egui::TextEdit::multiline(&mut comment.contents)
-                                            .desired_rows(5)
-                                            .desired_width(f32::INFINITY)
-                                            .hint_text("Write a comment…"),
-                                    );
-                                });
-                                ui.add_enabled_ui(!busy && !comment.locked, |ui| {
-                                    egui::ComboBox::from_id_salt("pagewing-comment-status")
-                                        .selected_text(format!("Status: {}", comment.review.label()))
-                                        .show_ui(ui, |ui| {
-                                            for status in ReviewStatus::ALL {
-                                                ui.selectable_value(&mut comment.review, status, status.label());
-                                            }
-                                        });
-                                    ui.checkbox(&mut comment.marked, "Marked (Acrobat checkmark)");
-                                });
-                                if !comment.states.is_empty() {
-                                    egui::CollapsingHeader::new("Status history").show(ui, |ui| {
-                                        for state in &comment.states {
-                                            ui.label(format!("{} · {}: {}", state.author, state.model, state.value));
-                                        }
-                                    });
-                                }
-                                ui.label("Save writes this comment directly to the current PDF.");
-                                let existing = comment.slot.is_some();
-                                let deletable = !comment.locked;
-                                ui.horizontal_wrapped(|ui| {
-                                    save = ui
-                                        .add_enabled(
-                                            !busy && !comment.locked && (comment.editable() || comment.contents == self.comments.original),
-                                            egui::Button::new("Save comment"),
-                                        )
-                                        .clicked();
-                                    if existing {
-                                        reply = ui.add_enabled(!busy && deletable, egui::Button::new("Reply")).clicked();
-                                        delete = ui.add_enabled(!busy && deletable,
-                                            egui::Button::new(if comment.parent.is_some() { "Delete reply & replies" } else { "Delete comment & highlight" }))
-                                            .on_hover_text("Delete this annotation and all its replies from the current PDF.")
-                                            .clicked();
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            !busy,
-                                            egui::Button::new("Discard / close editor"),
-                                        )
-                                        .clicked()
-                                    {
-                                        discard = true;
-                                    }
-                                    if busy {
-                                        ui.spinner();
-                                        ui.label("Saving…");
-                                    }
-                                });
-                            } else {
-                                ui.label("Choose an annotation to read or edit its comment.");
+                        let content_top = ui.cursor().top();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.heading("Comments");
+                            ui.weak(format!("{} total", self.comments.comments.items.len()));
+                            if ui
+                                .small_button("×")
+                                .on_hover_text("Hide comments · Ctrl/Cmd+Shift+M")
+                                .clicked()
+                            {
+                                open = false;
                             }
                         });
-                }
+                        self.comment_filters(ui);
+                        if ui
+                            .add_enabled(
+                                !self.comments.busy() && !self.selection.rects.is_empty(),
+                                egui::Button::new("Add comment to selection").wrap(),
+                            )
+                            .clicked()
+                        {
+                            self.add_comment();
+                        }
+                        ui.separator();
+                        if !self.comments.loaded {
+                            ui.spinner();
+                            ui.label("Reading PDF comments…");
+                        } else if self.comments.comments.items.is_empty() {
+                            ui.label("No existing comments.");
+                        }
+                        if self.comments.comments.limited {
+                            ui.colored_label(
+                                Color32::YELLOW,
+                                "Showing a limited number of annotations.",
+                            );
+                        }
+                        let changed = self
+                            .comments
+                            .view
+                            .update(&self.comments.comments, self.nav.page);
+                        if self.comments.loaded
+                            && self.comments.view.filter != CommentFilter::default()
+                        {
+                            ui.weak(format!(
+                                "{} matches · {} shown with thread context",
+                                self.comments.view.matches(),
+                                self.comments.view.rows().len()
+                            ));
+                            if self.comments.view.matches() == 0
+                                && !self.comments.comments.items.is_empty()
+                            {
+                                ui.label("No matching comments. Try clearing the filters.");
+                            }
+                        }
+                        let remaining =
+                            (panel_height - (ui.cursor().top() - content_top)).max(40.0);
+                        let list_height = if self.comments.editor.is_some() {
+                            // Keep the editor's save/discard actions reachable when
+                            // filters or status controls take more vertical space.
+                            (remaining - 360.0).clamp(40.0, 160.0)
+                        } else {
+                            remaining
+                        };
+                        selected = self.comment_list(ui, list_height, changed);
+                        actions = self.comment_editor(ui);
+                    });
             });
         self.comments.open = open;
-        if discard {
+        if actions.discard {
             self.comments.editor = None;
         }
         if let Some(index) = selected {
             self.edit_comment(index);
         }
-        if save {
+        if actions.save {
             self.save_comment();
-        } else if delete {
+        } else if actions.delete {
             self.delete_comment();
-        } else if reply {
+        } else if actions.reply {
             self.reply_comment();
         }
+    }
+
+    fn comment_filters(&mut self, ui: &mut egui::Ui) {
+        ui.add(
+            egui::TextEdit::singleline(&mut self.comments.view.filter.query)
+                .id(egui::Id::new("pagewing-comment-filter"))
+                .desired_width(f32::INFINITY)
+                .hint_text("Filter text or author…"),
+        );
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("pagewing-comment-review-filter")
+                .selected_text(
+                    self.comments
+                        .view
+                        .filter
+                        .review
+                        .map_or("All statuses", ReviewStatus::label),
+                )
+                .width(100.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.comments.view.filter.review,
+                        None,
+                        "All statuses",
+                    );
+                    for status in ReviewStatus::ALL {
+                        ui.selectable_value(
+                            &mut self.comments.view.filter.review,
+                            Some(status),
+                            status.label(),
+                        );
+                    }
+                });
+            ui.checkbox(&mut self.comments.view.filter.marked, "Marked only");
+            ui.checkbox(&mut self.comments.view.filter.current_page, "Current page");
+            if self.comments.view.filter != CommentFilter::default()
+                && ui.small_button("Clear filters").clicked()
+            {
+                self.comments.view.filter = CommentFilter::default();
+            }
+        });
+    }
+
+    fn comment_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        list_height: f32,
+        changed: bool,
+    ) -> Option<usize> {
+        let mut selected = None;
+        let row_height = ui.text_style_height(&egui::TextStyle::Button) * 3.0
+            + ui.spacing().button_padding.y * 2.0;
+        let mut list = egui::ScrollArea::vertical()
+            .id_salt("pagewing-comment-list")
+            .auto_shrink([false, false])
+            .max_height(list_height);
+        if changed {
+            list = list.vertical_scroll_offset(0.0);
+        }
+        list.show_rows(
+            ui,
+            row_height,
+            self.comments.view.rows().len(),
+            |ui, range| {
+                for row in range {
+                    let crate::comment_view::CommentRow {
+                        index,
+                        depth,
+                        matched,
+                    } = self.comments.view.rows()[row];
+                    let comment = &self.comments.comments.items[index];
+                    // Bound layout work even for very long annotations. The
+                    // complete text stays available in the tooltip and editor.
+                    let preview = preview_text(&comment.contents, 160);
+                    let author = preview_text(&comment.author, 60);
+                    let lines = [
+                        format!(
+                            "Page {}{}",
+                            self.page_name(comment.page),
+                            if author.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" · {author}")
+                            }
+                        ),
+                        if preview.is_empty() {
+                            "(no comment)".into()
+                        } else {
+                            preview
+                        },
+                        format!(
+                            "{}{}{}{}",
+                            if comment.parent.is_some() {
+                                "Reply"
+                            } else {
+                                &comment.kind
+                            },
+                            if comment.review == ReviewStatus::None {
+                                String::new()
+                            } else {
+                                format!(" · {}", comment.review.label())
+                            },
+                            if comment.marked { " · ✓ Marked" } else { "" },
+                            if matched { "" } else { " · Thread context" },
+                        ),
+                    ];
+                    let active = self.comments.editor.as_ref().is_some_and(|current| {
+                        current.page == comment.page && current.slot == comment.slot
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add_space(depth.min(6) as f32 * 14.0);
+                        if ui
+                            .add_enabled_ui(!self.loading && !self.comments.busy(), |ui| {
+                                comment_card(ui, &lines, active, matched, row_height)
+                            })
+                            .inner
+                            .on_hover_ui(|ui| {
+                                ui.set_max_width(ui.spacing().tooltip_width);
+                                ui.label(&comment.author);
+                                ui.label(if comment.contents.is_empty() {
+                                    "(no comment)"
+                                } else {
+                                    &comment.contents
+                                });
+                            })
+                            .clicked()
+                        {
+                            selected = Some(index);
+                        }
+                    });
+                }
+            },
+        );
+        selected
+    }
+
+    fn comment_editor(&mut self, ui: &mut egui::Ui) -> CommentActions {
+        let mut actions = CommentActions::default();
+        if self.comments.editor.is_some() {
+            egui::ScrollArea::vertical()
+                .id_salt("pagewing-comment-editor")
+                .max_height(360.0)
+                .show(ui, |ui| {
+                    ui.separator();
+                    let busy = self.comments.busy();
+                    if let Some(comment) = &mut self.comments.editor {
+                        ui.label(format!(
+                            "{} · page {}",
+                            if comment.slot.is_none() {
+                                if comment.parent.is_some() { "New reply" } else { "New highlight" }
+                            } else {
+                                "Edit comment"
+                            },
+                            comment.page + 1
+                        ));
+                        let read_only = !comment.editable();
+                        if read_only {
+                            ui.label(if comment.locked { "This annotation is read-only." } else { "Comment text is read-only." });
+                        }
+                        ui.add_enabled_ui(!busy && !read_only, |ui| {
+                            shortcuts::text_input(
+                                ui,
+                                egui::Id::new("pagewing-comment-input"),
+                                &mut self.comments.focus,
+                                &mut self.deferred_input,
+                                egui::TextEdit::multiline(&mut comment.contents)
+                                    .desired_rows(5)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("Write a comment…"),
+                            );
+                        });
+                        ui.add_enabled_ui(!busy && !comment.locked, |ui| {
+                            egui::ComboBox::from_id_salt("pagewing-comment-status")
+                                .selected_text(format!("Status: {}", comment.review.label()))
+                                .show_ui(ui, |ui| {
+                                    for status in ReviewStatus::ALL {
+                                        ui.selectable_value(&mut comment.review, status, status.label());
+                                    }
+                                });
+                            ui.checkbox(&mut comment.marked, "Marked (Acrobat checkmark)");
+                        });
+                        if !comment.states.is_empty() {
+                            egui::CollapsingHeader::new("Status history").show(ui, |ui| {
+                                for state in &comment.states {
+                                    ui.label(format!("{} · {}: {}", state.author, state.model, state.value));
+                                }
+                            });
+                        }
+                        ui.label("Save writes this comment directly to the current PDF.");
+                        let existing = comment.slot.is_some();
+                        let deletable = !comment.locked;
+                        ui.horizontal_wrapped(|ui| {
+                            actions.save = ui
+                                .add_enabled(
+                                    !busy && !comment.locked && (comment.editable() || comment.contents == self.comments.original),
+                                    egui::Button::new("Save comment"),
+                                )
+                                .clicked();
+                            if existing {
+                                actions.reply = ui.add_enabled(!busy && deletable, egui::Button::new("Reply")).clicked();
+                                actions.delete = ui.add_enabled(!busy && deletable,
+                                    egui::Button::new(if comment.parent.is_some() { "Delete reply & replies" } else { "Delete comment & highlight" }))
+                                    .on_hover_text("Delete this annotation and all its replies from the current PDF.")
+                                    .clicked();
+                            }
+                            if ui
+                                .add_enabled(
+                                    !busy,
+                                    egui::Button::new("Discard / close editor"),
+                                )
+                                .clicked()
+                            {
+                                actions.discard = true;
+                            }
+                            if busy {
+                                ui.spinner();
+                                ui.label("Saving…");
+                            }
+                        });
+                    } else {
+                        ui.label("Choose an annotation to read or edit its comment.");
+                    }
+                });
+        }
+        actions
     }
 
     pub(super) fn comment_overlays(
@@ -358,14 +563,8 @@ impl Pagewing {
         dimensions: [f32; 2],
     ) {
         let mut selected = None;
-        for (index, comment) in self
-            .comments
-            .comments
-            .items
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.page == page && c.parent.is_none())
-        {
+        for &index in self.comments.view.overlays(page) {
+            let comment = &self.comments.comments.items[index];
             for (part, rect) in comment.rects.iter().enumerate() {
                 let rect = self
                     .link_rect(*rect, page_rect, dimensions)
@@ -484,6 +683,7 @@ mod tests {
         let point = output
             .shapes
             .iter()
+            .rev()
             .find_map(|shape| {
                 if let egui::Shape::Text(text) = &shape.shape
                     && text.galley.text() == label
@@ -587,6 +787,7 @@ mod tests {
         );
         click_text(&mut app, &context, "Marked (Acrobat checkmark)");
         assert!(app.comments.editor.as_ref().unwrap().marked);
+        app.comments.view.filter.query = "Nested".into();
         click_text(&mut app, &context, "Save comment");
         wait(&mut app, &context, |app| {
             !app.comments.busy()
@@ -599,6 +800,10 @@ mod tests {
             ReviewStatus::Completed
         );
         assert!(app.comments.comments.items[2].marked);
+        assert_eq!(
+            app.comments.view.filter.query, "Nested",
+            "saving must retain the active filters"
+        );
         assert_eq!(app.comments.comments.items.len(), 3);
         app.edit_comment(1);
         click_text(&mut app, &context, "Delete reply & replies");
@@ -784,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn right_sidebar_shows_full_comments_from_all_pages_and_clicking_reveals_the_page() {
+    fn right_sidebar_previews_comments_and_keeps_full_text_in_the_editor() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("comments.pdf");
         std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
@@ -843,10 +1048,20 @@ mod tests {
             })
             .collect();
         assert!(texts.iter().any(|text| text.galley.text() == "2 total"));
-        assert!(
-            texts.iter().any(|text| text.galley.text().contains(&long)),
-            "the list must retain content past the old 100-character preview"
+        let first = texts
+            .iter()
+            .find(|text| text.galley.text().contains("A longer comment."))
+            .unwrap();
+        assert_eq!(
+            first.galley.text(),
+            preview_text(&long, 160),
+            "the summary must be a separately painted line, not truncated with its header"
         );
+        assert!(
+            !first.galley.text().contains("END OF FULL COMMENT"),
+            "cards keep long comments compact"
+        );
+        let first_point = first.pos + Vec2::new(10.0, 8.0);
         let other_page = texts
             .iter()
             .find(|text| text.galley.text().contains("Comment on another page"))
@@ -881,6 +1096,27 @@ mod tests {
             "Comment on another page"
         );
         assert!(app.comments.open);
+        app.comments.editor = None;
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &context,
+                vec![
+                    Event::PointerMoved(first_point),
+                    Event::PointerButton {
+                        pos: first_point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            long,
+            "opening a compact card retains the entire annotation"
+        );
         // Make sure both sidebars leave a usable PDF area in small windows.
         app.comments.editor = None;
         app.comments.focus = false;
@@ -894,5 +1130,68 @@ mod tests {
                 app.viewport
             );
         }
+    }
+
+    #[test]
+    fn comment_filter_input_isolated_from_reader_keys_and_preserves_drafts() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("filters.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let context = Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path),
+            Some(0),
+            root.path().join("library.json"),
+        );
+        wait(&mut app, &context, |app| app.comments.loaded);
+        let comment = Comment {
+            page: 0,
+            slot: Some(0),
+            parent: None,
+            review: ReviewStatus::None,
+            marked: false,
+            states: Vec::new(),
+            kind: "Highlight".into(),
+            contents: "jkg draft".into(),
+            author: "Straße".into(),
+            rects: Vec::new(),
+            has_appearance: false,
+            truncated: false,
+            locked: false,
+        };
+        app.comments.set_comments(Comments {
+            items: vec![comment],
+            limited: false,
+        });
+        app.comments.open = true;
+        click_text(&mut app, &context, "Filter text or author…");
+        let mut events = key(Key::J, Modifiers::NONE);
+        events.extend(key(Key::K, Modifiers::NONE));
+        events.extend(key(Key::G, Modifiers::NONE));
+        events.push(Event::Text("jkg STRASSE".into()));
+        frame(&mut app, &context, events);
+        assert_eq!(app.nav.page, 0);
+        assert_eq!(app.reading.rotation, 0);
+        assert_eq!(app.comments.view.matches(), 1);
+        assert_eq!(app.comments.view.filter.query, "jkg STRASSE");
+        app.edit_comment(0);
+        app.comments.editor.as_mut().unwrap().contents = "unsaved draft".into();
+        click_text(&mut app, &context, "Current page");
+        click_text(&mut app, &context, "Marked only");
+        assert_eq!(app.comments.view.matches(), 0);
+        assert!(app.comments.unsaved());
+        click_text(&mut app, &context, "Clear filters");
+        assert_eq!(app.comments.view.matches(), 1);
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "unsaved draft"
+        );
+        frame(&mut app, &context, key(Key::Escape, Modifiers::NONE));
+        assert!(!app.comments.open);
+        assert!(
+            app.comments.unsaved(),
+            "hiding filtered comments preserves the editor"
+        );
     }
 }

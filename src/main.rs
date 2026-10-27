@@ -3,6 +3,7 @@ mod app;
 mod bitmap;
 mod cache;
 mod cli;
+mod comment_view;
 mod config;
 mod continuous;
 mod destination;

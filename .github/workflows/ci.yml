@@ -68,7 +68,7 @@ jobs:
           - shard: 2
             tests: >-
               search-options percentage bookmarks link-copy link-hints
-              search-dense outline-keyboard search-load help
+              search-dense outline-keyboard search-load help comments
           - shard: 3
             tests: >-
               input-burst relative outline mouse-history link-menu continuous
