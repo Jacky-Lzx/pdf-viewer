@@ -3,7 +3,7 @@ use hayro::{
     hayro_interpret::util::TransformExt,
     hayro_syntax::{
         Pdf,
-        object::{Array, Dict, Name, Object, Rect as PdfRect, String as PdfString},
+        object::{Array, Dict, MaybeRef, Name, Object, Rect as PdfRect, String as PdfString},
         page::Page,
     },
     kurbo::Rect,
@@ -46,9 +46,16 @@ impl<'a> LinkReader<'a> {
             return Vec::new();
         };
         let transform = page.initial_transform(true).to_kurbo();
+        // Typed iteration stops at bad items. Count raw entries before resolving
+        // them so malformed annotations cannot hide later links or evade the cap.
         annotations
-            .iter::<Dict<'_>>()
+            .raw_iter()
             .take(crate::link_hints::MAX_LINKS)
+            .filter_map(|annotation| match annotation {
+                MaybeRef::Ref(reference) => self.pdf.xref().get::<Dict<'_>>(reference.into()),
+                MaybeRef::NotRef(Object::Dict(annotation)) => Some(annotation),
+                _ => None,
+            })
             .filter_map(|annotation| {
                 if annotation.get::<Name<'_>>(b"Subtype")?.as_ref() != b"Link" {
                     return None;
@@ -143,6 +150,51 @@ mod tests {
                 LinkTarget::Url("https://www.rust-lang.org/".into())
             );
             assert!(reader.destinations.get().is_none());
+        }
+    }
+
+    #[test]
+    fn invalid_annotations_and_missing_references_do_not_hide_later_links() {
+        let source = include_bytes!("../assets/folio-guide.pdf");
+        for marker in [
+            b"/Annots [<< /Type /Annot ".as_slice(),
+            b">> << /Type /Annot ",
+        ] {
+            for invalid in [
+                "null",
+                "0",
+                "false",
+                "()",
+                "[]",
+                "/Bad",
+                "1 0 R",
+                "6 0 R",
+                "999 0 R",
+                "null 999 0 R",
+            ] {
+                let mut bytes = source.to_vec();
+                let offset = bytes
+                    .windows(marker.len())
+                    .position(|value| value == marker)
+                    .unwrap();
+                let prefix = if marker.starts_with(b"/Annots") {
+                    "/Annots ["
+                } else {
+                    ">> "
+                };
+                let mut replacement = format!("{prefix}{invalid} << ").into_bytes();
+                replacement.resize(marker.len(), b' ');
+                assert_eq!(replacement.len(), marker.len());
+                bytes[offset..offset + marker.len()].copy_from_slice(&replacement);
+                let pdf = Pdf::new(bytes).unwrap();
+                let links = LinkReader::new(&pdf).read(&pdf.pages()[0]);
+                assert_eq!(links.len(), 2, "{prefix}{invalid}");
+                assert!(matches!(links[0].target, LinkTarget::Destination(_)));
+                assert_eq!(
+                    links[1].target,
+                    LinkTarget::Url("https://www.rust-lang.org/".into())
+                );
+            }
         }
     }
 

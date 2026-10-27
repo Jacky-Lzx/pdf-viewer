@@ -111,7 +111,25 @@ def run(binary):
                 expect(2)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 1000 web-link copy hints, exact URLs, Backspace, same-frame copying/count consumption, no-link fallback, invalid prefixes, Escape, rotated links, mixed internal/web filtering, normal f navigation and search input isolation")
+                damaged = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
+                for original, replacement in [
+                    (b"/Annots [<< /Type /Annot ", b"/Annots [null 999 0 R << "),
+                    (b">> << /Type /Annot ", b">> null 999 0 R << "),
+                ]:
+                    assert len(original) == len(replacement) and original in damaged
+                    damaged = damaged.replace(original, replacement, 1)
+                application = launch("damaged", damaged)
+                keyboard.key("y")
+                wait_for(lambda: keyboard.clipboard() != "https://www.rust-lang.org/",
+                         "fresh page text before damaged-link copy")
+                sequence("Fa", burst=True)
+                copied("https://www.rust-lang.org/")
+                expect(0)
+                sequence("fa", burst=True)
+                expect(1)
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                print("PASS: 1000 web-link copy hints, exact URLs, Backspace, same-frame copying/count consumption, no-link fallback, invalid prefixes, Escape, rotated links, mixed internal/web filtering, normal f navigation, search input isolation and recovery after invalid annotations/missing references")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
