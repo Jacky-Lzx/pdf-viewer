@@ -1,6 +1,6 @@
-use super::{Pagewing, shortcuts};
+use super::{Pagewing, dialog, shortcuts};
 use eframe::egui::{
-    self, Vec2,
+    self,
     text::{CCursor, CCursorRange},
 };
 
@@ -77,47 +77,38 @@ impl Pagewing {
         let mut open = true;
         let mut cancel = false;
         let mut chosen = None;
-        egui::Window::new("Zoom")
+        let short = context.content_rect().height() < 420.0;
+        dialog::window(context, "Zoom", "Zoom", 260.0)
             .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(260.0)
-            .max_width((context.content_rect().width() - 64.0).max(100.0))
-            .max_height((context.content_rect().height() - 120.0).max(64.0))
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(context, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("zoom-values")
-                    .max_height((context.content_rect().height() - 160.0).max(40.0))
-                    .show(ui, |ui| {
-                        ui.label("Zoom percentage");
-                        let (response, _) = shortcuts::text_input(
-                            ui,
-                            input_id(),
-                            &mut input.focus,
-                            &mut self.deferred_input,
-                            egui::TextEdit::singleline(&mut input.value)
-                                .desired_width(f32::INFINITY)
-                                .char_limit(64)
-                                .hint_text("125 or 125%"),
-                        );
-                        if response.changed() {
-                            input.invalid = false;
+                if short {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                } else {
+                    ui.label("Zoom percentage");
+                }
+                let (response, _) = shortcuts::text_input(
+                    ui,
+                    input_id(),
+                    &mut input.focus,
+                    &mut self.deferred_input,
+                    egui::TextEdit::singleline(&mut input.value)
+                        .desired_width(f32::INFINITY)
+                        .char_limit(64)
+                        .hint_text("125 or 125%"),
+                );
+                if response.changed() {
+                    input.invalid = false;
+                }
+                if input.invalid {
+                    ui.colored_label(ui.visuals().error_fg_color, "Enter a percentage above 0.");
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for percent in [50, 100, 150, 200] {
+                        if ui.button(format!("{percent}%")).clicked() {
+                            chosen = Some(percent as f32 / 100.0);
                         }
-                        if input.invalid {
-                            ui.colored_label(
-                                ui.visuals().error_fg_color,
-                                "Enter a percentage above 0.",
-                            );
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            for percent in [50, 100, 150, 200] {
-                                if ui.button(format!("{percent}%")).clicked() {
-                                    chosen = Some(percent as f32 / 100.0);
-                                }
-                            }
-                        });
-                    });
+                    }
+                });
                 ui.separator();
                 ui.horizontal(|ui| {
                     let apply = ui.button("Apply").clicked();
@@ -150,7 +141,7 @@ impl Pagewing {
 mod tests {
     use super::*;
     use crate::navigation::{Fit, Navigation};
-    use egui::{Context, Event, Key, Modifiers, Pos2, RawInput, Rect};
+    use egui::{Context, Event, Key, Modifiers, Pos2, RawInput, Rect, Vec2};
 
     fn frame(app: &mut Pagewing, context: &Context, mut events: Vec<Event>) {
         let mut deferred = std::mem::take(&mut app.deferred_input);
@@ -451,19 +442,62 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_presets_remain_visible_in_a_minimum_size_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::splat(240.0));
+        for (index, percent) in [50, 100, 150, 200].into_iter().enumerate() {
+            app.open_zoom(&context);
+            let input = app.zoom_input.as_mut().unwrap();
+            input.value = "0".into();
+            input.invalid = true;
+            {
+                let mut draw = |events| {
+                    context.run(
+                        RawInput {
+                            screen_rect: Some(screen),
+                            events,
+                            ..Default::default()
+                        },
+                        |context| {
+                            app.keys(context);
+                            app.zoom_dialog(context);
+                        },
+                    )
+                };
+                for _ in 0..4 {
+                    draw(Vec::new());
+                }
+                for _ in 0..=index {
+                    draw(key(Key::Tab));
+                }
+                let output = draw(Vec::new());
+                dialog::assert_visible_actions(
+                    &context,
+                    &output,
+                    screen,
+                    "Zoom",
+                    &[&format!("{percent}%"), "Apply", "Cancel"],
+                );
+                draw(key(Key::Enter));
+            }
+            assert!(app.zoom_input.is_none());
+            assert_eq!(app.reading.fit, Fit::Custom(percent as f32 / 100.0));
+            assert_eq!(app.nav.page, 1);
+        }
+    }
+
+    #[test]
     fn zoom_window_and_validation_fit_the_minimum_reader_size() {
         let directory = tempfile::tempdir().unwrap();
         let (mut app, context) = reader(directory.path().join("library.json"));
-        for size in [
-            Vec2::new(240.0, 240.0),
-            Vec2::new(240.0, 820.0),
-            Vec2::new(1180.0, 240.0),
-        ] {
+        for size in dialog::TEST_SIZES {
             app.open_zoom(&context);
             app.zoom_input.as_mut().unwrap().invalid = true;
             let screen = Rect::from_min_size(Pos2::ZERO, size);
+            let mut output = egui::FullOutput::default();
             for _ in 0..4 {
-                let _ = context.run(
+                output = context.run(
                     RawInput {
                         screen_rect: Some(screen),
                         ..Default::default()
@@ -471,12 +505,20 @@ mod tests {
                     |context| app.zoom_dialog(context),
                 );
             }
-            let rect = context
-                .memory(|memory| memory.area_rect(egui::Id::new("Zoom")))
-                .unwrap();
-            assert!(
-                screen.contains_rect(rect),
-                "screen {screen:?}, window {rect:?}"
+            dialog::assert_visible_actions(
+                &context,
+                &output,
+                screen,
+                "Zoom",
+                &[
+                    "Apply",
+                    "Cancel",
+                    "Enter a percentage above 0.",
+                    "50%",
+                    "100%",
+                    "150%",
+                    "200%",
+                ],
             );
             app.close_zoom(&context);
         }

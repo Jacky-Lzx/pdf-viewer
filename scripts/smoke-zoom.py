@@ -157,8 +157,35 @@ def run(binary):
                 assert copied() == "0", "validation remains editable at the minimum window size"
                 replace("150"); keyboard.key(ENTER)
                 expect(1.5, rotation=1)
+                for tabs, scale in enumerate((0.5, 1.0, 1.5, 2.0), start=1):
+                    open_zoom()
+                    text("0"); keyboard.key(ENTER)
+                    for _ in range(tabs):
+                        keyboard.key(TAB)
+                    keyboard.key(ENTER)
+                    expect(scale, rotation=1)
+                open_zoom()
+                text("0"); keyboard.key(ENTER)
+                for width, height in ((1180, 820), (240, 240), (1180, 240), (240, 820)):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, width, height)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.2)
+                    assert copied() == "0", "resizing preserves the invalid zoom draft and focus"
+                    expect(2.0, rotation=1)
+                # Apply follows the four presets; the invalid value must keep
+                # the dialog open and return focus to its input.
+                for _ in range(5):
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                assert copied() == "0", "invalid Apply returns focus to the input"
+                for _ in range(6):
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                expect(2.0, rotation=1)
+                keyboard.key("j", shift=True)
+                expect(2.0, page=1, rotation=1)
                 assert application.poll() is None
-                print("PASS: selected percentage, typed zoom and center, invalid input isolation, presets, Tab/Enter cancellation, same-frame click/shortcut/text/apply and Escape/navigation, repeated shortcut draft, continuous/rotated zoom, bidirectional Find handoff and minimum-size validation/application")
+                print("PASS: selected percentage, typed zoom and center, invalid input isolation, presets, Tab/Enter cancellation, same-frame click/shortcut/text/apply and Escape/navigation, repeated shortcut draft, continuous/rotated zoom, bidirectional Find handoff, minimum-size presets, resize-preserved invalid draft, Apply validation and Cancel focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
