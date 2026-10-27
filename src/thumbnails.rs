@@ -39,7 +39,7 @@ pub struct Thumbnails {
 impl Default for Thumbnails {
     fn default() -> Self {
         Self {
-            cache: TextureCache::with_budget(8 * 1024 * 1024),
+            cache: TextureCache::exact_with_budget(8 * 1024 * 1024),
             wanted: Vec::new(),
             requested: None,
             failed: HashSet::new(),

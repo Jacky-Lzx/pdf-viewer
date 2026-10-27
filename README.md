@@ -347,6 +347,8 @@ cargo bench --locked --bench link_reading -- 9
 cargo bench --locked --bench comments -- 7
 # 阅读视图渲染规划，比较重复计算、当前视图缓存命中与滚动失效
 cargo bench --locked --bench render_plan -- 9
+# 多页和分块的纹理保护准入，另测重复保护列表更新
+cargo bench --locked --bench texture_protection -- 7
 # 名称与页码标签树，覆盖共享无效/重复数组及跨节点扫描上限
 cargo bench --locked --bench metadata_trees -- 9
 # 文本缓存命中、少量和批量逐出，包含真实页面费用记账
@@ -363,6 +365,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline-keyboard.p
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-long-title.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-bookmarks.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-page-size.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-tiles.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-zoom.py target/release/pagewing

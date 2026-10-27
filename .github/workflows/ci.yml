@@ -76,7 +76,7 @@ jobs:
           - shard: 4
             tests: >-
               desktop destinations thumbnails selection selection-scroll
-              page-size long-title file-watch mouse-input
+              page-size tiles long-title file-watch mouse-input
     steps:
       - uses: actions/checkout@v4
       - name: Linux desktop runtime dependencies

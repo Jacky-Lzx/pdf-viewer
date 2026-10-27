@@ -34,8 +34,18 @@ fn texture(context: &Context, image: &Arc<ColorImage>) -> TextureHandle {
     )
 }
 
-fn filled(context: &Context, image: &Arc<ColorImage>, budget: usize, pinned: &str) -> TextureCache {
-    let mut cache = TextureCache::with_budget(budget);
+fn filled(
+    context: &Context,
+    image: &Arc<ColorImage>,
+    budget: usize,
+    pinned: &str,
+    exact: bool,
+) -> TextureCache {
+    let mut cache = if exact {
+        TextureCache::exact_with_budget(budget)
+    } else {
+        TextureCache::with_budget(budget)
+    };
     for page in 0..512 {
         assert!(cache.insert(key(page), texture(context, image)));
     }
@@ -87,7 +97,8 @@ fn main() {
                     let context = Context::default();
                     let initial_textures = context.tex_manager().read().num_allocated();
                     if kind == "hit" {
-                        let mut cache = filled(&context, &resident, budget, pinned);
+                        let mut cache =
+                            filled(&context, &resident, budget, pinned, name == "thumbnail");
                         drop(context.tex_manager().write().take_delta());
                         for index in 0..32768 {
                             black_box(cache.get(black_box(&key(index % 512))).unwrap());
@@ -101,7 +112,7 @@ fn main() {
                         continue;
                     }
                     let mut caches: Vec<_> = (0..64)
-                        .map(|_| filled(&context, &resident, budget, pinned))
+                        .map(|_| filled(&context, &resident, budget, pinned, name == "thumbnail"))
                         .collect();
                     let textures: Vec<_> = (0..64).map(|_| texture(&context, &incoming)).collect();
                     let ids: Vec<_> = textures.iter().map(TextureHandle::id).collect();

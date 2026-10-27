@@ -1,6 +1,9 @@
 use crate::document::RenderKey;
 use eframe::egui::{TextureHandle, TextureId};
-use std::{cmp::Reverse, collections::HashMap};
+use std::{
+    cmp::Reverse,
+    collections::{HashMap, hash_map::Entry as MapEntry},
+};
 
 const BUDGET: usize = 96 * 1024 * 1024;
 const MAX_ENTRIES: usize = 512;
@@ -11,8 +14,49 @@ struct Entry {
     bytes: usize,
 }
 
+struct Pinned {
+    keys: Vec<RenderKey>,
+    bytes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FullPageWidths {
+    first: u32,
+    others: Vec<u32>,
+}
+
+impl FullPageWidths {
+    fn iter(&self) -> impl Iterator<Item = &u32> {
+        std::iter::once(&self.first).chain(&self.others)
+    }
+
+    /// Return true when removing the last resident width for this page/style.
+    fn remove(&mut self, width: u32) -> bool {
+        if self.first == width {
+            let Some(next) = self.others.pop() else {
+                return true;
+            };
+            self.first = next;
+        } else {
+            let index = self
+                .others
+                .iter()
+                .position(|&candidate| candidate == width)
+                .unwrap();
+            self.others.swap_remove(index);
+        }
+        if self.others.is_empty() {
+            self.others = Vec::new();
+        }
+        false
+    }
+}
+
 pub struct TextureCache {
     entries: HashMap<RenderKey, Entry>,
+    // Only full-page rasters participate in zoom fallback selection. Most
+    // pages have one or two widths, independent of the cache's tile count.
+    full_pages: Option<HashMap<(usize, u8, bool), FullPageWidths>>,
     clock: u64,
     pub bytes: usize,
     pub hits: u64,
@@ -22,21 +66,28 @@ pub struct TextureCache {
 
 impl Default for TextureCache {
     fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-            clock: 0,
-            bytes: 0,
-            hits: 0,
-            budget: BUDGET,
-            protected: Vec::new(),
-        }
+        Self::with_budget(BUDGET)
     }
 }
 
 impl TextureCache {
     pub fn with_budget(budget: usize) -> Self {
         Self {
+            entries: HashMap::new(),
+            full_pages: Some(HashMap::new()),
+            clock: 0,
+            bytes: 0,
+            hits: 0,
             budget,
+            protected: Vec::new(),
+        }
+    }
+
+    /// Previews use exact keys and never display another zoom's raster.
+    pub fn exact_with_budget(budget: usize) -> Self {
+        Self {
+            budget,
+            full_pages: None,
             ..Self::default()
         }
     }
@@ -53,16 +104,14 @@ impl TextureCache {
         bytes <= self.available_for_insert(&self.pinned_for_insert(key))
     }
 
-    fn available_for_insert(&self, pinned: &[RenderKey]) -> usize {
-        let bytes: usize = pinned
-            .iter()
-            .filter_map(|key| self.entries.get(key))
-            .map(|entry| entry.bytes)
-            .sum();
-        self.budget.saturating_sub(bytes)
+    fn available_for_insert(&self, pinned: &Pinned) -> usize {
+        self.budget.saturating_sub(pinned.bytes)
     }
     pub fn clear(&mut self) {
         self.entries.clear();
+        if let Some(full_pages) = &mut self.full_pages {
+            full_pages.clear();
+        }
         self.bytes = 0;
         self.hits = 0;
         self.protected.clear();
@@ -77,22 +126,30 @@ impl TextureCache {
         self.protected.extend_from_slice(keys);
     }
 
-    fn pinned_for_insert(&self, key: RenderKey) -> Vec<RenderKey> {
-        self.protected
+    fn pinned_for_insert(&self, key: RenderKey) -> Pinned {
+        let mut bytes = 0;
+        let keys = self
+            .protected
             .iter()
             .filter_map(|&target| {
                 // A target may replace its own displayed zoom fallback.
                 if target == key {
                     return None;
                 }
-                let pinned = if self.entries.contains_key(&target) {
+                let resident = self.entries.get(&target);
+                let pinned = if resident.is_some() {
                     target
                 } else {
                     self.fallback_key(target)?
                 };
-                (pinned != key).then_some(pinned)
+                if pinned == key {
+                    return None;
+                }
+                bytes += resident.or_else(|| self.entries.get(&pinned))?.bytes;
+                Some(pinned)
             })
-            .collect()
+            .collect();
+        Pinned { keys, bytes }
     }
 
     /// Drawing needs only the ID; the cache retains ownership until eviction.
@@ -110,48 +167,57 @@ impl TextureCache {
     }
 
     fn fallback_key(&self, key: RenderKey) -> Option<RenderKey> {
-        self.entries
-            .keys()
-            .filter(|candidate| {
-                candidate.tile.is_none()
-                    && key.tile.is_none()
-                    && candidate.page == key.page
-                    && candidate.rotation == key.rotation
-                    && candidate.night == key.night
-            })
-            .min_by_key(|candidate| {
-                (
-                    candidate.width.abs_diff(key.width),
-                    Reverse(candidate.width),
-                )
-            })
-            .copied()
+        if key.tile.is_some() {
+            return None;
+        }
+        let &width = self
+            .full_pages
+            .as_ref()?
+            .get(&(key.page, key.rotation, key.night))?
+            .iter()
+            .min_by_key(|&&width| (width.abs_diff(key.width), Reverse(width)))?;
+        Some(RenderKey { width, ..key })
     }
 
-    fn make_room(&mut self, bytes: usize, pinned: &[RenderKey]) -> bool {
+    /// Every replacement and eviction must update bytes and fallback widths
+    /// together so indexed candidates always have a resident texture.
+    fn remove(&mut self, key: RenderKey) {
+        let Some(entry) = self.entries.remove(&key) else {
+            return;
+        };
+        self.bytes -= entry.bytes;
+        if key.tile.is_none()
+            && let Some(full_pages) = &mut self.full_pages
+        {
+            let group = (key.page, key.rotation, key.night);
+            let MapEntry::Occupied(mut widths) = full_pages.entry(group) else {
+                unreachable!("full-page texture must have indexed widths");
+            };
+            if widths.get_mut().remove(key.width) {
+                widths.remove();
+            }
+        }
+    }
+
+    fn make_room(&mut self, bytes: usize, pinned: &Pinned) -> bool {
         let remaining = self.budget.saturating_sub(bytes);
         let fits = |cache: &Self| cache.bytes <= remaining && cache.entries.len() < MAX_ENTRIES;
         while !fits(self) {
             let Some(oldest) = self
                 .entries
                 .iter()
-                .filter(|(key, _)| !pinned.contains(key))
+                .filter(|(key, _)| !pinned.keys.contains(key))
                 .min_by_key(|(_, entry)| entry.used)
                 .map(|(key, _)| *key)
             else {
                 return false;
             };
-            self.bytes -= self.entries.remove(&oldest).unwrap().bytes;
+            self.remove(oldest);
             if fits(self) {
                 return true;
             }
-            let protected_bytes: usize = pinned
-                .iter()
-                .filter_map(|key| self.entries.get(key))
-                .map(|entry| entry.bytes)
-                .sum();
-            let eligible = self.entries.len() - pinned.len();
-            let eligible_bytes = self.bytes - protected_bytes;
+            let eligible = self.entries.len() - pinned.keys.len();
+            let eligible_bytes = self.bytes - pinned.bytes;
             // Keep ordinary single/few evictions allocation-free. A large
             // raster can instead release many entries using one sorted scan.
             if eligible < 32
@@ -163,12 +229,12 @@ impl TextureCache {
             let mut oldest: Vec<_> = self
                 .entries
                 .iter()
-                .filter(|(key, _)| !pinned.contains(key))
+                .filter(|(key, _)| !pinned.keys.contains(key))
                 .map(|(&key, entry)| (entry.used, key))
                 .collect();
             oldest.sort_unstable_by_key(|(used, _)| *used);
             for (_, key) in oldest {
-                self.bytes -= self.entries.remove(&key).unwrap().bytes;
+                self.remove(key);
                 if fits(self) {
                     return true;
                 }
@@ -183,14 +249,23 @@ impl TextureCache {
         if bytes > self.available_for_insert(&pinned) {
             return false;
         }
-        if let Some(old) = self.entries.remove(&key) {
-            self.bytes -= old.bytes;
-        }
+        self.remove(key);
         if !self.make_room(bytes, &pinned) {
             return false;
         }
         self.clock += 1;
         self.bytes += bytes;
+        if key.tile.is_none()
+            && let Some(full_pages) = &mut self.full_pages
+        {
+            full_pages
+                .entry((key.page, key.rotation, key.night))
+                .and_modify(|widths| widths.others.push(key.width))
+                .or_insert_with(|| FullPageWidths {
+                    first: key.width,
+                    others: Vec::new(),
+                });
+        }
         self.entries.insert(
             key,
             Entry {
@@ -223,6 +298,139 @@ mod tests {
             ColorImage::filled([4, 4], Color32::WHITE),
             TextureOptions::LINEAR,
         )
+    }
+
+    fn assert_fallback_index(cache: &TextureCache) {
+        let mut expected: HashMap<_, Vec<_>> = HashMap::new();
+        for key in cache.entries.keys().filter(|key| key.tile.is_none()) {
+            expected
+                .entry((key.page, key.rotation, key.night))
+                .or_default()
+                .push(key.width);
+        }
+        let mut actual: HashMap<_, Vec<_>> = cache
+            .full_pages
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|(&group, widths)| (group, widths.iter().copied().collect()))
+            .collect();
+        for widths in expected.values_mut().chain(actual.values_mut()) {
+            widths.sort_unstable();
+        }
+        assert_eq!(actual, expected);
+        for page in 0..6 {
+            for rotation in 0..4 {
+                for night in [false, true] {
+                    for width in [1, 32, 48, 64, 96, 128, 256, 1024] {
+                        let target = RenderKey {
+                            page,
+                            rotation,
+                            night,
+                            width,
+                            tile: None,
+                        };
+                        let expected = cache
+                            .entries
+                            .keys()
+                            .filter(|candidate| {
+                                candidate.tile.is_none()
+                                    && candidate.page == page
+                                    && candidate.rotation == rotation
+                                    && candidate.night == night
+                            })
+                            .min_by_key(|candidate| {
+                                (candidate.width.abs_diff(width), Reverse(candidate.width))
+                            })
+                            .copied();
+                        assert_eq!(cache.fallback_key(target), expected, "{target:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fallback_index_tracks_mixed_tiles_replacements_evictions_and_clear() {
+        let context = Context::default();
+        let mut cache = TextureCache::with_budget(64 * 64);
+        for index in 0..120 {
+            let key = RenderKey {
+                page: index % 6,
+                width: [32, 64, 96, 128][index / 6 % 4],
+                rotation: (index / 24 % 4) as u8,
+                night: index % 2 == 1,
+                tile: (index % 4 == 0).then_some(crate::document::Tile {
+                    scale_bits: 2.0_f32.to_bits(),
+                    x: index as u32,
+                    y: 0,
+                    size: [4, 4],
+                }),
+            };
+            assert!(cache.insert(key, texture(&context)));
+            if index % 7 == 0 {
+                assert!(cache.insert(key, texture(&context)));
+            }
+            if index % 10 == 0 {
+                assert_fallback_index(&cache);
+            }
+        }
+        assert_fallback_index(&cache);
+        let target = RenderKey {
+            width: 80,
+            ..*cache.entries.keys().find(|key| key.tile.is_none()).unwrap()
+        };
+        let displayed = cache.fallback_key(target).unwrap();
+        cache.protect(target);
+        let image = context.load_texture(
+            "batch eviction",
+            ColorImage::filled([8, 64], Color32::WHITE),
+            TextureOptions::LINEAR,
+        );
+        assert!(cache.insert(key(1000), image));
+        assert!(cache.contains(&displayed));
+        assert_eq!(cache.fallback_key(target), Some(displayed));
+        assert_fallback_index(&cache);
+        let before = cache.full_pages.clone();
+        let bytes = cache.bytes;
+        let image = context.load_texture(
+            "over budget",
+            ColorImage::filled([64, 64], Color32::WHITE),
+            TextureOptions::LINEAR,
+        );
+        assert!(!cache.insert(key(1001), image));
+        assert_eq!(cache.full_pages, before);
+        assert_eq!(cache.bytes, bytes);
+        assert_fallback_index(&cache);
+        cache.clear();
+        assert_fallback_index(&cache);
+        assert!(cache.full_pages.as_ref().unwrap().is_empty());
+        assert!(cache.fallback_key(target).is_none());
+    }
+
+    #[test]
+    fn exact_cache_skips_fallback_index_but_still_protects_exact_textures() {
+        let context = Context::default();
+        let mut cache = TextureCache::exact_with_budget(128);
+        assert!(cache.insert(key(0), texture(&context)));
+        let target = RenderKey {
+            width: 64,
+            ..key(0)
+        };
+        assert!(cache.fallback(target).is_none());
+        cache.protect(target);
+        assert!(
+            cache.can_insert(key(1), 128),
+            "absent exact key needs no fallback reservation"
+        );
+        cache.protect(key(0));
+        assert!(!cache.can_insert(key(1), 128));
+        assert!(cache.insert(key(1), texture(&context)));
+        assert!(cache.contains(&key(0)));
+        cache.clear();
+        assert!(cache.full_pages.is_none());
+        assert!(cache.insert(key(0), texture(&context)));
+        assert!(cache.fallback(target).is_none());
     }
 
     #[test]

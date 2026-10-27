@@ -123,3 +123,7 @@ harness = false
 [[bench]]
 name = "render_plan"
 harness = false
+
+[[bench]]
+name = "texture_protection"
+harness = false
