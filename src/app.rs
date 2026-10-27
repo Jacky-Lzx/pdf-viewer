@@ -1,3 +1,4 @@
+mod comments;
 mod continuous;
 mod help;
 mod properties;
@@ -49,6 +50,7 @@ pub struct Folio {
     dimensions: Vec<[f32; 2]>,
     info: crate::document_info::DocumentInfo,
     properties_open: bool,
+    comments: comments::CommentUi,
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
@@ -113,14 +115,22 @@ impl Folio {
         path: Option<PathBuf>,
         page: Option<usize>,
     ) -> Self {
-        let config = state::config_path();
+        Self::with_context(&cc.egui_ctx, path, page, state::config_path())
+    }
+
+    fn with_context(
+        context: &egui::Context,
+        path: Option<PathBuf>,
+        page: Option<usize>,
+        config: PathBuf,
+    ) -> Self {
         let library = Library::load(&config);
-        set_theme(&cc.egui_ctx, library.dark);
-        shortcuts::configure_input(&cc.egui_ctx);
-        crate::fonts::install(cc.egui_ctx.clone());
+        set_theme(context, library.dark);
+        shortcuts::configure_input(context);
+        crate::fonts::install(context.clone());
         let mut app = Self {
-            worker: Worker::new(cc.egui_ctx.clone()),
-            state_writer: crate::state_writer::StateWriter::new(config, cc.egui_ctx.clone()),
+            worker: Worker::new(context.clone()),
+            state_writer: crate::state_writer::StateWriter::new(config, context.clone()),
             library,
             reading: ReadingState::default(),
             last_closed: None,
@@ -130,6 +140,7 @@ impl Folio {
             dimensions: Vec::new(),
             info: crate::document_info::DocumentInfo::default(),
             properties_open: false,
+            comments: comments::CommentUi::default(),
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
@@ -188,7 +199,7 @@ impl Folio {
             dirty: false,
         };
         if let Some(path) = path {
-            app.open(path, &cc.egui_ctx);
+            app.open(path, context);
             if let Some(page) = page {
                 app.reading.page = page;
                 app.reading.offset = [0.0; 2];
@@ -199,6 +210,9 @@ impl Folio {
     }
 
     fn open(&mut self, path: PathBuf, context: &egui::Context) {
+        if self.comment_change_blocked() {
+            return;
+        }
         self.remember();
         self.clear_document(context);
         let path = std::fs::canonicalize(&path).unwrap_or(path);
@@ -233,6 +247,7 @@ impl Folio {
         self.continuous_link_request = None;
         self.info = crate::document_info::DocumentInfo::default();
         self.properties_open = false;
+        self.comments = comments::CommentUi::default();
         self.outline.set_entries(Vec::new());
         self.bookmark_pages.clear();
         self.labels = crate::page_labels::PageLabels::default();
@@ -289,6 +304,9 @@ impl Folio {
     }
 
     fn close_document(&mut self, context: &egui::Context) {
+        if self.comment_change_blocked() {
+            return;
+        }
         if !self.reading.path.as_os_str().is_empty() {
             self.last_closed = Some(self.reading.path.clone());
         }
@@ -318,6 +336,9 @@ impl Folio {
     }
 
     fn reload(&mut self) {
+        if self.comment_change_blocked() {
+            return;
+        }
         if self.nav.count == 0 || self.loading {
             return;
         }
@@ -767,6 +788,21 @@ impl Folio {
         }
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
+                Event::Comments { id, comments } if id == self.id => {
+                    self.comments.comments = comments;
+                    self.comments.loaded = true;
+                }
+                Event::CommentSaved { id, result } if id == self.id => {
+                    self.comments.saving = false;
+                    match result {
+                        Ok(()) => {
+                            self.comments.editor = None;
+                            self.reload();
+                            self.notify("Comment saved in PDF.");
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                }
                 Event::FileChanged { id } if id == self.id => {
                     self.file_changed = true;
                 }
@@ -828,6 +864,10 @@ impl Folio {
                     self.continuous_layout = crate::continuous::Layout::default();
                     self.continuous_link_request = None;
                     self.info = info;
+                    let comments_open = !reloaded || self.comments.open;
+                    self.comments = comments::CommentUi::default();
+                    self.comments.open = comments_open;
+                    self.worker.comments();
                     self.reveal_page = Some(self.nav.page);
                     self.outline.set_entries(outline);
                     self.labels = labels;
@@ -1002,6 +1042,10 @@ impl Folio {
                 (self.password_open, "folio-password-input"),
                 (self.help, "folio-help-input"),
                 (
+                    self.comments.open && self.comments.editor.is_some(),
+                    "folio-comment-input",
+                ),
+                (
                     self.library.sidebar && self.nav.count > 0 && !self.outline.is_empty(),
                     "folio-outline-input",
                 ),
@@ -1033,6 +1077,7 @@ impl Folio {
                 || self.goto_open
                 || self.password_open
                 || self.recent_picker.is_some()
+                || (self.comments.open && self.comments.editor.is_some())
                 || context.memory(|memory| {
                     [
                         "folio-search-input",
@@ -1041,6 +1086,7 @@ impl Folio {
                         "folio-password-input",
                         "folio-help-input",
                         "folio-outline-input",
+                        "folio-comment-input",
                     ]
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
@@ -1116,6 +1162,39 @@ impl Folio {
                 self.dirty = true;
                 context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 self.change_search();
+                continue;
+            }
+            if !popup_open && key == Key::M && modifiers.command && modifiers.shift {
+                self.comments.open = !self.comments.open;
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                continue;
+            }
+            if !popup_open
+                && modifiers.command
+                && modifiers.shift
+                && key == Key::H
+                && self.nav.count > 0
+            {
+                self.add_comment();
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                continue;
+            }
+            if self.comments.open
+                && modifiers.command
+                && key == Key::Enter
+                && self.comments.editor.is_some()
+            {
+                self.save_comment();
+                context.input_mut(|input| input.consume_key(modifiers, key));
+                continue;
+            }
+            if key == Key::Escape && self.comments.open {
+                self.comments.open = false;
+                self.comments.focus = false;
+                context.memory_mut(|memory| {
+                    memory.surrender_focus(egui::Id::new("folio-comment-input"))
+                });
+                context.input_mut(|input| input.consume_key(modifiers, key));
                 continue;
             }
             if key == Key::Escape {
@@ -1646,6 +1725,21 @@ impl Folio {
                             self.library.sidebar = !self.library.sidebar;
                             self.dirty = true;
                         }
+                        if ui
+                            .selectable_label(self.comments.open, "Comments")
+                            .clicked()
+                        {
+                            self.comments.open = !self.comments.open;
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.selection.rects.is_empty(),
+                                egui::Button::new("Add comment"),
+                            )
+                            .clicked()
+                        {
+                            self.add_comment();
+                        }
                         ui.separator();
                         if ui
                             .button("‹")
@@ -2036,6 +2130,7 @@ impl Folio {
                             .then(|| egui::Shape::rect_filled(rect, 1.0, SELECTION_COLOR))
                     }));
                     self.link_overlays(ui, self.nav.page, page_rect, dimensions);
+                    self.comment_overlays(ui, self.nav.page, page_rect, dimensions);
                 } else {
                     painter.text(
                         page_rect.center(),
@@ -2558,12 +2653,18 @@ impl eframe::App for Folio {
         }
         let _side_button_focus = shortcuts::preserve_side_button_focus(context);
         self.events(context);
+        if context.input(|input| input.viewport().close_requested())
+            && self.comment_change_blocked()
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         self.keys(context);
         self.toolbar(context);
         self.search_bar(context);
         self.status(context);
         self.dialogs(context);
         self.properties_window(context);
+        self.comments_sidebar(context);
         self.sidebar(context);
         self.canvas(context);
         if popup_view

@@ -87,6 +87,18 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
     ("d / i", "Toggle dark interface / invert page"),
+    (
+        "Ctrl/Cmd+Shift+h",
+        "Add a highlight comment to selected text",
+    ),
+    (
+        "Ctrl/Cmd+Enter",
+        "Save the current comment directly in the PDF",
+    ),
+    (
+        "Ctrl/Cmd+Shift+m",
+        "Read PDF comments; select text and use Add comment to annotate",
+    ),
     ("y", "Copy page text"),
     ("o   or   Ctrl/Cmd+o", "Open PDF"),
     (":", "Go to page dialog"),

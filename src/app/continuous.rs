@@ -196,6 +196,7 @@ impl Folio {
                     }));
                 }
                 self.link_overlays(ui, page, page_rect, dimensions);
+                self.comment_overlays(ui, page, page_rect, dimensions);
                 if self.nav.page != active_page || self.pending_destination.is_some() {
                     // A clicked internal link changes the layout and pending destination.
                     break;

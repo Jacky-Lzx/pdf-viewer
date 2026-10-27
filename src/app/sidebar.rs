@@ -358,7 +358,10 @@ impl Folio {
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {
         self.thumbnails.begin_frame();
-        if !self.library.sidebar || self.nav.count == 0 {
+        if !self.library.sidebar
+            || self.nav.count == 0
+            || (self.comments.open && context.available_rect().width() < 220.0)
+        {
             if !self.loading
                 && let Some(keys) = self.thumbnails.requests()
             {

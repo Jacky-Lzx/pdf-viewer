@@ -16,6 +16,14 @@ use std::{
 };
 
 pub enum Event {
+    Comments {
+        id: u64,
+        comments: crate::annotations::Comments,
+    },
+    CommentSaved {
+        id: u64,
+        result: Result<(), String>,
+    },
     FileChanged {
         id: u64,
     },
@@ -68,6 +76,12 @@ pub enum Event {
     },
 }
 
+struct SaveComment {
+    id: u64,
+    source: PathBuf,
+    comment: crate::annotations::Comment,
+}
+
 struct OpenRequest {
     id: u64,
     path: PathBuf,
@@ -114,6 +128,8 @@ struct Pending {
     copy: Option<usize>,
     links: Option<usize>,
     inspect: Option<Inspection>,
+    comments: bool,
+    save_comment: Option<SaveComment>,
     stop: bool,
 }
 
@@ -130,6 +146,8 @@ impl Pending {
         self.copy = None;
         self.links = None;
         self.inspect = None;
+        self.comments = false;
+        self.save_comment = None;
     }
 
     fn replace_renders(&mut self, keys: Vec<RenderKey>) {
@@ -370,6 +388,20 @@ impl Worker {
             })
         });
     }
+    pub fn comments(&self) {
+        self.update(|pending| pending.comments = true);
+    }
+
+    pub fn save_comment(&self, id: u64, source: PathBuf, comment: crate::annotations::Comment) {
+        self.update(|pending| {
+            pending.save_comment = Some(SaveComment {
+                id,
+                source,
+                comment,
+            })
+        });
+    }
+
     pub fn copy(&self, page: usize) {
         self.update(|pending| pending.copy = Some(page));
     }
@@ -402,6 +434,8 @@ fn emit(tx: &SyncSender<Event>, context: &egui::Context, event: Event) {
 }
 
 enum Job {
+    Comments,
+    SaveComment(SaveComment),
     Render(RenderKey, u64),
     Thumbnail(RenderKey, u64),
     Search(usize),
@@ -448,6 +482,9 @@ fn session(
                         Some(SearchProgress::new(request))
                     };
                 }
+                if let Some(request) = pending.save_comment.take() {
+                    break Job::SaveComment(request);
+                }
                 if let Some(request) = pending.inspect.take() {
                     break Job::Inspect(request);
                 }
@@ -459,6 +496,9 @@ fn session(
                 }
                 if let Some(key) = pending.render.pop_front() {
                     break Job::Render(key, pending.render_revision);
+                }
+                if std::mem::take(&mut pending.comments) {
+                    break Job::Comments;
                 }
                 if let Some(progress) = &search {
                     break Job::Search(progress.page);
@@ -501,6 +541,26 @@ fn session(
             }
         }
         match job {
+            Job::Comments => {
+                let cancelled = || {
+                    let pending = shared.0.lock().unwrap();
+                    pending.stop || pending.close || pending.open.is_some()
+                };
+                let comments = crate::annotations::read(pdf, cancelled);
+                if !cancelled() {
+                    emit(tx, context, Event::Comments { id, comments });
+                }
+            }
+            Job::SaveComment(request) => {
+                if request.id != id {
+                    continue;
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::annotations::save(pdf, &request.comment, &request.source)
+                }))
+                .unwrap_or_else(|_| Err("The PDF engine could not save this comment.".into()));
+                emit(tx, context, Event::CommentSaved { id, result });
+            }
             Job::Links(page) => {
                 if let Some(data) = pdf.pages().get(page) {
                     let links = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
