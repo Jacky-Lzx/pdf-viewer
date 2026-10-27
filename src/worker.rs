@@ -420,7 +420,7 @@ fn session(
 ) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
-    let destinations = crate::outline::DestinationIndex::new(pdf);
+    let link_reader = crate::links::LinkReader::new(pdf);
     let mut texts = crate::text_cache::TextCache::default();
     let mut search: Option<SearchProgress> = None;
     loop {
@@ -504,7 +504,7 @@ fn session(
             Job::Links(page) => {
                 if let Some(data) = pdf.pages().get(page) {
                     let links = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        crate::links::read(data, &destinations)
+                        link_reader.read(data)
                     }))
                     .unwrap_or_default();
                     emit(tx, context, Event::Links { id, page, links });

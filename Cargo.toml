@@ -84,3 +84,7 @@ harness = false
 [[bench]]
 name = "outline_filter"
 harness = false
+
+[[bench]]
+name = "link_reading"
+harness = false
