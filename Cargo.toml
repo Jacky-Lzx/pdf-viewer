@@ -88,3 +88,7 @@ harness = false
 [[bench]]
 name = "link_reading"
 harness = false
+
+[[bench]]
+name = "text_cache"
+harness = false

@@ -63,6 +63,41 @@ impl TextCache {
         }
     }
 
+    fn make_room(&mut self, bytes: usize, entries: usize, protected: Option<usize>) {
+        let remaining = self.budget.saturating_sub(bytes);
+        let fits = |cache: &Self| cache.bytes <= remaining && cache.entries.len() <= entries;
+        while !fits(self) {
+            self.evict_oldest(protected);
+            if fits(self) {
+                return;
+            }
+            let pinned = protected.and_then(|page| self.entries.get(&page));
+            let eligible = self.entries.len() - usize::from(pinned.is_some());
+            let eligible_bytes = self.bytes - pinned.map_or(0, |entry| entry.bytes);
+            // A few removals need no allocation. For a large byte deficit,
+            // sort remaining candidates once instead of repeatedly scanning.
+            if eligible < 32
+                || self.bytes.saturating_sub(remaining)
+                    <= (eligible_bytes / eligible).saturating_mul(8)
+            {
+                continue;
+            }
+            let mut oldest: Vec<_> = self
+                .entries
+                .iter()
+                .filter(|(page, _)| Some(**page) != protected)
+                .map(|(&page, entry)| (entry.used, page))
+                .collect();
+            oldest.sort_unstable_by_key(|(used, _)| *used);
+            for (_, page) in oldest {
+                self.remove(page);
+                if fits(self) {
+                    return;
+                }
+            }
+        }
+    }
+
     pub fn insert(&mut self, page: usize, text: Arc<PageText>) -> bool {
         let bytes = memory_bytes(&text);
         // An uncached large page must not flush other useful entries.
@@ -70,9 +105,7 @@ impl TextCache {
             return false;
         }
         self.remove(page);
-        while self.bytes + bytes > self.budget || self.entries.len() >= self.limit {
-            self.evict_oldest(None);
-        }
+        self.make_room(bytes, self.limit - 1, None);
         self.clock += 1;
         self.bytes += bytes;
         self.entries.insert(
@@ -99,9 +132,7 @@ impl TextCache {
         }
         self.bytes = self.bytes - entry.bytes + bytes;
         entry.bytes = bytes;
-        while self.bytes > self.budget {
-            self.evict_oldest(Some(page));
-        }
+        self.make_room(0, self.limit, Some(page));
     }
 }
 
@@ -137,6 +168,74 @@ mod tests {
             held.text, "other",
             "eviction must not invalidate active selection references"
         );
+    }
+
+    #[test]
+    fn a_large_insertion_evicts_exactly_the_oldest_pages_and_keeps_the_touched_page() {
+        let small = page("small");
+        let unit = memory_bytes(&small);
+        let incoming = page(&"x".repeat(4000));
+        let removed = memory_bytes(&incoming).div_ceil(unit);
+        assert!((9..64).contains(&removed));
+        let mut cache = TextCache {
+            budget: unit * 64,
+            ..Default::default()
+        };
+        for index in 0..64 {
+            assert!(cache.insert(index, Arc::clone(&small)));
+        }
+        cache.get(0).unwrap();
+        assert!(cache.insert(64, Arc::clone(&incoming)));
+        assert!(cache.bytes <= cache.budget);
+        assert!(Arc::ptr_eq(&cache.get(64).unwrap(), &incoming));
+        for index in 0..64 {
+            assert_eq!(
+                cache.get(index).is_some(),
+                index == 0 || index > removed,
+                "page {index}"
+            );
+        }
+        assert_eq!(cache.bytes, unit * (64 - removed) + memory_bytes(&incoming));
+    }
+
+    #[test]
+    fn large_index_growth_keeps_the_protected_oldest_page_and_evicts_others_in_order() {
+        let mut active = PageText::default();
+        active.text = "x".repeat(1000);
+        active.spans = (0..1000)
+            .map(|index| crate::text::TextSpan {
+                range: index..index + 1,
+                rect: hayro::kurbo::Rect::new(
+                    (index % 100) as f64 * 8.0,
+                    (index / 100) as f64 * 16.0,
+                    (index % 100) as f64 * 8.0 + 6.0,
+                    (index / 100) as f64 * 16.0 + 10.0,
+                ),
+            })
+            .collect();
+        let active = Arc::new(active);
+        let before = memory_bytes(&active);
+        let small = page("small");
+        let unit = memory_bytes(&small);
+        let mut cache = TextCache {
+            budget: before + unit * 128,
+            ..Default::default()
+        };
+        assert!(cache.insert(0, Arc::clone(&active)));
+        for index in 1..=128 {
+            assert!(cache.insert(index, Arc::clone(&small)));
+        }
+        active.prepare_selection();
+        let after = memory_bytes(&active);
+        let removed = (after - before).div_ceil(unit);
+        assert!((9..128).contains(&removed));
+        cache.refresh(0, &active);
+        assert!(cache.bytes <= cache.budget);
+        assert!(Arc::ptr_eq(&cache.get(0).unwrap(), &active));
+        for index in 1..=128 {
+            assert_eq!(cache.get(index).is_some(), index > removed, "page {index}");
+        }
+        assert_eq!(cache.bytes, after + unit * (128 - removed));
     }
 
     #[test]
