@@ -224,6 +224,10 @@ cargo bench --locked --bench document_bytes -- 9
 cargo bench --locked --bench outline_filter -- 9
 # 首次链接读取，包含目标索引初始化和无链接、网页、内部跳转三种页面
 cargo bench --locked --bench link_reading -- 9
+# 文本缓存命中、少量和批量逐出，包含真实页面费用记账
+cargo bench --locked --bench text_cache -- 9
+# 页面与预览纹理缓存，包含 egui 对象释放和可见纹理保护
+cargo bench --locked --bench texture_cache -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
 xvfb-run -a python3 scripts/smoke-install-linux.py target/release/folio
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
@@ -258,6 +262,7 @@ xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
 xvfb-run -a python3 scripts/smoke-password.py target/release/folio
 xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
 xvfb-run -a python3 scripts/smoke-percentage.py target/release/folio
+xvfb-run -a python3 scripts/smoke-relative.py target/release/folio
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

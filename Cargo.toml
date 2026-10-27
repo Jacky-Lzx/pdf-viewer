@@ -92,3 +92,7 @@ harness = false
 [[bench]]
 name = "text_cache"
 harness = false
+
+[[bench]]
+name = "texture_cache"
+harness = false
