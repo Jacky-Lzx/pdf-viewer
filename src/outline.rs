@@ -217,7 +217,11 @@ fn named_destinations<'a>(pdf: &'a Pdf, catalog: &Dict<'a>) -> HashMap<Vec<u8>, 
         .and_then(|names| names.get::<Dict<'_>>(b"Dests"));
     let mut stack: Vec<_> = root.into_iter().map(|node| (node, 0)).collect();
     let mut seen = HashSet::new();
+    let mut budget = crate::pdf_objects::ScanBudget::default();
     while let Some((node, depth)) = stack.pop() {
+        if budget.is_empty() {
+            break;
+        }
         if depth > 32
             || seen.len() >= 10_000
             || named.len() >= 10_000
@@ -226,7 +230,7 @@ fn named_destinations<'a>(pdf: &'a Pdf, catalog: &Dict<'a>) -> HashMap<Vec<u8>, 
             continue;
         }
         if let Some(array) = node.get::<Array<'_>>(b"Names") {
-            for (key, value) in crate::pdf_objects::pairs(pdf, &array, 10_000) {
+            for (key, value) in budget.pairs(pdf, &array, 10_000) {
                 let Object::String(key) = key else {
                     continue;
                 };
@@ -239,7 +243,9 @@ fn named_destinations<'a>(pdf: &'a Pdf, catalog: &Dict<'a>) -> HashMap<Vec<u8>, 
         if let Some(kids) = node.get::<Array<'_>>(b"Kids") {
             let available = 10_000_usize.saturating_sub(stack.len());
             stack.extend(
-                crate::pdf_objects::dictionaries(pdf, &kids, available).map(|kid| (kid, depth + 1)),
+                budget
+                    .dictionaries(pdf, &kids, available)
+                    .map(|kid| (kid, depth + 1)),
             );
         }
     }
@@ -392,6 +398,29 @@ mod tests {
                 .page,
             0
         );
+    }
+
+    #[test]
+    fn name_tree_shares_one_raw_budget_across_leaf_pairs_and_child_arrays() {
+        for (items, leaves, kids, late) in [
+            (9999, 5, false, true),
+            (10000, 5, false, false),
+            (10000, 10, true, true),
+            (10000, 11, true, false),
+        ] {
+            let pdf = crate::pdf_objects::repeated_tree(items, leaves, kids);
+            let index = DestinationIndex::new(&pdf);
+            let names = index.named();
+            assert!(names.contains_key(b"early".as_slice()));
+            assert_eq!(
+                names.contains_key(b"late".as_slice()),
+                late,
+                "{items} items in {leaves} shared arrays; kids={kids}"
+            );
+            for target in names.values() {
+                assert_eq!(index.resolve(target.clone()).unwrap().page, 0);
+            }
+        }
     }
 
     #[test]

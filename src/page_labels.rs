@@ -39,7 +39,11 @@ impl PageLabels {
         let mut stack: Vec<_> = root.into_iter().map(|node| (node, 0)).collect();
         let mut seen = HashSet::new();
         let mut ranges = BTreeMap::new();
+        let mut budget = crate::pdf_objects::ScanBudget::default();
         while let Some((node, depth)) = stack.pop() {
+            if budget.is_empty() {
+                break;
+            }
             if depth > 32
                 || seen.len() >= 10_000
                 || ranges.len() >= 10_000
@@ -48,7 +52,7 @@ impl PageLabels {
                 continue;
             }
             if let Some(nums) = node.get::<Array<'_>>(b"Nums") {
-                for (index, value) in crate::pdf_objects::pairs(pdf, &nums, 10_000) {
+                for (index, value) in budget.pairs(pdf, &nums, 10_000) {
                     let Object::Dict(label) = value else {
                         continue;
                     };
@@ -99,7 +103,8 @@ impl PageLabels {
             if let Some(kids) = node.get::<Array<'_>>(b"Kids") {
                 let available = 10_000_usize.saturating_sub(stack.len());
                 stack.extend(
-                    crate::pdf_objects::dictionaries(pdf, &kids, available)
+                    budget
+                        .dictionaries(pdf, &kids, available)
                         .map(|kid| (kid, depth + 1)),
                 );
             }
@@ -362,6 +367,26 @@ mod tests {
         let labels = PageLabels::read(&pdf);
         assert_eq!(labels.label(4).as_deref(), Some("A-1"));
         assert_eq!(labels.resolve_input("A-2", 6), Some(5));
+    }
+
+    #[test]
+    fn label_tree_shares_one_raw_budget_across_leaf_pairs_and_child_arrays() {
+        for (items, leaves, kids, late) in [
+            (9999, 5, false, true),
+            (10000, 5, false, false),
+            (10000, 10, true, true),
+            (10000, 11, true, false),
+        ] {
+            let pdf = crate::pdf_objects::repeated_tree(items, leaves, kids);
+            let labels = PageLabels::read(&pdf);
+            let expected = if late { "late1" } else { "early1" };
+            assert_eq!(
+                labels.label(0).as_deref(),
+                Some(expected),
+                "{items} items in {leaves} shared arrays; kids={kids}"
+            );
+            assert_eq!(labels.resolve_input(expected, 1), Some(0));
+        }
     }
 
     #[test]

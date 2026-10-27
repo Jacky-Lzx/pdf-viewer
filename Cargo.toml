@@ -96,3 +96,7 @@ harness = false
 [[bench]]
 name = "texture_cache"
 harness = false
+
+[[bench]]
+name = "metadata_trees"
+harness = false
