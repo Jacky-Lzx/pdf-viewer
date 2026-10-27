@@ -1,0 +1,23 @@
+# Pagewing: ~/.config/pagewing/config.toml (or $XDG_CONFIG_HOME/pagewing/config.toml).
+# Edit and restart the reader. Missing options use built-in defaults.
+
+[appearance]
+dark = false
+night = false
+sidebar = false
+thumbnails = false
+
+[display]
+# single, continuous, facing
+layout = "single"
+# page, width, height, or a zoom factor: 1.5 = 150% (range: 0.05-8.0)
+fit = "page"
+# Restore saved document views; false opens at page 1 with the defaults above.
+remember_documents = true
+
+[shortcuts]
+# An action replaces all of its default bindings; [] disables it.
+# Modifiers: Cmd (Ctrl on Linux, Command on macOS), Ctrl, Alt, Shift.
+# Use key names such as X, ArrowDown, PageDown, Comma, Plus, Questionmark.
+# next_page = ["X", "Shift+J"]
+# night = []

@@ -8,19 +8,12 @@ use std::{collections::BTreeMap, sync::OnceLock};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Layout {
     #[default]
+    #[serde(rename = "single", alias = "Single")]
     Single,
+    #[serde(rename = "continuous", alias = "Continuous")]
     Continuous,
+    #[serde(rename = "facing", alias = "Facing")]
     Facing,
-}
-
-impl Layout {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Single => "Single page",
-            Self::Continuous => "Continuous",
-            Self::Facing => "Two pages side by side",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -87,6 +80,10 @@ impl Binding {
     }
 
     fn parse(text: &str) -> Self {
+        Self::parse_config(text).expect("valid built-in binding")
+    }
+
+    pub fn parse_config(text: &str) -> Result<Self, String> {
         let mut modifiers = Modifiers::NONE;
         let mut key = text;
         while let Some((prefix, rest)) = key.split_once('+') {
@@ -95,7 +92,7 @@ impl Binding {
                 "Ctrl" => modifiers.ctrl = true,
                 "Alt" => modifiers.alt = true,
                 "Shift" => modifiers.shift = true,
-                _ => panic!("invalid built-in binding: {text}"),
+                _ => return Err(format!("Unknown shortcut modifier in {text:?}")),
             }
             key = rest;
         }
@@ -103,7 +100,12 @@ impl Binding {
         if modifiers.ctrl && !cfg!(target_os = "macos") {
             modifiers.command = true;
         }
-        Self::from_event(Key::from_name(key).expect("built-in key"), modifiers, None)
+        let key = Key::from_name(key).ok_or_else(|| format!("Unknown shortcut key in {text:?}"))?;
+        Ok(Self::from_event(key, modifiers, None))
+    }
+
+    pub fn config_label(&self) -> String {
+        self.label().replace("Ctrl/Cmd", "Cmd")
     }
 
     pub fn event(&self) -> Option<(Key, Modifiers)> {
@@ -142,9 +144,6 @@ impl Binding {
             return true;
         };
         if matches!(key, Key::Escape | Key::Backspace | Key::Enter) {
-            return true;
-        }
-        if self.command && key == Key::Comma {
             return true;
         }
         if self.command && matches!(key, Key::A | Key::C | Key::X | Key::V) {
@@ -435,6 +434,11 @@ impl Shortcuts {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        for id in self.overrides.keys() {
+            if !commands().iter().any(|command| command.id == id) {
+                return Err(format!("Unknown shortcut action {id:?}"));
+            }
+        }
         let mut used: Vec<(&Binding, &str)> = Vec::new();
         for command in commands() {
             for binding in self.bindings(command) {
@@ -525,16 +529,7 @@ mod tests {
             .overrides
             .insert("next_page".into(), vec![Binding::parse("P")]);
         assert!(shortcuts.validate().unwrap_err().contains("Fit page"));
-        for key in [
-            "G",
-            "Z",
-            "Escape",
-            "Enter",
-            "Backspace",
-            "5",
-            "Cmd+Comma",
-            "Cmd+C",
-        ] {
+        for key in ["G", "Z", "Escape", "Enter", "Backspace", "5", "Cmd+C"] {
             shortcuts
                 .overrides
                 .insert("next_page".into(), vec![Binding::parse(key)]);

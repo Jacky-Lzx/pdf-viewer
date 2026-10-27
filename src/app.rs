@@ -1,11 +1,12 @@
 mod comments;
+#[cfg(test)]
+mod config;
 mod continuous;
 mod help;
 mod properties;
 mod recent;
 mod reload;
 mod selection_scroll;
-mod settings;
 mod shortcuts;
 mod sidebar;
 mod spread;
@@ -80,6 +81,7 @@ pub struct Pagewing {
     auto_reload_pending: bool,
     automatic_reload: bool,
     error: Option<String>,
+    configuration_error: Option<String>,
     message: Option<(String, Instant)>,
     pan: Vec2,
     overflow: Vec2,
@@ -106,7 +108,6 @@ pub struct Pagewing {
     goto_open: bool,
     goto_focus: bool,
     help: bool,
-    settings: Option<settings::SettingsUi>,
     help_filter: help::HelpFilter,
     input_buttons: shortcuts::InputButtons,
     recent_picker: Option<crate::recent::RecentPicker>,
@@ -123,22 +124,43 @@ impl Pagewing {
         path: Option<PathBuf>,
         page: Option<usize>,
     ) -> Self {
-        Self::with_context(&cc.egui_ctx, path, page, state::config_path())
+        Self::with_configuration(
+            &cc.egui_ctx,
+            path,
+            page,
+            state::config_path(),
+            crate::config::path(),
+        )
     }
 
+    #[cfg(test)]
     fn with_context(
         context: &egui::Context,
         path: Option<PathBuf>,
         page: Option<usize>,
         config: PathBuf,
     ) -> Self {
-        let library = Library::load(&config);
+        let preferences = config.with_file_name("config.toml");
+        Self::with_configuration(context, path, page, config, preferences)
+    }
+
+    fn with_configuration(
+        context: &egui::Context,
+        path: Option<PathBuf>,
+        page: Option<usize>,
+        state_path: PathBuf,
+        preferences: PathBuf,
+    ) -> Self {
+        let mut library = Library::load(&state_path);
+        let config = crate::config::load_or_create(&preferences, &library);
+        let config_error = config.as_ref().err().cloned();
+        config.unwrap_or_default().apply(&mut library);
         set_theme(context, library.dark);
         shortcuts::configure_input(context);
         crate::fonts::install(context.clone());
         let mut app = Self {
             worker: Worker::new(context.clone()),
-            state_writer: crate::state_writer::StateWriter::new(config, context.clone()),
+            state_writer: crate::state_writer::StateWriter::new(state_path, context.clone()),
             library,
             reading: ReadingState::default(),
             last_closed: None,
@@ -174,6 +196,7 @@ impl Pagewing {
             auto_reload_pending: false,
             automatic_reload: false,
             error: None,
+            configuration_error: config_error.clone(),
             message: None,
             pan: Vec2::ZERO,
             overflow: Vec2::ZERO,
@@ -200,7 +223,6 @@ impl Pagewing {
             goto_open: false,
             goto_focus: false,
             help: false,
-            settings: None,
             help_filter: help::HelpFilter::default(),
             input_buttons: shortcuts::InputButtons::default(),
             recent_picker: None,
@@ -217,6 +239,9 @@ impl Pagewing {
                 app.reading.offset = [0.0; 2];
                 app.pending_offset = Some([0.0; 2]);
             }
+        }
+        if let Some(error) = config_error {
+            eprintln!("{error}");
         }
         app
     }
@@ -1133,13 +1158,6 @@ impl Pagewing {
                     self.open_help(context);
                 }
             }
-            Some(shortcuts::InputButton::Settings) => {
-                if self.settings.is_some() {
-                    self.settings = None;
-                } else {
-                    self.open_settings(context);
-                }
-            }
             Some(shortcuts::InputButton::Find) => self.find(),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
             Some(shortcuts::InputButton::ReloadChanged) => {
@@ -1181,11 +1199,6 @@ impl Pagewing {
                     break;
                 }
             }
-        }
-        // A settings draft owns keyboard input, including shortcut recording.
-        if self.settings.is_some() {
-            self.settings_keys(context);
-            return;
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
@@ -1245,11 +1258,6 @@ impl Pagewing {
             };
             let raw_key = key;
             let raw_modifiers = modifiers;
-            if modifiers.command && key == Key::Comma {
-                shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
-                self.open_settings(context);
-                break;
-            }
             // Adapt configured bindings to the existing reader commands, but
             // consume the original physical press so text cannot leak to egui.
             // Sequences and text fields retain their own keyboard vocabulary.
@@ -1944,15 +1952,10 @@ impl Pagewing {
                     }
                     toolbar::right_group(
                         ui,
-                        if self.nav.count > 0 { 360.0 } else { 190.0 },
+                        if self.nav.count > 0 { 280.0 } else { 110.0 },
                         |ui| {
                             ui.add_space(12.0);
                             self.input_buttons.help = Some(ui.button("?").id);
-                            self.input_buttons.settings = Some(
-                                ui.button("Settings")
-                                    .on_hover_text("Preferences · Ctrl/Cmd+,")
-                                    .id,
-                            );
                             if ui
                                 .button(if self.library.dark { "Light" } else { "Dark" })
                                 .clicked()
@@ -2769,7 +2772,16 @@ impl Pagewing {
                 });
         }
         self.help_window(context);
-        self.settings_window(context);
+        if let Some(error) = self.configuration_error.clone() {
+            egui::TopBottomPanel::bottom("configuration-error").show(context, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(Color32::from_rgb(200, 75, 55), error);
+                    if ui.button("Dismiss").clicked() {
+                        self.configuration_error = None;
+                    }
+                });
+            });
+        }
         if let Some(error) = self.error.clone() {
             egui::TopBottomPanel::bottom("error").show(context, |ui| {
                 ui.horizontal_wrapped(|ui| {

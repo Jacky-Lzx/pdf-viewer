@@ -113,16 +113,32 @@ require('tex-tools').setup({
 
 隐藏 Comments 面板会保留草稿；**Discard / close editor** 放弃本条修改。存在未保存草稿时，切换、关闭、重新加载文档或退出会提示先保存或放弃，避免丢失输入。保存采用 PDF 标准 Highlight/Contents 字段和高亮外观流，其他 PDF 阅读器也可显示；编辑现有 comment 时保留其他批注及页面内容。保存会先完成临时文件写入，再替换当前 PDF；若磁盘文件已被其他程序修改，会报告错误并保留 comment 草稿，避免覆盖外部更改。加密 PDF 暂不支持保存批注；锁定、超长批注及 FreeText 的内容可读取，不能修改。批注扫描最多检查 100,000 个条目并展示 10,000 条，超出时显示提示。
 
-## 设置界面
+## 配置文件
 
-点击顶部工具栏 **Settings**，或按 `Ctrl/Cmd+,` 打开设置。修改后点击 **Save settings** 生效并保存到现有的 `library.json`；**Cancel** 或 `Escape` 放弃本次修改。窄窗口中可横向滚动工具栏找到 Settings。
+设置通过 TOML 文件管理，程序内不再提供 Settings 界面。Linux 和 macOS 均读取 `~/.config/pagewing/config.toml`；若设置了绝对路径的 `XDG_CONFIG_HOME`，则读取 `$XDG_CONFIG_HOME/pagewing/config.toml`。首次打开阅读器时会从已有设置生成配置文件，保留原来的外观、默认视图和快捷键。文件存在后只读取，不会被阅读进度保存覆盖；修改后重启阅读器生效。
 
-- **Display**：选择单页、连续滚动或双页布局；设置适应整页、宽度、高度，或 5%–800% 的自定义缩放；切换深色界面、PDF 页面反色、侧栏和页面预览。
-- 默认视图用于首次打开的文档。启用 **Restore each document's last position and view** 时，已有文档恢复上次的位置与显示方式；关闭后，每次从第一页按默认视图打开，书签和命名位置保留。启动参数 `--page` 仍可指定起始页。
-- 勾选 **Apply default view to the current document too** 可同时改变当前文档的布局和缩放，保留当前页码与书签。
-- **Keyboard shortcuts**：按功能或按键筛选，点击 **Add** 后直接按下新快捷键，点击绑定旁的 **×** 删除；支持一个功能绑定多个按键，也可删除全部绑定以停用该快捷键。重复绑定会提示冲突；**Reset** 恢复单项，**Reset all shortcuts** 恢复全部。
+```toml
+[appearance]
+dark = false
+night = false
+sidebar = false
+thumbnails = false
 
-录制时按 `Escape` 取消录制，再按一次关闭设置。`Ctrl/Cmd+,` 始终用于打开设置；文本编辑快捷键、数字计数，以及 `gg`、`z…`、`m…`、`'…` 等 Vim 组合命令保留。自定义的阅读快捷键在输入框中不会触发阅读操作。帮助窗口和按钮提示会显示保存后的按键；下表列出默认绑定。
+[display]
+layout = "single" # single / continuous / facing
+fit = "page"      # page / width / height，也可写 1.5 表示 150%（0.05–8.0）
+remember_documents = true
+
+[shortcuts]
+next_page = ["X", "Shift+J"] # 替换该动作的全部默认绑定
+night = []                 # 停用该动作的快捷键
+```
+
+省略的字段使用内置默认值；省略的快捷键动作继承默认绑定。删除动作的配置行即可恢复其默认快捷键。完整示例见 [config.example.toml](assets/config.example.toml)，动作名与按键格式见[配置参考](docs/configuration.md)。
+
+默认视图用于首次打开的文档；`remember_documents = true` 时，已有文档仍恢复上次的位置和视图。设为 `false` 后，每次从第一页按默认视图打开，书签和命名位置保留；`--page` 仍可指定起始页。外观选项是启动时的默认值，阅读过程中仍可用工具栏或快捷键临时切换；下次启动重新应用配置文件。
+
+配置格式、字段、按键或绑定冲突有误时，阅读器显示包含配置路径的错误，并使用内置默认设置，不覆盖原文件。文本编辑快捷键、数字计数及 `gg`、`z…`、`m…`、`'…` 等 Vim 组合命令保留。自定义阅读快捷键在输入框中不会触发阅读操作；帮助窗口和按钮提示会显示配置的按键。下表列出默认绑定。
 
 ## 键盘操作
 
@@ -265,9 +281,9 @@ require('tex-tools').setup({
 - 命名目标表在首次解析名称或字符串目标时才读取；普通直接页码和页面引用不读取整张名称表，目录和页面链接分别复用各自已准备的表。
 - 渲染器移交像素缓冲区后，在后台转换为页面和缩略图所需的纹理像素；界面线程核对请求与缓存容量后上传。后台结果队列最多容纳 4 条消息，避免 UI 暂停时无限积累图像。
 - 没有输入或后台结果时，界面不持续重绘。
-- 阅读进度在独立后台线程序列化并原子替换配置文件，队列只保留最新待写快照；写入失败后显示提示并重试，正常退出会等待最新状态写完。
+- 阅读进度在独立后台线程序列化并原子替换阅读状态文件，队列只保留最新待写快照；写入失败后显示提示并重试，正常退出会等待最新状态写完。
 
-阅读状态保存在系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/pagewing/library.json`（默认 `~/.config/pagewing/library.json`），macOS 为 `~/Library/Application Support/dev.pagewing.Pagewing/library.json`。首次启动且新配置尚不存在时，会读取原 Folio 的阅读状态；后续保存写入 Pagewing 目录，原文件保留。密码不持久化。
+阅读状态独立保存在 `library.json`，不作为手工配置入口。系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/pagewing/library.json`（默认 `~/.config/pagewing/library.json`），macOS 为 `~/Library/Application Support/dev.pagewing.Pagewing/library.json`。首次启动且新配置尚不存在时，会读取原 Folio 的阅读状态；后续保存写入 Pagewing 目录，原文件保留。密码不持久化。
 
 ## 验证与性能测量
 

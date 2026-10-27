@@ -176,8 +176,8 @@ mod tests {
                             ] {
                                 left_end = ui.button(label).rect.right();
                             }
-                            right_group(ui, 360.0, |ui| {
-                                for label in ["Help", "Settings", "Dark", "Find", "Bookmark"] {
+                            right_group(ui, 280.0, |ui| {
+                                for label in ["Help", "Dark", "Find", "Bookmark"] {
                                     let response = ui.button(label);
                                     assert!(
                                         response.rect.left() >= left_end,

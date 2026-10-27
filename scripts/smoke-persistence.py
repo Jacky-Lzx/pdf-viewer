@@ -56,6 +56,7 @@ def run(binary):
                 assert saved(lambda _, book: book["page"] == 1 and book["rotation"] == 1 and 4 in book["bookmarks"])
                 # A genuine write failure must leave the reader usable and retry.
                 config_path.unlink()
+                (config_path.parent / "config.toml").unlink()
                 config_path.parent.rmdir()
                 config_path.parent.write_text("a file blocks the settings directory")
                 application = launch()

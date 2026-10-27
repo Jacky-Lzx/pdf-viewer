@@ -110,7 +110,6 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("F, then a label", "Copy a visible web-link address"),
     ("F11", "Toggle fullscreen"),
     ("? / F1 / Escape", "Find keyboard shortcuts / close dialog"),
-    ("Ctrl/Cmd+,", "Open Settings"),
     ("Right-click web link", "Copy link address"),
     (
         "Ctrl/Cmd+click PDF",
@@ -200,8 +199,6 @@ impl HelpFilter {
         ] {
             self.catalog.push((keys.into(), action.into()));
         }
-        self.catalog
-            .push(("Ctrl/Cmd+,".into(), "Open Settings".into()));
         self.filter();
     }
 
@@ -237,7 +234,6 @@ impl Pagewing {
         self.search_open = false;
         self.search_focus = false;
         self.pending_search_jump = None;
-        self.settings = None;
         self.help = true;
         self.help_filter.reset();
         self.help_filter.configure(&self.library.shortcuts);
