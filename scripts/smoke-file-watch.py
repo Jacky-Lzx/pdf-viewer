@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise passive file-change notices, snapshot reload and dismiss in X11."""
+"""Exercise automatic file refresh, snapshot recovery and dismiss in X11."""
 import ctypes
 import json
 import os
@@ -69,34 +69,27 @@ def run(binary):
                 assert replacement.stat().st_size == stamp.st_size
                 os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
                 replacement.replace(document)
-                wait_for(visible, "stable atomic replacement notice")
-                assert "Title: Edition one" in details(), "notice must preserve the loaded snapshot"
+                wait_for(lambda: "Title: Edition two" in details(), "automatic stable atomic replacement refresh")
                 # Saving a mark resolves current geometry, detecting accidental viewport changes.
                 keyboard.key("m"); keyboard.key("a")
-                wait_for(lambda: "a" in book().get("marks", {}), "view after file notice")
+                wait_for(lambda: "a" in book().get("marks", {}), "view after automatic refresh")
                 assert view() == initial, (view(), initial)
-                keyboard.click((690, 88))
-                wait_for(lambda: not visible(), "dismissed file notice")
-                time.sleep(1.2)
-                assert not visible(), "unchanged file must not show a dismissed notice again"
-
-                document.write_bytes(metadata_pdf(source, "Edition three"))
-                wait_for(visible, "subsequent file update notice")
-                keyboard.click((620, 88))
-                wait_for(lambda: not visible(), "Reload button clears notice")
-                wait_for(lambda: "Title: Edition three" in details(), "button reload updates metadata")
-                assert view() == initial, (view(), initial)
+                assert not visible(), "successful automatic refresh must clear the notice"
 
                 document.write_bytes(b"incomplete compiler output")
                 wait_for(visible, "incomplete update notice")
-                keyboard.key("r", ctrl=True)
-                time.sleep(0.4)
-                assert "Title: Edition three" in details(), "failed reload must retain the old PDF"
+                time.sleep(0.5)
+                assert "Title: Edition two" in details(), "failed automatic reload must retain the old PDF"
                 assert visible(), "failed reload must retain the file notice"
+                keyboard.click((690, 88))
+                wait_for(lambda: not visible(), "dismissed failed update")
+                time.sleep(1.2)
+                assert not visible(), "unchanged invalid file must not trigger repeated reloads"
                 document.write_bytes(metadata_pdf(source, "Recovered edition"))
-                keyboard.key("r", ctrl=True)
-                wait_for(lambda: "Title: Recovered edition" in details(), "keyboard reload recovery")
+                wait_for(lambda: "Title: Recovered edition" in details(), "automatic recovery after a subsequent change")
                 wait_for(lambda: not visible(), "successful recovery clears notice")
+                keyboard.key("r", ctrl=True)
+                wait_for(lambda: "Title: Recovered edition" in details(), "manual reload remains available")
 
                 keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                                        ctypes.c_uint, ctypes.c_uint]
@@ -106,9 +99,8 @@ def run(binary):
                 probe = (300, 74)
                 baseline = keyboard.pixel(probe)
                 document.write_bytes(metadata_pdf(source, "Compact edition"))
-                wait_for(visible, "notice in compact window")
-                keyboard.click((530, 88))
-                wait_for(lambda: not visible(), "dismiss in compact window")
+                wait_for(lambda: "Title: Compact edition" in details(), "automatic refresh in compact window")
+                assert not visible(), "compact refresh must clear the notice"
                 keyboard.key("w", ctrl=True)
                 time.sleep(0.4)
                 closed = keyboard.pixel(probe)
@@ -117,8 +109,8 @@ def run(binary):
                 assert keyboard.pixel(probe) == closed, "closed documents must stop watching"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: passive stable-change notices, equal-size/mtime atomic replacement, "
-                      "unchanged reading view, dismiss without repeats, button/keyboard reload, "
+                print("PASS: automatic stable-change refresh, equal-size/mtime atomic replacement, "
+                      "unchanged reading view, dismiss without repeats, keyboard reload, "
                       "failed reload snapshot and recovery, compact window and close")
             except Exception:
                 log.flush(); log.seek(0)

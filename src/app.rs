@@ -3,6 +3,7 @@ mod continuous;
 mod help;
 mod properties;
 mod recent;
+mod reload;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
@@ -74,6 +75,8 @@ pub struct Folio {
     loading: bool,
     reloading: bool,
     file_changed: bool,
+    auto_reload_pending: bool,
+    automatic_reload: bool,
     error: Option<String>,
     message: Option<(String, Instant)>,
     pan: Vec2,
@@ -165,6 +168,8 @@ impl Folio {
             loading: false,
             reloading: false,
             file_changed: false,
+            auto_reload_pending: false,
+            automatic_reload: false,
             error: None,
             message: None,
             pan: Vec2::ZERO,
@@ -290,6 +295,8 @@ impl Folio {
         self.loading = false;
         self.reloading = false;
         self.file_changed = false;
+        self.auto_reload_pending = false;
+        self.automatic_reload = false;
         self.error = None;
         self.message = None;
         self.goto.clear();
@@ -348,6 +355,8 @@ impl Folio {
         if self.nav.count == 0 || self.loading {
             return;
         }
+        self.auto_reload_pending = false;
+        self.automatic_reload = false;
         self.remember();
         self.nav.clear_prefix();
         self.loading = true;
@@ -820,6 +829,7 @@ impl Folio {
                 }
                 Event::FileChanged { id } if id == self.id => {
                     self.file_changed = true;
+                    self.auto_reload_pending = true;
                 }
                 Event::PageText { id, page, text }
                     if id == self.id && page == self.selection_page && self.selection.active =>
@@ -853,6 +863,8 @@ impl Folio {
                     }
                     self.reloading = false;
                     self.file_changed = false;
+                    self.auto_reload_pending = false;
+                    self.automatic_reload = false;
                     self.loading = false;
                     self.error = None;
                     self.cache.clear();
@@ -976,6 +988,7 @@ impl Folio {
                     if self.loading && !opening {
                         continue;
                     }
+                    let automatic = opening && self.automatic_reload;
                     if opening && self.loading && self.reloading {
                         self.restart_search();
                         self.requested = None;
@@ -983,11 +996,12 @@ impl Folio {
                     }
                     if opening {
                         self.loading = false;
+                        self.automatic_reload = false;
                         if !message.contains("Decryption") {
                             self.synctex.cancel_pending();
                         }
                     }
-                    if opening && message.contains("Decryption") {
+                    if opening && message.contains("Decryption") && !automatic {
                         self.password_open = true;
                         self.password_focus = true;
                         self.goto_open = false;
@@ -1000,7 +1014,11 @@ impl Folio {
                             }
                         });
                     }
-                    self.error = Some(message);
+                    self.error = Some(if automatic && message.contains("Decryption") {
+                        "PDF changed but needs a password. Press Ctrl/Cmd+R to unlock the new version.".into()
+                    } else {
+                        message
+                    });
                 }
                 _ => {}
             }
@@ -1051,7 +1069,10 @@ impl Folio {
                     self.reload();
                 }
             }
-            Some(shortcuts::InputButton::DismissChange) => self.file_changed = false,
+            Some(shortcuts::InputButton::DismissChange) => {
+                self.file_changed = false;
+                self.auto_reload_pending = false;
+            }
             None => {}
         }
         if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
@@ -2171,6 +2192,9 @@ impl Folio {
         if self.file_changed && self.nav.count > 0 {
             self.file_change_notice(context, canvas.response.rect);
         }
+        // Honor this frame's keys and buttons before deciding whether the
+        // document is safe to replace (e.g. starting a comment or selection).
+        self.reload_if_changed(context);
     }
 
     fn file_change_notice(&mut self, context: &egui::Context, canvas: egui::Rect) {
