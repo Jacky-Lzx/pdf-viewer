@@ -44,6 +44,8 @@ enum MarkAction {
 }
 
 pub struct Pagewing {
+    #[cfg(target_os = "macos")]
+    open_documents: Option<crate::macos_open::OpenDocuments>,
     worker: Worker,
     state_writer: crate::state_writer::StateWriter,
     library: Library,
@@ -119,6 +121,44 @@ pub struct Pagewing {
 }
 
 impl Pagewing {
+    #[cfg(target_os = "macos")]
+    pub fn set_open_documents(
+        &mut self,
+        documents: crate::macos_open::OpenDocuments,
+        context: &egui::Context,
+    ) {
+        documents.attach(context);
+        self.open_documents = Some(documents);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_open_documents(&mut self, context: &egui::Context) {
+        let paths = self
+            .open_documents
+            .as_ref()
+            .map(|documents| documents.take_paths())
+            .unwrap_or_default();
+        let mut paths = paths.into_iter();
+        if let Some(path) = paths.next() {
+            self.open(path, context);
+            context.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        // Each reader holds one document. Preserve every additional selection
+        // from a Finder batch in its own reader process/window.
+        for path in paths {
+            let result = std::env::current_exe()
+                .and_then(|exe| std::process::Command::new(exe).arg("--").arg(&path).spawn());
+            match result {
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                }
+                Err(error) => self.notify(format!("Cannot open {}: {error}", path.display())),
+            }
+        }
+    }
+
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
@@ -159,6 +199,8 @@ impl Pagewing {
         shortcuts::configure_input(context);
         crate::fonts::install(context.clone());
         let mut app = Self {
+            #[cfg(target_os = "macos")]
+            open_documents: None,
             worker: Worker::new(context.clone()),
             state_writer: crate::state_writer::StateWriter::new(state_path, context.clone()),
             library,
@@ -2813,6 +2855,8 @@ impl Pagewing {
 
 impl eframe::App for Pagewing {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        self.macos_open_documents(context);
         let popup_view = (
             self.id,
             self.nav.page,

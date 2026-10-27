@@ -36,6 +36,14 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>10.15</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>CFBundleDocumentTypes</key>
+  <array><dict>
+    <key>CFBundleTypeName</key><string>PDF document</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Alternate</string>
+    <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+    <key>CFBundleTypeExtensions</key><array><string>pdf</string></array>
+  </dict></array>
 </dict></plist>
 PLIST
 codesign --force --deep --sign - "$bundle"

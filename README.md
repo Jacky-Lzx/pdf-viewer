@@ -32,7 +32,7 @@ Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcom
 sudo apt install build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev
 ```
 
-NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Pagewing.app`。
+NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Pagewing.app`。将应用复制到 `/Applications` 后，可在 Finder 中通过 PDF 的“打开方式”选择 Pagewing，应用启动前后均支持。一次选择多个 PDF 时，额外文件会在独立窗口中打开；当前窗口有未保存的 comment 时会提示先保存或放弃。
 
 Linux 可安装为当前用户的桌面应用，随后从应用菜单或 PDF 的“打开方式”选择 Pagewing：
 

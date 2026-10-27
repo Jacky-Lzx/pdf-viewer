@@ -17,6 +17,8 @@ mod link_cache;
 mod link_hints;
 mod link_visibility;
 mod links;
+#[cfg(target_os = "macos")]
+mod macos_open;
 mod navigation;
 mod outline;
 mod outline_view;
@@ -95,11 +97,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_drag_and_drop(true),
         ..Default::default()
     };
+    // Register before the native event loop consumes Finder's cold-start event.
+    #[cfg(target_os = "macos")]
+    let open_documents = macos_open::OpenDocuments::install();
     eframe::run_native(
         "Pagewing",
         options,
         Box::new(move |cc| {
             let mut app = app::Pagewing::new(cc, path, page);
+            #[cfg(target_os = "macos")]
+            app.set_open_documents(open_documents, &cc.egui_ctx);
             if let Some(request) = sync_request {
                 app.configure_synctex(request, &cc.egui_ctx);
             }
