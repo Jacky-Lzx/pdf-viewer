@@ -43,6 +43,11 @@ def run(binary):
             ([document, document], "Open one PDF at a time"),
             ([document.name], "Unknown option"),
             (["--text", missing, "1"], "Cannot read"),
+            (["--page"], "Missing page number"),
+            (["--page", "0", missing], "Page numbers start at 1"),
+            (["--page", "2"], "Missing PDF path"),
+            (["--page", "2", "--"], "Missing PDF path"),
+            (["--page", "2", missing, document], "Open one PDF at a time"),
         ]:
             invoke(args, error)
         assert not output.exists(), "invalid commands must not create output files"
@@ -60,7 +65,10 @@ def run(binary):
 
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
-            application = subprocess.Popen([str(binary), "--", document.name], cwd=root, env=environment, stdout=log, stderr=log)
+            def launch(args):
+                return subprocess.Popen([str(binary), *args], cwd=root, env=environment, stdout=log, stderr=log)
+
+            application = launch(["--", document.name])
 
             def saved_page(page):
                 def saved():
@@ -78,7 +86,47 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert saved_page(1)(), "Vim navigation and final state save work for the special path"
-                print("PASS: argument errors before PDF I/O, version/help, complete PNG and write failure reporting, real text/benchmark output and native -- opening of a relative dash-prefixed Unicode path")
+                application = launch(["--page", "4", "--", document.name])
+                wait_for(lambda: keyboard.focus(document.name), "native page override window")
+                wait_for(saved_page(3), "explicit page overrides the previously saved page")
+                keyboard.key("y")
+                assert keyboard.clipboard() == invoke(["--text", document, "4"]).removesuffix("\n")
+                keyboard.key("b"); keyboard.key("r"); keyboard.key("w")
+                for character in "3jma":
+                    keyboard.key(character)
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                saved = json.loads(config_path.read_text())["recent"][0]
+                assert saved["rotation"] == 1 and saved["fit"] == "Width" and saved["offset"][1] > 0
+                assert saved["bookmarks"] == [3] and saved["marks"]["a"]["page"] == 3
+
+                application = launch(["--page", "2", document.name])
+                wait_for(lambda: keyboard.focus(document.name), "second page override window")
+                wait_for(saved_page(1), "page override resets the old page offset")
+                saved = json.loads(config_path.read_text())["recent"][0]
+                assert saved["offset"] == [0.0, 0.0] and saved["rotation"] == 1 and saved["fit"] == "Width"
+                assert saved["bookmarks"] == [3] and saved["marks"]["a"]["page"] == 3
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+
+                application = launch(["--", document.name])
+                wait_for(lambda: keyboard.focus(document.name), "ordinary reopen window")
+                expected = invoke(["--text", document, "2"]).removesuffix("\n")
+                def restored_text():
+                    keyboard.key("y")
+                    return keyboard.clipboard() == expected
+                wait_for(restored_text, "ordinary reopen still restores the last page")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+
+                application = launch(["--page", "999", document.name])
+                wait_for(lambda: keyboard.focus(document.name), "clamped start page window")
+                wait_for(saved_page(5), "out-of-range GUI start page clamps to the last page")
+                keyboard.key("y")
+                assert keyboard.clipboard() == invoke(["--text", document, "6"]).removesuffix("\n")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                print("PASS: CLI validation/exports, special paths, physical start page and clamping, saved-view override, retained zoom/rotation/bookmarks/marks and ordinary session restore")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

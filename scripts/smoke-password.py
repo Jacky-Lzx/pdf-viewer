@@ -88,7 +88,17 @@ def run(binary):
                 assert "jkgdi" not in config_path.read_text()
                 config = json.loads(config_path.read_text())
                 assert not config["dark"] and not config["night"] and not config["thumbnails"]
-                print("PASS: keyboard-only unlock, wrong-password focus recovery, real decrypted text, reload from focused search, retained query/page, cancel recovery and no password in saved state")
+                application = subprocess.Popen([str(binary), "--page", "2", str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "encrypted start-page window")
+                time.sleep(0.8)
+                password("wrong")
+                password("jkgdi")
+                copied_page(1)
+                expect(1, "explicit start page survives password retries and overrides saved page")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                assert "jkgdi" not in config_path.read_text()
+                print("PASS: keyboard-only unlock, wrong-password focus, decrypted text, reload/search/cancel recovery, explicit start page after retries and no password in saved state")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

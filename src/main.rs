@@ -32,10 +32,10 @@ use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let path = match cli::parse(&args)? {
+    let (path, page) = match cli::parse(&args)? {
         cli::Command::Help => {
             println!(
-                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
+                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
             );
             return Ok(());
         }
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Folio {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        cli::Command::Gui(path) => path,
+        cli::Command::Gui { path, page } => (path, page),
         command => return headless(command).map_err(Into::into),
     };
     let options = eframe::NativeOptions {
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "Folio",
         options,
-        Box::new(move |cc| Ok(Box::new(app::Folio::new(cc, path)))),
+        Box::new(move |cc| Ok(Box::new(app::Folio::new(cc, path, page)))),
     )?;
     Ok(())
 }

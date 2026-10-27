@@ -100,7 +100,11 @@ pub struct Folio {
 }
 
 impl Folio {
-    pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        path: Option<PathBuf>,
+        page: Option<usize>,
+    ) -> Self {
         let config = state::config_path();
         let library = Library::load(&config);
         set_theme(&cc.egui_ctx, library.dark);
@@ -175,6 +179,11 @@ impl Folio {
         };
         if let Some(path) = path {
             app.open(path, &cc.egui_ctx);
+            if let Some(page) = page {
+                app.reading.page = page;
+                app.reading.offset = [0.0; 2];
+                app.pending_offset = Some([0.0; 2]);
+            }
         }
         app
     }

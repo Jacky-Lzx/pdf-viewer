@@ -4,7 +4,10 @@ use std::{ffi::OsString, path::PathBuf};
 pub enum Command {
     Help,
     Version,
-    Gui(Option<PathBuf>),
+    Gui {
+        path: Option<PathBuf>,
+        page: Option<usize>,
+    },
     Text {
         path: PathBuf,
         page: usize,
@@ -24,7 +27,7 @@ pub enum Command {
 impl Command {
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
-            Self::Gui(path) => path.as_deref(),
+            Self::Gui { path, .. } => path.as_deref(),
             Self::Text { path, .. } | Self::Render { path, .. } | Self::Benchmark { path, .. } => {
                 Some(path)
             }
@@ -35,7 +38,10 @@ impl Command {
 
 pub fn parse(args: &[OsString]) -> Result<Command, String> {
     let Some(first) = args.first() else {
-        return Ok(Command::Gui(None));
+        return Ok(Command::Gui {
+            path: None,
+            page: None,
+        });
     };
     let number = |index: usize, default: usize| -> Result<usize, String> {
         args.get(index).map_or(Ok(default), |value| {
@@ -53,6 +59,25 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
     match first.to_str() {
         Some("--help" | "-h") if args.len() == 1 => Ok(Command::Help),
         Some("--version" | "-V") if args.len() == 1 => Ok(Command::Version),
+        Some("--page") => {
+            if args.len() < 2 {
+                return Err(
+                    "Missing page number. Usage: folio --page PAGE [--] document.pdf".into(),
+                );
+            }
+            let page = page(1)?;
+            let path = match &args[2..] {
+                [] => return Err("Missing PDF path. Run folio --help.".into()),
+                [path] if path == "--" => return Err("Missing PDF path after --".into()),
+                [path] => path,
+                [separator, path] if separator == "--" => path,
+                _ => return Err("Open one PDF at a time. Run folio --help.".into()),
+            };
+            Ok(Command::Gui {
+                path: Some(path.into()),
+                page: Some(page),
+            })
+        }
         Some("--render") => {
             if args.len() < 2 {
                 return Err("Missing PDF path. Run folio --help.".into());
@@ -97,15 +122,24 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
             }
         }
         Some("--") => match &args[1..] {
-            [] => Ok(Command::Gui(None)),
-            [path] => Ok(Command::Gui(Some(path.into()))),
+            [] => Ok(Command::Gui {
+                path: None,
+                page: None,
+            }),
+            [path] => Ok(Command::Gui {
+                path: Some(path.into()),
+                page: None,
+            }),
             _ => Err("Open one PDF at a time. Run folio --help.".into()),
         },
         _ if first.to_string_lossy().starts_with('-') => {
             Err("Unknown option. Run folio --help.".into())
         }
         _ if args.len() > 1 => Err("Open one PDF at a time. Run folio --help.".into()),
-        _ => Ok(Command::Gui(Some(first.into()))),
+        _ => Ok(Command::Gui {
+            path: Some(first.into()),
+            page: None,
+        }),
     }
 }
 
@@ -166,12 +200,27 @@ mod tests {
 
     #[test]
     fn gui_terminator_preserves_special_paths_and_rejects_extra_files() {
-        assert_eq!(command(&[]).unwrap(), Command::Gui(None));
-        assert_eq!(command(&["--"]).unwrap(), Command::Gui(None));
-        for path in ["-notes.pdf", "--render", "文档 空格.pdf"] {
+        assert_eq!(
+            command(&[]).unwrap(),
+            Command::Gui {
+                path: None,
+                page: None
+            }
+        );
+        assert_eq!(
+            command(&["--"]).unwrap(),
+            Command::Gui {
+                path: None,
+                page: None
+            }
+        );
+        for path in ["-notes.pdf", "--render", "--page", "文档 空格.pdf"] {
             assert_eq!(
                 command(&["--", path]).unwrap(),
-                Command::Gui(Some(path.into()))
+                Command::Gui {
+                    path: Some(path.into()),
+                    page: None
+                }
             );
         }
         assert!(command(&["-notes.pdf"]).is_err());
@@ -179,6 +228,31 @@ mod tests {
         assert!(command(&["--", "one.pdf", "two.pdf"]).is_err());
         assert_eq!(command(&["--version"]).unwrap(), Command::Version);
         assert_eq!(command(&["-h"]).unwrap(), Command::Help);
+    }
+
+    #[test]
+    fn gui_start_page_is_one_based_and_requires_one_unmodified_path() {
+        for path in ["book.pdf", "-notes.pdf", "文档 空格.pdf"] {
+            let expected = Command::Gui {
+                path: Some(path.into()),
+                page: Some(41),
+            };
+            assert_eq!(command(&["--page", "42", path]).unwrap(), expected);
+            assert_eq!(command(&["--page", "42", "--", path]).unwrap(), expected);
+        }
+        for args in [
+            vec!["--page"],
+            vec!["--page", "42"],
+            vec!["--page", "42", "--"],
+            vec!["--page", "0", "book.pdf"],
+            vec!["--page", "-1", "book.pdf"],
+            vec!["--page", "1.5", "book.pdf"],
+            vec!["--page", "99999999999999999999999999999999", "book.pdf"],
+            vec!["--page", "1", "one.pdf", "two.pdf"],
+            vec!["--page", "1", "--", "one.pdf", "two.pdf"],
+        ] {
+            assert!(command(&args).is_err(), "{args:?}");
+        }
     }
 
     #[cfg(unix)]
@@ -201,6 +275,21 @@ mod tests {
                 .unwrap()
                 .as_os_str(),
             path
+        );
+        assert_eq!(
+            parse(&["--page".into(), "2".into(), path.clone()]).unwrap(),
+            Command::Gui {
+                path: Some(path.clone().into()),
+                page: Some(1)
+            }
+        );
+        assert!(
+            parse(&[
+                "--page".into(),
+                OsString::from_vec(vec![0xff]),
+                path.clone()
+            ])
+            .is_err()
         );
         assert!(parse(&["--text".into(), path, OsString::from_vec(vec![0xff])]).is_err());
     }
