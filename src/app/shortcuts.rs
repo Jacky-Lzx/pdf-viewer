@@ -56,12 +56,12 @@ pub(super) fn reader_actions(
         })
 }
 
-pub(super) struct SideButtonFocusGuard {
+pub(super) struct PointerFocusGuard {
     context: eframe::egui::Context,
     previous: eframe::egui::SurrenderFocusOn,
 }
 
-impl Drop for SideButtonFocusGuard {
+impl Drop for PointerFocusGuard {
     fn drop(&mut self) {
         self.context
             .options_mut(|options| options.input_options.surrender_focus_on = self.previous);
@@ -70,7 +70,7 @@ impl Drop for SideButtonFocusGuard {
 
 pub(super) fn preserve_side_button_focus(
     context: &eframe::egui::Context,
-) -> Option<SideButtonFocusGuard> {
+) -> Option<PointerFocusGuard> {
     let side_buttons_only = context.input(|input| {
         let mut found = false;
         for event in &input.events {
@@ -91,16 +91,20 @@ pub(super) fn preserve_side_button_focus(
     }
     // egui treats every mouse button as a click outside a focused input.
     // Side buttons belong to history, so preserve focus for this draw only.
+    Some(preserve_pointer_focus(context))
+}
+
+pub(super) fn preserve_pointer_focus(context: &eframe::egui::Context) -> PointerFocusGuard {
     let previous = context.options_mut(|options| {
         std::mem::replace(
             &mut options.input_options.surrender_focus_on,
             eframe::egui::SurrenderFocusOn::Never,
         )
     });
-    Some(SideButtonFocusGuard {
+    PointerFocusGuard {
         context: context.clone(),
         previous,
-    })
+    }
 }
 
 pub(super) fn focus_text_input(

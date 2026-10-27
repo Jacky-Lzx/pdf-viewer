@@ -1,3 +1,4 @@
+mod help;
 mod properties;
 mod recent;
 mod shortcuts;
@@ -87,6 +88,8 @@ pub struct Folio {
     goto_open: bool,
     goto_focus: bool,
     help: bool,
+    help_filter: help::HelpFilter,
+    help_button: Option<egui::Id>,
     recent_picker: Option<crate::recent::RecentPicker>,
     password: String,
     password_open: bool,
@@ -160,6 +163,8 @@ impl Folio {
             goto_open: false,
             goto_focus: false,
             help: false,
+            help_filter: help::HelpFilter::default(),
+            help_button: None,
             recent_picker: None,
             password: String::new(),
             password_open: false,
@@ -863,12 +868,31 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
+        // Apply the toolbar toggle before routing this frame's keyboard input.
+        // Otherwise a click that releases search focus can send following text
+        // to reader commands before the help filter has opened.
+        if let Some(response) = self.help_button.and_then(|id| context.read_response(id))
+            && response.clicked()
+        {
+            if !response.clicked_by(egui::PointerButton::Primary) {
+                context.input_mut(|input| {
+                    input.consume_key(egui::Modifiers::NONE, Key::Enter);
+                    input.consume_key(egui::Modifiers::NONE, Key::Space);
+                });
+            }
+            if self.help {
+                self.close_help(context);
+            } else {
+                self.open_help(context);
+            }
+        }
         if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
             for (visible, name) in [
                 (self.search_open, "folio-search-input"),
                 (self.recent_picker.is_some(), "folio-recent-input"),
                 (self.goto_open, "folio-page-input"),
                 (self.password_open, "folio-password-input"),
+                (self.help, "folio-help-input"),
                 (
                     self.library.sidebar && self.nav.count > 0 && !self.outline.is_empty(),
                     "folio-outline-input",
@@ -895,6 +919,7 @@ impl Folio {
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
+                || (self.help && self.help_filter.focus)
                 || self.outline.focus
                 || self.goto_open
                 || self.password_open
@@ -905,6 +930,7 @@ impl Folio {
                         "folio-recent-input",
                         "folio-page-input",
                         "folio-password-input",
+                        "folio-help-input",
                         "folio-outline-input",
                     ]
                     .iter()
@@ -1450,7 +1476,7 @@ impl Folio {
                     self.goto_focus = true;
                     self.goto.clear();
                 }
-                Key::Questionmark | Key::F1 => self.help = true,
+                Key::Questionmark | Key::F1 => self.open_help(context),
                 Key::F11 => {
                     let fullscreen =
                         context.input(|input| input.viewport().fullscreen.unwrap_or(false));
@@ -1570,9 +1596,7 @@ impl Folio {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(12.0);
-                        if ui.button("?").clicked() {
-                            self.help = !self.help;
-                        }
+                        self.help_button = Some(ui.button("?").id);
                         if ui
                             .button(if self.library.dark { "Light" } else { "Dark" })
                             .clicked()
@@ -2288,43 +2312,7 @@ impl Folio {
                     }
                 });
         }
-        if self.help {
-            egui::Window::new("Keyboard shortcuts").open(&mut self.help).collapsible(false).resizable(false).default_width(480.0).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).max_height((context.content_rect().height() - 60.0).max(200.0)).vscroll(true).show(context, |ui| {
-                ui.label(RichText::new("Stay in the flow.").size(23.0).strong().color(ACCENT)); ui.add_space(12.0);
-                egui::Grid::new("keys").num_columns(2).spacing([35.0, 8.0]).show(ui, |ui| {
-                    for (keys, action) in [
-                        ("j / k / h / l", "Scroll down / up / left / right"), ("J / K   or   ] / [", "Next / previous page"), ("gg / G", "First / last page"),
-                        ("42G   or   42 Enter", "Go to page 42"), ("Ctrl+d / Ctrl+u", "Half screen down / up"), ("Space / Shift+Space", "Screen down / up"),
-                        ("50%", "Jump to a percentage of the document's pages"),
-                        ("zt / zz / zb", "Current page top / vertical center / bottom"),
-                        ("zH / zL", "Scroll left / right half a screen; counts supported"),
-                        ("z0 / z$", "Current page left / right edge; keep vertical position"),
-                        ("3r / 3R", "Rotate clockwise / counterclockwise three quarter turns"),
-                        ("Ctrl+e / Ctrl+y", "Scroll down / up without turning pages, optional count"),
-                        ("Alt+Left / Alt+Right", "Jump history back / forward"), ("+ / −  ·  Ctrl/Cmd++ / −", "Zoom in / out"), ("p / w / e", "Fit page / width / height"), ("r / Shift+r", "Rotate clockwise / counterclockwise"),
-                        ("Mouse back / forward", "Restore the previous / next reading view"),
-                        ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
-                        ("a / Ctrl/Cmd+0", "100% zoom, keeping the viewport center"),
-                        ("Ctrl/Cmd+p", "Find a recent document"), ("/   or   Ctrl/Cmd+f", "Search document"), ("n / N  ·  3n / 3N", "Next / previous search match, optional count"), ("Alt+c / Alt+w", "Match case / whole words (search open)"), ("b", "Toggle bookmark"), ("Tab", "Toggle sidebar"),
-                        ("ma   /   'a or `a", "Save / restore named position a–z"),
-                        ("t", "Toggle page previews and open sidebar"),
-                        ("c", "Find chapter · ↑/↓ or Ctrl+j/k · Enter to follow"),
-                        ("v, drag, then y", "Select and copy text (Ctrl/Cmd+C also works)"),
-                        ("Ctrl/Cmd+a", "Select all text on the current page"),
-                        ("Double / triple click in v", "Select word / line; drag to extend in the same units"),
-                        ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
-                        ("s, then y", "Document information, copy details"),
-                        ("Ctrl/Cmd+w", "Close PDF and save reading position"),
-                        ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
-                        ("d / i", "Toggle dark interface / invert page"), ("y", "Copy page text"), ("o   or   Ctrl/Cmd+o", "Open PDF"), (":", "Go to page dialog"),
-                        ("f, then a label", "Follow a visible PDF link"),
-                        ("F, then a label", "Copy a visible web-link address"),
-                        ("F11", "Toggle fullscreen"), ("? / Escape", "Show help / close dialog"),
-                    ] { ui.monospace(keys); ui.label(action); ui.end_row(); }
-                });
-                ui.add_space(12.0); ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan. Double-click to fit.");
-            });
-        }
+        self.help_window(context);
         if let Some(error) = self.error.clone() {
             egui::TopBottomPanel::bottom("error").show(context, |ui| {
                 ui.horizontal_wrapped(|ui| {

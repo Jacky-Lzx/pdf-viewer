@@ -40,6 +40,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 页面导航快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
 
+帮助窗口支持按按键或功能说明筛选，例如 `zoom`、`copy link`；多个词需要同时匹配，英文不区分大小写。Copy shortcuts 可复制当前结果，清空筛选后可复制全部快捷键。`Escape` 返回阅读，重新打开帮助会清空上次筛选。
+
 | 按键 | 操作 |
 | --- | --- |
 | `j` / `k` / `h` / `l` | 向下 / 上 / 左 / 右滚动；上下到达边缘后翻页 |
@@ -185,6 +187,7 @@ xvfb-run -a python3 scripts/smoke-paths.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-close.py target/release/folio
 xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
+xvfb-run -a python3 scripts/smoke-help.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
