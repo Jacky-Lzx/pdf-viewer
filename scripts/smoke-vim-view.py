@@ -67,7 +67,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "Vim alignment reader window")
                 position(0, 0, "initial fit page", fit="Page")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 sequence("999zLJ")
                 position(1, 0, "horizontal half-screen stops on a fitted page and consumes its count", fit="Page", horizontal=0)
                 sequence("K999z$J", burst=True)
@@ -128,7 +127,7 @@ def run(binary):
                 sequence("9999999R")
                 position(0, 0, "large inverse rotation restores the orientation", fit="Width", rotation=0)
                 sequence("9")
-                keyboard.click((625, 28))
+                keyboard.click((878, 28))
                 position(0, 0, "toolbar rotation clears a pending keyboard count", fit="Width", rotation=1)
                 sequence("J")
                 position(1, 0, "toolbar count cleanup preserves single-page navigation", fit="Width", rotation=1)
@@ -142,7 +141,7 @@ def run(binary):
                 keyboard.key("r", shift=True)
                 sequence("zb")
                 position(0, 1, "bottom before toolbar rotation", fit="Width")
-                keyboard.click((625, 28))
+                keyboard.click((878, 28))
                 position(0, 0, "toolbar rotation matches keyboard origin", fit="Width", rotation=1)
                 keyboard.key("r", shift=True)
                 sequence("zbmaJ")

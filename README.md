@@ -107,7 +107,7 @@ require('tex-tools').setup({
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
 
-打开 PDF 后，右侧默认显示 **Comments** 列表，按文档页序展示所有页面已读取的批注，包含页码、作者与完整 comment 内容；列表可滚动，面板宽度可拖动调整。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
+打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示所有页面已读取的批注，包含页码、作者与完整 comment 内容；列表可滚动，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
 
 删除批注：在右侧列表中选中已保存的条目，点击 **Delete comment & highlight**。程序会直接更新当前 PDF，删除整条批注及其高亮、关联弹窗和同页回复，列表自动刷新。FreeText 和超长批注也可整条删除，锁定批注不能删除。若只想删除 comment 文字并保留高亮，清空编辑框后点击 **Save comment**。尚未保存的新批注使用 **Discard / close editor** 放弃。
 

@@ -48,7 +48,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "selection reader window")
                 wait_for(lambda: saved(lambda book: book["page"] == 0), "initial reading state")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 application.send_signal(signal.SIGSTOP)
                 try:
                     keyboard.key("a", ctrl=True, delay=0)

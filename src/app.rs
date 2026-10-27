@@ -893,7 +893,7 @@ impl Pagewing {
                     self.continuous_layout = crate::continuous::Layout::default();
                     self.continuous_link_request = None;
                     self.info = info;
-                    let comments_open = !reloaded || self.comments.open;
+                    let comments_open = reloaded && self.comments.open;
                     self.comments = comments::CommentUi::default();
                     self.comments.open = comments_open;
                     self.worker.comments();

@@ -50,7 +50,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "search load reader window")
                 expect(0, "initial reading state")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("/")
                 for letter in "dense":
                     keyboard.key(letter)

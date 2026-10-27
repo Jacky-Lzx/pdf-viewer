@@ -75,7 +75,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "outline reader window")
                 expect(0, "initial reading state")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key(0xFF09)
                 time.sleep(0.3)
                 keyboard.click((100, 272))

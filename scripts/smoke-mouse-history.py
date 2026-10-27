@@ -67,7 +67,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "mouse history reader window")
                 expect(lambda item: item["page"] == 0, "initial document")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 sequence("wzb")
                 first = expect(lambda item: item["fit"] == "Width" and item["offset"][1] == 1, "first full reading view")
                 sequence("Jr+zz")

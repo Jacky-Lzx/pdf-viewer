@@ -431,6 +431,7 @@ mod tests {
         wait(&mut app, &context, |app| {
             app.comments.loaded && app.nav.count > 0
         });
+        assert!(!app.comments.open, "comments must stay closed on open");
         frame(&mut app, &context, key(Key::A, Modifiers::COMMAND));
         wait(&mut app, &context, |app| !app.selection.rects.is_empty());
         // Exercise the same visible toolbar button a mouse user activates.
@@ -618,9 +619,15 @@ mod tests {
         );
         wait(&mut app, &context, |app| app.comments.loaded);
         assert!(
-            app.comments.open,
-            "the right sidebar is visible when the PDF opens"
+            !app.comments.open,
+            "the right sidebar stays closed even when the PDF contains comments"
         );
+        frame(
+            &mut app,
+            &context,
+            key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT),
+        );
+        assert!(app.comments.open, "the shortcut opens the comments sidebar");
         let output = frame(&mut app, &context, Vec::new());
         let texts: Vec<_> = output
             .shapes

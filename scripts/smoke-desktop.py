@@ -234,8 +234,6 @@ def run(binary):
         try:
             application = launch()
             expect(lambda _, book: book["page"] == 0, "initial page")
-            # These pointer coordinates exercise the full-width reading canvas.
-            keyboard.key("m", ctrl=True, shift=True)
             keyboard.key("v"); time.sleep(0.3)
             keyboard.drag((374, 290), (570, 290)); keyboard.key("y")
             selected = keyboard.clipboard()

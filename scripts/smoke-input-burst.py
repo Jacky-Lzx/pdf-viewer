@@ -68,7 +68,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "burst-input reader window")
                 expect(paths[0], 0, "initial reading state")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 burst(text("42") + [(BACKSPACE, {})] + text("G"))
                 expect(paths[0], 3, "Backspace corrects a physical page prefix within the same frame")
                 burst(text("4") + [(BACKSPACE, {})] + text("J"))

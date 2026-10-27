@@ -66,7 +66,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "bookmark reader window")
                 expect(0, "initial reading state with 600 bookmarks")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 wait_for(selected_bookmark_y, "first bookmark is visible")
                 keyboard.key("g", shift=True)
                 expect(599, "G reaches the final bookmarked page")

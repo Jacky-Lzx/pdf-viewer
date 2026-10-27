@@ -71,7 +71,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "reader with a long UTF-16 chapter title")
                 expect(0, "document opened")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 chapter("strasse")
                 expect(2, "Unicode title prefix retains its actual destination")
                 keyboard.key("y")

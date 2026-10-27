@@ -75,7 +75,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "selection auto-scroll reader")
                 expect(lambda value: value["page"] == 0, "initial page")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("w")
                 expect(lambda value: value["fit"] == "Width", "page wider than the vertical viewport")
                 select_native()

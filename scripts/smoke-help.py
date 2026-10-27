@@ -46,6 +46,8 @@ def run(binary):
                     keyboard.key(character.lower(), shift=character.isupper() or character == "?", delay=delay)
 
             def burst(value, toolbar=False):
+                if toolbar:
+                    keyboard.wheel((1100, 28), down=True, steps=20)
                 application.send_signal(signal.SIGSTOP)
                 try:
                     if toolbar:
@@ -76,7 +78,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "shortcut help reader window")
                 expect(0)
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 burst("?zoom")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "zoom", "same-frame help opening must focus its filter"
@@ -106,6 +107,7 @@ def run(binary):
                 copy_matches(["Toggle bookmark", "Next / previous bookmark"], ["Zoom in"])
                 keyboard.key(ESCAPE)
                 text("99m")
+                keyboard.wheel((1100, 28), down=True, steps=20)
                 keyboard.click((1140, 28))
                 keyboard.key(ESCAPE); keyboard.key("j", shift=True)
                 expect(2)

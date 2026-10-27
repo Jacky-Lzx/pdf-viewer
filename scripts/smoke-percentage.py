@@ -50,7 +50,6 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "percentage reader window")
                 expect(0)
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 for value, page in [("50%", 2), ("51%", 3), ("25%", 1), ("75%", 4),
                                     ("0%", 0), ("99%", 5), ("1%", 0), ("100%", 5),
                                     ("0%", 0), ("999999999999%", 5), ("0%", 0)]:

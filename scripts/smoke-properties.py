@@ -66,7 +66,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "properties reader window")
                 expect(document, 0)
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("s")
                 assert "Title: 中文 😀 reading" in details(), "s opens document information"
                 keyboard.key(0xFF1B)

@@ -85,7 +85,6 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "reader window")
                 wait_for(lambda: book().get("page") == 0, "initial document saved")
-                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 empty_reopen_preserves_query()
                 keyboard.key("3"); keyboard.key("g", shift=True)
                 keyboard.key("w"); keyboard.key("z"); keyboard.key("b")
@@ -166,7 +165,7 @@ def run(binary):
                 closed()
                 recent("pagewing-smoke")
                 reopened()
-                keyboard.click((210, 28))
+                keyboard.click((244, 28))
                 closed()
                 reopen_shortcut()
                 reopened()
