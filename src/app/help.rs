@@ -79,6 +79,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
     ("s, then y", "Document information, copy details"),
     ("Ctrl/Cmd+w", "Close PDF and save reading position"),
+    (
+        "Ctrl/Cmd+Shift+t",
+        "Reopen the most recently closed document in this session",
+    ),
     ("Ctrl/Cmd+q", "Quit and save the latest reading position"),
     ("d / i", "Toggle dark interface / invert page"),
     ("y", "Copy page text"),

@@ -39,6 +39,7 @@ pub struct Folio {
     state_writer: crate::state_writer::StateWriter,
     library: Library,
     reading: ReadingState,
+    last_closed: Option<PathBuf>,
     bookmark_pages: Vec<usize>,
     nav: Navigation,
     history: crate::history::ViewHistory,
@@ -119,6 +120,7 @@ impl Folio {
             state_writer: crate::state_writer::StateWriter::new(config, cc.egui_ctx.clone()),
             library,
             reading: ReadingState::default(),
+            last_closed: None,
             bookmark_pages: Vec::new(),
             nav: Navigation::default(),
             history: crate::history::ViewHistory::default(),
@@ -279,11 +281,24 @@ impl Folio {
     }
 
     fn close_document(&mut self, context: &egui::Context) {
+        if !self.reading.path.as_os_str().is_empty() {
+            self.last_closed = Some(self.reading.path.clone());
+        }
         self.save();
         self.clear_document(context);
         self.dialog = None;
         self.worker.close();
         context.send_viewport_cmd(egui::ViewportCommand::Title("Folio".into()));
+    }
+
+    fn reopen_closed(&mut self, context: &egui::Context) {
+        self.nav.clear_prefix();
+        self.mark_action = None;
+        if let Some(path) = self.last_closed.take() {
+            self.open(path, context);
+        } else {
+            self.notify("No recently closed document");
+        }
     }
 
     fn filename(&self) -> String {
@@ -1033,7 +1048,8 @@ impl Folio {
             }
             if popup_open
                 && modifiers.command
-                && matches!(key, Key::O | Key::F | Key::P | Key::R | Key::W | Key::Q)
+                && (matches!(key, Key::O | Key::F | Key::P | Key::R | Key::W | Key::Q)
+                    || (key == Key::T && modifiers.shift))
             {
                 egui::Popup::close_all(context);
             }
@@ -1114,6 +1130,11 @@ impl Folio {
             if modifiers.command && key == Key::W {
                 context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
                 self.close_document(context);
+                continue;
+            }
+            if modifiers.command && modifiers.shift && key == Key::T {
+                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                self.reopen_closed(context);
                 continue;
             }
             if modifiers.command && key == Key::Q {

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
@@ -51,6 +52,15 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0, "Reader did not exit cleanly"
 
+            def reopen_closed(path, page, rotation, mark):
+                keyboard.key("w", ctrl=True)
+                keyboard.key("t", ctrl=True, shift=True)
+                time.sleep(0.8)
+                # A changed page proves the raw path actually loaded again;
+                # the unchanged saved state alone could be stale after close.
+                keyboard.key("j", shift=True)
+                wait_for(lambda: saved(path, page + 1, rotation, mark), "closed raw path reloads and retains its rotation/mark")
+
             try:
                 application = launch(paths[0])
                 wait_for(lambda: saved(paths[0], 0, 0), "initial non-UTF-8 path save")
@@ -84,14 +94,18 @@ def run(binary):
                 wait_for(lambda: saved(paths[1], 5, 3, "b"), "recent picker restores second raw path")
                 keyboard.key("'"); keyboard.key("b")
                 wait_for(lambda: saved(paths[1], 1, 3, "b"), "restored raw-path named mark")
+                reopen_closed(paths[1], 1, 3, "b")
+                keyboard.key("'"); keyboard.key("b")
+                wait_for(lambda: saved(paths[1], 1, 3, "b"), "mark survives the second raw path's shortcut reopen")
                 keyboard.key("p", ctrl=True)
                 keyboard.key("j", ctrl=True); keyboard.key("j", ctrl=True); keyboard.key(0xFF0D)
                 wait_for(lambda: saved(paths[0], 2, 1, "a"), "recent picker restores first raw path")
+                reopen_closed(paths[0], 2, 1, "a")
                 keyboard.key("'"); keyboard.key("a")
                 quit()
                 assert saved(paths[0], 4, 1, "a")
                 print("PASS: distinct non-UTF-8 Unix paths, ordinary paths in the same library, "
-                      "background save, immediate quit, restart, recent reopen, bookmarks and named marks")
+                      "background save, immediate quit, restart, recent and closed-document shortcut reopen, retained rotation, bookmarks and named marks")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

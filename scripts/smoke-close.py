@@ -66,9 +66,26 @@ def run(binary):
                 keyboard.key("y")
                 assert "Make yourself at home." in keyboard.clipboard(), "the saved page and actual PDF must be restored"
 
+            def reopen_shortcut():
+                keyboard.key("t", ctrl=True, shift=True)
+
+            def empty_reopen_preserves_query():
+                keyboard.key("f", ctrl=True)
+                keyboard.key("a", ctrl=True)
+                for character in "keep3":
+                    keyboard.key(character)
+                reopen_shortcut()
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "keep3", "an empty reopen action must preserve the current input and document"
+                keyboard.key("a", ctrl=True)
+                keyboard.key(0xFF08)
+                keyboard.key(0xFF1B)
+
             try:
                 window = wait_for(keyboard.focus, "reader window")
                 wait_for(lambda: book().get("page") == 0, "initial document saved")
+                empty_reopen_preserves_query()
                 keyboard.key("3"); keyboard.key("g", shift=True)
                 keyboard.key("w"); keyboard.key("z"); keyboard.key("b")
                 keyboard.key("m"); keyboard.key("a"); keyboard.key("b")
@@ -87,9 +104,21 @@ def run(binary):
                 keyboard.key("w", ctrl=True)
                 keyboard.key("j", shift=True)
                 assert book() == saved, "closing welcome and reader keys cannot overwrite saved progress"
-                recent("folio-smoke")
+                keyboard.key("?", shift=True)
+                reopen_shortcut()
                 reopened()
                 assert book()["marks"] == saved["marks"]
+                assert book()["bookmarks"] == saved["bookmarks"]
+                assert abs(book()["offset"][1] - saved["offset"][1]) < 0.0001
+                empty_reopen_preserves_query()
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    keyboard.key("w", ctrl=True, delay=0)
+                    keyboard.key("t", ctrl=True, shift=True, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                time.sleep(0.8)
+                reopened()
                 # Accumulate close, picker, query and Enter into the same frame.
                 application.send_signal(signal.SIGSTOP)
                 try:
@@ -106,6 +135,17 @@ def run(binary):
                 time.sleep(0.5)
                 keyboard.key("w", ctrl=True)
                 closed()
+                reopen_shortcut()
+                wait_for(lambda: title().startswith("encrypted.pdf"), "closed password dialog reopens")
+                time.sleep(0.5)
+                for character in "jkgdi":
+                    keyboard.key(character)
+                keyboard.key(0xFF0D)
+                time.sleep(0.8)
+                keyboard.key("y")
+                assert "Encrypted document page 2." in keyboard.clipboard(), "reopened encrypted document must unlock at its saved page"
+                keyboard.key("w", ctrl=True)
+                closed()
                 recent("folio-smoke")
                 reopened()
                 keyboard.key("w", ctrl=True)
@@ -115,16 +155,25 @@ def run(binary):
                 time.sleep(0.5)
                 keyboard.key("w", ctrl=True)
                 closed()
+                missing.write_bytes(document.read_bytes())
+                reopen_shortcut()
+                wait_for(lambda: title().startswith("missing.pdf"), "previously missing document reopens")
+                time.sleep(0.8)
+                keyboard.key("y")
+                assert "native PDF reader" in keyboard.clipboard(), "a closed failed load can be retried after the file is restored"
+                keyboard.key("w", ctrl=True)
+                closed()
                 recent("folio-smoke")
                 reopened()
                 keyboard.click((210, 28))
                 closed()
-                recent("folio-smoke")
+                reopen_shortcut()
                 reopened()
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert book()["page"] == 2 and abs(book()["offset"][1] - saved["offset"][1]) < 0.0001
-                print("PASS: close from search, immediate progress save, same-window welcome, repeated close, recent reopen, same-frame close/reopen, password and missing-file dialogs, toolbar button, marks/bookmarks and graceful quit")
+                assert "jkgdi" not in config_path.read_text()
+                print("PASS: close from search, immediate progress save, same-window welcome, repeated close, shortcut/help/recent reopen, consumed and empty reopen preserves input, same-frame close/reopen, password unlock and missing-file retry, toolbar button, marks/bookmarks and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
