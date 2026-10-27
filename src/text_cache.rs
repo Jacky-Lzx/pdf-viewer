@@ -344,21 +344,28 @@ mod tests {
                 ),
             })
             .collect();
-        let dense = Arc::new(dense);
-        let before = memory_bytes(&dense);
-        let mut cache = TextCache {
-            budget: before,
-            ..Default::default()
-        };
-        assert!(cache.insert(0, Arc::clone(&dense)));
-        dense.prepare_selection();
-        assert!(memory_bytes(&dense) > before);
-        cache.refresh(0, &dense);
-        assert!(cache.get(0).is_none());
-        assert_eq!(cache.bytes, 0);
-        assert_eq!(
-            dense.nearest_span(hayro::kurbo::Point::new(13.0, 20.0)),
-            Some(101)
-        );
+        let mut sparse = PageText::default();
+        sparse.text = "Rust cafe\u{301} 中文 👩‍💻 word ".repeat(200);
+        sparse.spans.push(crate::text::TextSpan {
+            range: 0..sparse.text.len(),
+            rect: hayro::kurbo::Rect::new(0.0, 0.0, 6.0, 10.0),
+        });
+        for (dense, expected) in [(Arc::new(dense), 101), (Arc::new(sparse), 0)] {
+            let before = memory_bytes(&dense);
+            let mut cache = TextCache {
+                budget: before,
+                ..Default::default()
+            };
+            assert!(cache.insert(0, Arc::clone(&dense)));
+            dense.prepare_selection();
+            assert!(memory_bytes(&dense) > before);
+            cache.refresh(0, &dense);
+            assert!(cache.get(0).is_none());
+            assert_eq!(cache.bytes, 0);
+            assert_eq!(
+                dense.nearest_span(hayro::kurbo::Point::new(13.0, 20.0)),
+                Some(expected)
+            );
+        }
     }
 }

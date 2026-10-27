@@ -30,6 +30,7 @@ fn main() {
             .collect();
         let index = WordBoundaries::new(&text);
         index.prepare_lines(&text);
+        assert!(index.lines_prepared());
         for &offset in &offsets {
             assert_eq!(index.word_range(&text, offset), word_range(&text, offset));
             assert!(index.contains(index.word_range(&text, offset).start));

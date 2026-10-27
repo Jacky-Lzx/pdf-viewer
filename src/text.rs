@@ -148,15 +148,26 @@ pub fn advance_match(
 }
 
 impl PageText {
+    fn indexed_words(&self) -> bool {
+        self.spans.len() >= 256 || (!self.spans.is_empty() && self.text.len() >= 4096)
+    }
+
     pub fn selection_prepared(&self) -> bool {
-        self.spans.len() < 256 || self.selection_index.get().is_some()
+        (self.spans.len() < 256 || self.selection_index.get().is_some())
+            && (!self.indexed_words()
+                || self
+                    .word_boundaries
+                    .get()
+                    .is_some_and(WordBoundaries::lines_prepared))
     }
 
     pub fn prepare_selection(&self) {
-        if self.spans.len() >= 256 {
+        if self.indexed_words() {
             self.word_boundaries
                 .get_or_init(|| WordBoundaries::new(&self.text))
                 .prepare_lines(&self.text);
+        }
+        if self.spans.len() >= 256 {
             self.selection_index
                 .get_or_init(|| crate::selection_index::SelectionIndex::new(&self.spans));
         }
@@ -438,6 +449,94 @@ impl<'a> Device<'a> for TextDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_glyph_with_long_unicode_mapping_prepares_text_indexes_without_geometry() {
+        let pdf = hayro::hayro_syntax::Pdf::new(
+            include_bytes!("../assets/selection-long-mapping.pdf").to_vec(),
+        )
+        .unwrap();
+        let page = extract(&pdf.pages()[0], &InterpreterCache::new());
+        assert_eq!(page.spans.len(), 1);
+        assert_eq!(page.text, "Rust cafe\u{301} 中文 👩‍💻 word ".repeat(200));
+        assert!(!page.selection_prepared());
+        let bytes = page.memory_bytes();
+        let offsets: Vec<_> = page.text.char_indices().map(|(offset, _)| offset).collect();
+        let expected: Vec<_> = offsets
+            .iter()
+            .map(|&offset| (page.word_range(offset), page.line_range(offset)))
+            .collect();
+        page.prepare_selection();
+        assert!(page.selection_prepared());
+        assert!(page.word_boundaries.get().unwrap().lines_prepared());
+        assert!(page.selection_index.get().is_none());
+        assert!(page.memory_bytes() > bytes);
+        for (offset, expected) in offsets.into_iter().zip(expected) {
+            assert_eq!((page.word_range(offset), page.line_range(offset)), expected);
+        }
+        let prepared_bytes = page.memory_bytes();
+        page.prepare_selection();
+        assert_eq!(page.memory_bytes(), prepared_bytes);
+    }
+
+    #[test]
+    fn long_sparse_text_prepares_lines_after_whole_word_search_and_respects_thresholds() {
+        for (bytes, spans, prepared) in [(4095, 1, true), (4096, 1, false), (8192, 0, true)] {
+            let page = PageText {
+                text: "x".repeat(bytes),
+                spans: (0..spans)
+                    .map(|_| TextSpan {
+                        range: 0..bytes,
+                        rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            assert_eq!(page.selection_prepared(), prepared);
+            page.prepare_selection();
+            assert!(page.selection_prepared());
+            assert_eq!(page.word_boundaries.get().is_some(), !prepared);
+            assert!(page.selection_index.get().is_none());
+        }
+        let mut page = PageText {
+            text: "Rust cafe\u{301}\r\n中文 👩‍💻\n".repeat(300),
+            ..Default::default()
+        };
+        page.spans.push(TextSpan {
+            range: 0..page.text.len(),
+            rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+        });
+        let query = SearchQuery::new(
+            "Rust".into(),
+            SearchOptions {
+                whole_word: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            !page
+                .search_batch(0, &query, &mut SearchCursor::default(), 1)
+                .hits
+                .is_empty()
+        );
+        assert!(!page.word_boundaries.get().unwrap().lines_prepared());
+        assert!(!page.selection_prepared());
+        let bytes = page.memory_bytes();
+        page.prepare_selection();
+        assert!(page.selection_prepared());
+        assert!(page.selection_index.get().is_none());
+        assert!(page.memory_bytes() > bytes);
+        for (offset, _) in page.text.char_indices() {
+            assert_eq!(
+                page.line_range(offset),
+                boundaries::line_range(&page.text, offset)
+            );
+            assert_eq!(
+                page.word_range(offset),
+                boundaries::word_range(&page.text, offset)
+            );
+        }
+    }
 
     #[test]
     fn batches_resume_dense_pages_without_losing_or_duplicating_hits() {

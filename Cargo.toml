@@ -54,6 +54,10 @@ name = "word_selection"
 harness = false
 
 [[bench]]
+name = "sparse_selection"
+harness = false
+
+[[bench]]
 name = "search_index"
 harness = false
 

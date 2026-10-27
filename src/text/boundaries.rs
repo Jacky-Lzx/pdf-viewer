@@ -102,6 +102,10 @@ impl WordBoundaries {
             .get_or_init(|| text.match_indices('\n').map(|(offset, _)| offset).collect());
     }
 
+    pub fn lines_prepared(&self) -> bool {
+        self.line_breaks.get().is_some()
+    }
+
     pub fn memory_bytes(&self) -> usize {
         self.bits.capacity() * std::mem::size_of::<u64>()
             + self

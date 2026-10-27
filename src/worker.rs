@@ -1403,52 +1403,65 @@ mod tests {
 
     #[test]
     fn all_text_inspection_defers_interactive_indexes_and_reuses_the_cached_page() {
-        let worker = Worker::new(egui::Context::default());
-        worker.open(1, sample(), String::new());
-        assert!(matches!(receive(&worker), Event::Opened { .. }));
-        worker.inspect_all(0);
-        let all = match receive(&worker) {
-            Event::PageText { page: 0, text, .. } => text,
-            _ => panic!("Expected whole-page text"),
-        };
-        assert!(
-            all.spans.len() >= 256,
-            "fixture must exercise indexed selection"
-        );
-        let bytes = all.memory_bytes();
-        let rects = all.rects_for_range(0..all.text.len());
-        let mut selection = crate::selection::TextSelection::default();
-        selection.select_all();
-        selection.set_text(Arc::clone(&all));
-        assert!(selection.needs_preparation());
-        selection.clear_range();
-        assert!(
-            selection.needs_preparation(),
-            "a margin click must not lose the deferred inspection"
-        );
-        worker.inspect(0);
-        let interactive = match receive(&worker) {
-            Event::PageText { page: 0, text, .. } => text,
-            _ => panic!("Expected interactive text"),
-        };
-        assert!(Arc::ptr_eq(&all, &interactive));
-        assert!(
-            !selection.needs_preparation(),
-            "shared text sees the prepared index without another inspection"
-        );
-        assert!(interactive.memory_bytes() > bytes);
-        assert_eq!(
-            interactive.rects_for_range(0..interactive.text.len()),
-            rects
-        );
-        let indexed_bytes = interactive.memory_bytes();
-        worker.inspect_all(0);
-        match receive(&worker) {
-            Event::PageText { page: 0, text, .. } => {
-                assert!(Arc::ptr_eq(&all, &text));
-                assert_eq!(text.memory_bytes(), indexed_bytes);
+        let directory = tempfile::tempdir().unwrap();
+        let mapping = directory.path().join("long-mapping.pdf");
+        std::fs::write(
+            &mapping,
+            include_bytes!("../assets/selection-long-mapping.pdf"),
+        )
+        .unwrap();
+        for (path, sparse) in [(sample(), false), (mapping, true)] {
+            let worker = Worker::new(egui::Context::default());
+            worker.open(1, path, String::new());
+            assert!(matches!(receive(&worker), Event::Opened { .. }));
+            worker.inspect_all(0);
+            let all = match receive(&worker) {
+                Event::PageText { page: 0, text, .. } => text,
+                _ => panic!("Expected whole-page text"),
+            };
+            assert!(
+                if sparse {
+                    all.spans.len() == 1 && all.text.len() >= 4096
+                } else {
+                    all.spans.len() >= 256
+                },
+                "fixture must exercise indexed selection"
+            );
+            let bytes = all.memory_bytes();
+            let rects = all.rects_for_range(0..all.text.len());
+            let mut selection = crate::selection::TextSelection::default();
+            selection.select_all();
+            selection.set_text(Arc::clone(&all));
+            assert!(selection.needs_preparation());
+            selection.clear_range();
+            assert!(
+                selection.needs_preparation(),
+                "a margin click must not lose the deferred inspection"
+            );
+            worker.inspect(0);
+            let interactive = match receive(&worker) {
+                Event::PageText { page: 0, text, .. } => text,
+                _ => panic!("Expected interactive text"),
+            };
+            assert!(Arc::ptr_eq(&all, &interactive));
+            assert!(
+                !selection.needs_preparation(),
+                "shared text sees the prepared index without another inspection"
+            );
+            assert!(interactive.memory_bytes() > bytes);
+            assert_eq!(
+                interactive.rects_for_range(0..interactive.text.len()),
+                rects
+            );
+            let indexed_bytes = interactive.memory_bytes();
+            worker.inspect_all(0);
+            match receive(&worker) {
+                Event::PageText { page: 0, text, .. } => {
+                    assert!(Arc::ptr_eq(&all, &text));
+                    assert_eq!(text.memory_bytes(), indexed_bytes);
+                }
+                _ => panic!("Expected the same indexed cached page"),
             }
-            _ => panic!("Expected the same indexed cached page"),
         }
     }
 

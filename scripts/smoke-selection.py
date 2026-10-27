@@ -135,7 +135,22 @@ def run(binary):
                 wait_for(lambda: saved(lambda book: book["page"] == 0), "page navigation cancels Select All")
                 keyboard.key("y")
                 assert keyboard.clipboard() == page_text[0], "page change must not copy a stale full-page selection"
-                print("PASS: same-frame Select All/Copy before text arrives, repeat/glyph reset, rotated/current-page full text, page-change cancellation, word/line drags, clipboard, preserved zoom and search input/prefill guards")
+                # One drawn glyph can represent thousands of Unicode scalars.
+                # Selection preparation must use text size as well as glyphs.
+                fixture = runpy.run_path(str(SCRIPTS / "make-selection-fixture.py"))
+                document.write_bytes(fixture["make_pdf"]())
+                keyboard.key("r", ctrl=True)
+                def reloaded_long_text():
+                    keyboard.key("y")
+                    return keyboard.clipboard() == fixture["TEXT"]
+                wait_for(reloaded_long_text, "reload a sparse glyph page with a long Unicode text layer")
+                keyboard.key("v")
+                clicks((382, 138), 2)
+                copy(fixture["TEXT"])
+                clicks((382, 138), 3)
+                copy(fixture["TEXT"])
+                keyboard.key(0xFF1B)
+                print("PASS: same-frame Select All/Copy before text arrives, repeat/glyph reset, rotated/current-page full text, page-change cancellation, word/line drags, long Unicode glyph mappings, clipboard, preserved zoom and search input/prefill guards")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
