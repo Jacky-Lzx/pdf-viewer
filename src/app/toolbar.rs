@@ -1,12 +1,157 @@
-use super::Pagewing;
+use super::{Pagewing, appearance, set_theme, shortcuts};
 use crate::navigation::Fit;
-use eframe::egui::{self, scroll_area::ScrollAreaOutput};
+use eframe::egui::{self, RichText, scroll_area::ScrollAreaOutput};
+
+// Match egui's text tooltip layout while deferring shortcut formatting until
+// the tooltip is actually shown. Ordinary toolbar frames only create a closure.
+trait LazyTooltip {
+    fn on_hover_text_lazy(self, text: impl FnOnce() -> String) -> Self;
+}
+
+impl LazyTooltip for egui::Response {
+    fn on_hover_text_lazy(self, text: impl FnOnce() -> String) -> Self {
+        self.on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.add(egui::Label::new(text()));
+        })
+    }
+}
 
 impl Pagewing {
+    pub(super) fn toolbar(&mut self, context: &egui::Context) {
+        self.input_buttons = shortcuts::InputButtons::default();
+        egui::TopBottomPanel::top("toolbar")
+            .frame(appearance::panel(context, 4))
+            .exact_height(56.0)
+            .show(context, |ui| {
+                let compact = ui.available_width() < 1000.0;
+                horizontal_bar(ui, "reader-controls", |ui| {
+                    ui.add_space(12.0);
+                    appearance::logo(ui, 30.0);
+                    if !compact {
+                        ui.label(RichText::new("Pagewing").size(19.0).strong());
+                    }
+                    ui.add_space(16.0);
+                    if ui
+                        .button("Open")
+                        .on_hover_text_lazy(|| self.library.shortcuts.label("open"))
+                        .clicked()
+                    {
+                        self.choose_file();
+                    }
+                    if !self.reading.path.as_os_str().is_empty()
+                        && appearance::tool(ui, appearance::Icon::Close, "Close document", false)
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("close"))
+                            .clicked()
+                    {
+                        self.close_document(context);
+                    }
+                    if self.nav.count > 0 {
+                        if appearance::tool(
+                            ui,
+                            appearance::Icon::Sidebar,
+                            "Sidebar",
+                            self.library.sidebar,
+                        )
+                        .on_hover_text_lazy(|| self.library.shortcuts.label("sidebar"))
+                        .clicked()
+                        {
+                            self.library.sidebar = !self.library.sidebar;
+                            self.dirty = true;
+                        }
+                        self.input_buttons.comments = Some(
+                            appearance::tool(
+                                ui,
+                                appearance::Icon::Comments,
+                                "Comments",
+                                self.comments.open,
+                            )
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("comments"))
+                            .id,
+                        );
+                        if !self.selection.rects.is_empty() && ui.button("Add comment").clicked() {
+                            self.add_comment();
+                        }
+                        ui.separator();
+                        if appearance::tool(ui, appearance::Icon::Previous, "Previous page", false)
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("previous_page"))
+                            .clicked()
+                        {
+                            self.step(-1);
+                        }
+                        if appearance::tool(ui, appearance::Icon::Next, "Next page", false)
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("next_page"))
+                            .clicked()
+                        {
+                            self.step(1);
+                        }
+                        ui.separator();
+                        if appearance::tool(ui, appearance::Icon::Rotate, "Rotate page", false)
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("rotate"))
+                            .clicked()
+                        {
+                            self.rotate_page(false, 1);
+                        }
+                    }
+                    right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
+                        ui.add_space(12.0);
+                        self.input_buttons.help = Some(
+                            appearance::tool(
+                                ui,
+                                appearance::Icon::Help,
+                                "Keyboard shortcuts",
+                                false,
+                            )
+                            .id,
+                        );
+                        if appearance::tool(
+                            ui,
+                            appearance::Icon::Theme,
+                            if self.library.dark {
+                                "Switch to light theme"
+                            } else {
+                                "Switch to dark theme"
+                            },
+                            false,
+                        )
+                        .clicked()
+                        {
+                            self.library.dark = !self.library.dark;
+                            set_theme(context, self.library.dark);
+                            self.dirty = true;
+                        }
+                        if self.nav.count > 0 {
+                            self.input_buttons.find = Some(
+                                appearance::tool(
+                                    ui,
+                                    appearance::Icon::Search,
+                                    "Find in document",
+                                    self.search_open,
+                                )
+                                .on_hover_text_lazy(|| self.library.shortcuts.label("find"))
+                                .id,
+                            );
+                            if appearance::tool(
+                                ui,
+                                appearance::Icon::Bookmark,
+                                "Bookmark",
+                                self.reading.bookmarks.contains(&self.nav.page),
+                            )
+                            .on_hover_text_lazy(|| self.library.shortcuts.label("bookmark"))
+                            .clicked()
+                            {
+                                self.bookmark();
+                            }
+                        }
+                    });
+                });
+            });
+    }
+
     pub(super) fn view_controls(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("+")
-            .on_hover_text(self.library.shortcuts.label("zoom_in"))
+            .on_hover_text_lazy(|| self.library.shortcuts.label("zoom_in"))
             .clicked()
         {
             self.zoom(1.2);
@@ -21,15 +166,17 @@ impl Pagewing {
         };
         self.input_buttons.zoom = Some(
             ui.add_enabled(!self.loading, egui::Button::new(label).frame(false))
-                .on_hover_text(format!(
-                    "Set zoom percentage · {}",
-                    self.library.shortcuts.label("zoom")
-                ))
+                .on_hover_text_lazy(|| {
+                    format!(
+                        "Set zoom percentage · {}",
+                        self.library.shortcuts.label("zoom")
+                    )
+                })
                 .id,
         );
         if ui
             .button("−")
-            .on_hover_text(self.library.shortcuts.label("zoom_out"))
+            .on_hover_text_lazy(|| self.library.shortcuts.label("zoom_out"))
             .clicked()
         {
             self.zoom(1.0 / 1.2);
@@ -174,6 +321,68 @@ pub(super) fn right_group<R>(
 mod tests {
     use super::*;
     use egui::{Context, Event, Modifiers, MouseWheelUnit, PointerButton, RawInput, Rect, Vec2};
+
+    #[test]
+    fn shortcut_tooltips_format_only_when_visible_and_follow_current_bindings() {
+        let context = Context::default();
+        context.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut shortcuts = crate::settings::Shortcuts::default();
+        let formats = std::cell::Cell::new(0);
+        let mut position = egui::Pos2::new(500.0, 400.0);
+        let mut button = Rect::NOTHING;
+        let mut time = 0.0;
+        let mut draw = |shortcuts: &crate::settings::Shortcuts, position| {
+            time += 0.25;
+            let mut button = Rect::NOTHING;
+            let output = context.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(600.0, 500.0),
+                    )),
+                    time: Some(time),
+                    events: vec![Event::PointerMoved(position)],
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| {
+                        let response = ui.button("Comments").on_hover_text_lazy(|| {
+                            formats.set(formats.get() + 1);
+                            shortcuts.label("comments")
+                        });
+                        button = response.rect;
+                    });
+                },
+            );
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (button, text)
+        };
+        for _ in 0..4 {
+            button = draw(&shortcuts, position).0;
+        }
+        assert_eq!(formats.get(), 0, "hidden tooltips must not format labels");
+        position = button.center();
+        for bindings in [
+            vec![crate::settings::Binding::parse_config("Cmd+Alt+M").unwrap()],
+            Vec::new(),
+        ] {
+            shortcuts.overrides.insert("comments".into(), bindings);
+            let mut text = String::new();
+            for _ in 0..12 {
+                text = draw(&shortcuts, position).1;
+            }
+            assert!(formats.get() > 0);
+            assert!(text.contains(&shortcuts.label("comments")), "{text}");
+        }
+    }
 
     fn frame(
         context: &Context,
