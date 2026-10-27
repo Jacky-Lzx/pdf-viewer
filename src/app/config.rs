@@ -31,6 +31,63 @@ fn frame(app: &mut Pagewing, context: &Context, events: Vec<Event>) -> FullOutpu
 }
 
 #[test]
+fn zoom_roundtrip_does_not_save_roundoff_as_half_page_scroll() {
+    let directory = tempfile::tempdir().unwrap();
+    let context = Context::default();
+    let mut app =
+        Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+    app.nav = crate::navigation::Navigation::new(1, 0);
+    app.dimensions = vec![[600_000.0, 800_000.0]];
+    app.viewport = Vec2::new(1132.0, 680.0);
+    app.resolve_view();
+    app.zoom_steps(1, false);
+    app.resolve_view();
+    assert!((app.current_offset()[1] - 0.5).abs() < 0.001);
+    app.zoom_steps(1, true);
+    app.resolve_view();
+    assert_eq!(app.current_offset(), [0.0; 2]);
+}
+
+#[test]
+fn toolbar_find_accepts_same_frame_text_at_the_desktop_smoke_position() {
+    let directory = tempfile::tempdir().unwrap();
+    let context = Context::default();
+    let mut app =
+        Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+    app.nav = crate::navigation::Navigation::new(4, 1);
+    app.dimensions = vec![[600.0, 800.0]; 4];
+    let pos = egui::pos2(1050.0, 28.0);
+    let mut events = vec![Event::PointerMoved(pos)];
+    events.extend([true, false].map(|pressed| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }));
+    events.extend(key(Key::J, Modifiers::NONE));
+    events.push(Event::Text("jkgditoolbar".into()));
+    for events in [Vec::new(), Vec::new(), events] {
+        let _ = context.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1180.0, 820.0))),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                app.keys(context);
+                app.toolbar(context);
+                app.search_bar(context);
+                egui::CentralPanel::default().show(context, |_| {});
+            },
+        );
+    }
+    assert!(app.search_open);
+    assert_eq!(app.query, "jkgditoolbar");
+    assert_eq!(app.nav.page, 1);
+    assert_eq!(app.reading.fit, Fit::Page);
+}
+
+#[test]
 fn configured_reader_keys_keep_counts_and_do_not_escape_text_fields_or_sequences() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(

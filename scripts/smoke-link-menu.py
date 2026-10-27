@@ -40,7 +40,8 @@ def run(binary):
                 # Guide URI annotation center in the rendered page's coordinates.
                 x, y = (164, 417.5) if rotation else (417.5, 636)
                 pw, ph = (800, 600) if rotation else (600, 800)
-                vw, vh = width - 48, height - 133 - (42 if search else 0)
+                # 56px toolbar, 36px status bar and 24px canvas margins.
+                vw, vh = width - 48, height - 140 - (42 if search else 0)
                 scale = min(vw / pw, vh / ph)
                 return (round(24 + (vw - pw * scale) / 2 + x * scale),
                         round(80 + (42 if search else 0) + (vh - ph * scale) / 2 + y * scale))
@@ -98,7 +99,7 @@ def run(binary):
                 menu(point(search=True)); keyboard.key(0xFF1B)
                 keyboard.key("+", shift=True)
                 wait_for(lambda: isinstance(book().get("fit"), dict), "zoom after closing only the menu")
-                assert abs(book()["fit"]["Custom"] - (820 - 133 - 42) / 800 * 1.2) < 0.01, "Escape must leave the underlying search bar open"
+                assert abs(book()["fit"]["Custom"] - (820 - 140 - 42) / 800 * 1.2) < 0.005, "Escape must leave the underlying search bar open"
                 keyboard.key(0xFF1B); keyboard.key("p")
                 menu(point())
                 keyboard.key("f", ctrl=True)

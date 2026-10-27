@@ -85,7 +85,9 @@ pub struct ReadingMark {
 
 pub fn normalized_offset(pan: [f32; 2], overflow: [f32; 2]) -> [f32; 2] {
     std::array::from_fn(|axis| {
-        if overflow[axis] > 0.0 {
+        // Fit/zoom roundtrips can leave a few f32 ULPs of overflow. Do not
+        // turn an imperceptible displacement into a large saved fraction.
+        if overflow[axis] > 0.001 {
             (pan[axis] / overflow[axis]).clamp(0.0, 1.0)
         } else {
             0.0
