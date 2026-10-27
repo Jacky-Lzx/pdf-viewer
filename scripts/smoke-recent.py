@@ -57,9 +57,9 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
 
-            def selected_row_visible():
-                for y in range(150, 480, 2):
-                    colors = [keyboard.pixel((x, y)) for x in (200, 400, 600)]
+            def selected_row_visible(minimum=False):
+                for y in (range(100, 184, 2) if minimum else range(150, 480, 2)):
+                    colors = [keyboard.pixel((x, y)) for x in ((40, 100, 170) if minimum else (200, 400, 600))]
                     if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         return True
                 return False
@@ -106,17 +106,44 @@ def run(binary):
                 keyboard.key(0xFF1B)
                 keyboard.key("k", shift=True)
                 expect(paths[-1], 4, "empty results do not navigate or open a stale document; Escape restores navigation")
+
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                picker()
+                for _ in range(23):
+                    keyboard.key("j", ctrl=True, delay=0.015)
+                wait_for(lambda: selected_row_visible(minimum=True), "last result stays visible at minimum size")
+                keyboard.key(0xFF0D)
+                expect(paths[-2], 4, "last recent result opens at minimum size")
+                picker("alpha")
+                # One result: Tab goes to the row, Open, then Cancel.
+                for _ in range(3):
+                    keyboard.key(0xFF09)
+                keyboard.key(0xFF0D)
+                keyboard.key("k", shift=True)
+                expect(paths[-2], 3, "Enter on Cancel closes the picker without opening its selected result")
+                picker("alpha")
+                keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                expect(paths[0], 0, "Tab and Enter activate Open at minimum size")
+                picker("jkgmissing")
+                keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                keyboard.key("j", shift=True)
+                expect(paths[0], 1, "empty results leave Cancel accessible with Tab and Enter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 # Empty history must also remain usable from the welcome screen.
                 config_path.write_text('{"recent": []}')
                 application = subprocess.Popen([str(binary)], env=environment, stdout=log, stderr=log)
-                wait_for(lambda: keyboard.focus("Pagewing"), "welcome window without recent documents")
-                picker(); keyboard.key(0xFF0D); keyboard.key(0xFF1B)
+                window = wait_for(lambda: keyboard.focus("Pagewing"), "welcome window without recent documents")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                picker(); keyboard.key(0xFF0D); keyboard.key(0xFF09); keyboard.key(0xFF0D)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, 24-row compact scrolling, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

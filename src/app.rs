@@ -3,6 +3,7 @@ mod comments;
 #[cfg(test)]
 mod config;
 mod continuous;
+mod dialog;
 mod help;
 mod properties;
 mod recent;
@@ -1538,11 +1539,17 @@ impl Pagewing {
                 continue;
             }
             if let Some(picker) = &mut self.recent_picker {
-                if key == Key::Enter {
+                let filter_focused = picker.focus
+                    || context
+                        .memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")));
+                // Tab can focus a result, Open or Cancel. Leave their activation
+                // keys for egui instead of treating every Enter as filter confirm.
+                if key == Key::Enter && filter_focused {
                     picker.confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
-                    || (modifiers.ctrl && matches!(key, Key::J | Key::K))
+                } else if filter_focused
+                    && (matches!(key, Key::ArrowUp | Key::ArrowDown)
+                        || (modifiers.ctrl && matches!(key, Key::J | Key::K)))
                 {
                     let delta = if matches!(key, Key::ArrowUp | Key::K) {
                         -1

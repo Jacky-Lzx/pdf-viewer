@@ -1,5 +1,5 @@
-use super::Pagewing;
-use eframe::egui::{self, Vec2};
+use super::{Pagewing, dialog};
+use eframe::egui;
 use std::fmt::Write;
 
 impl Pagewing {
@@ -67,29 +67,45 @@ impl Pagewing {
         }
         let mut open = true;
         let mut close = false;
-        egui::Window::new("Document information")
+        let size = context.content_rect().size();
+        let compact = size.x < 480.0 || size.y < 420.0;
+        dialog::window(context, "Document information", "PDF details", 520.0)
             .open(&mut open)
-            .collapsible(false)
-            .default_width(520.0)
-            .max_width((context.content_rect().width() - 80.0).max(280.0))
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(context, |ui| {
+                let stacked = ui.available_width() < 420.0;
                 egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 180.0).max(160.0))
+                    .id_salt("pagewing-document-info-fields")
+                    .max_height((size.y - if compact { 140.0 } else { 180.0 }).max(40.0))
                     .show(ui, |ui| {
-                        egui::Grid::new("document-info-fields")
-                            .num_columns(2)
-                            .max_col_width(
-                                (context.content_rect().width() - 210.0).clamp(150.0, 420.0),
-                            )
-                            .spacing([16.0, 10.0])
-                            .show(ui, |ui| {
-                                for (label, value) in self.property_rows() {
-                                    ui.weak(label);
-                                    ui.add(egui::Label::new(value).selectable(true).wrap());
-                                    ui.end_row();
-                                }
-                            });
+                        if stacked {
+                            for (label, value) in self.property_rows() {
+                                ui.weak(label);
+                                ui.add(egui::Label::new(value).selectable(true).wrap());
+                                ui.add_space(8.0);
+                            }
+                        } else {
+                            for (label, value) in self.property_rows() {
+                                ui.horizontal_top(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 16.0;
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(84.0, 0.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_min_width(84.0);
+                                            ui.weak(label);
+                                        },
+                                    );
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(ui.available_width(), 0.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.add(egui::Label::new(value).selectable(true).wrap());
+                                        },
+                                    );
+                                });
+                                ui.add_space(2.0);
+                            }
+                        }
                     });
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -100,5 +116,64 @@ impl Pagewing {
                 });
             });
         self.properties_open = open && !close;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::navigation::Navigation;
+
+    #[test]
+    fn long_document_information_and_actions_fit_when_resizing() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.nav = Navigation::new(6, 2);
+        app.dimensions = vec![[600.0, 800.0]; 6];
+        app.reading.path = directory
+            .path()
+            .join("a-long-filename-without-spaces-".repeat(6));
+        app.info.fields = vec![("Title", "中文 😀 very long title ".repeat(100))];
+        for size in dialog::TEST_SIZES {
+            app.show_properties(&context);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = context.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |context| app.properties_window(context),
+                );
+            }
+            dialog::assert_visible_actions(
+                &context,
+                &output,
+                screen,
+                "Document information",
+                &["Copy details", "Close"],
+            );
+            if size.x > 1000.0 && size.y > 500.0 {
+                let text_y = |value: &str| {
+                    output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == value => {
+                                Some(text.pos.y)
+                            }
+                            _ => None,
+                        })
+                        .unwrap()
+                };
+                assert!(
+                    text_y("Title") <= text_y(&app.info.fields[0].1) + 1.0,
+                    "the label must align with the start of a long field"
+                );
+            }
+        }
     }
 }
