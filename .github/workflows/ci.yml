@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Stop spending runner time on commits superseded by a newer push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     strategy:
@@ -29,44 +34,6 @@ jobs:
       - run: cargo build --locked --release
       - name: Headless document information
         run: python3 scripts/smoke-info.py target/release/pagewing
-      - name: Native desktop smoke test
-        if: runner.os == 'Linux'
-        run: |
-          xvfb-run -a python3 scripts/smoke-install-linux.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-desktop.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-cli.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-outline.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-long-title.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-page-size.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-continuous.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-fit-height.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-destinations.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-link-hints.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-link-menu.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-link-copy.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-selection.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-search-load.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-search-options.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-search-dense.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-persistence.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-paths.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-recent.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-close.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-properties.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-file-watch.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-help.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-input-burst.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-password.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-vim-view.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-percentage.py target/release/pagewing
-          xvfb-run -a python3 scripts/smoke-relative.py target/release/pagewing
       - name: Exercise renderer and text extraction
         shell: bash
         run: |
@@ -83,3 +50,53 @@ jobs:
             target/release/pagewing
             target/Pagewing.app
             target/guide.png
+
+  desktop-smoke:
+    name: Desktop smoke (${{ matrix.shard }})
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Balanced using measured test durations; each group takes about 5 minutes.
+        # Each job owns its X server, so keyboard, mouse and clipboard stay isolated.
+        include:
+          - shard: 1
+            tests: >-
+              vim-view fit-height paths close properties cli load-cancel
+          - shard: 2
+            tests: >-
+              search-options percentage bookmarks link-copy link-hints
+              search-dense outline-keyboard search-load help
+          - shard: 3
+            tests: >-
+              input-burst relative outline mouse-history link-menu continuous
+              recent password persistence install-linux
+          - shard: 4
+            tests: >-
+              desktop destinations thumbnails selection selection-scroll
+              page-size long-title file-watch mouse-input
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux desktop runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libgl1 libx11-6 libxi6 libxrandr2 xvfb libxtst6 libglib2.0-bin desktop-file-utils
+      - uses: actions/download-artifact@v4
+        with:
+          name: pagewing-Linux-X64
+          path: target
+      - name: Native desktop smoke tests
+        env:
+          SMOKE_TESTS: ${{ matrix.tests }}
+        run: |
+          chmod +x target/release/pagewing
+          failed=0
+          for test in $SMOKE_TESTS; do
+            echo "::group::smoke-$test"
+            if ! xvfb-run -a -s '-screen 0 1280x1024x24' python3 "scripts/smoke-$test.py" target/release/pagewing; then
+              echo "::error::smoke-$test failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
