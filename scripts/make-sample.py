@@ -23,7 +23,7 @@ PAGES = [
         "42G               Jump to page 42.",
         "Ctrl+d / Ctrl+u   Move half a screen.",
         "Space             Move down a screen.",
-        "", "Drag the page to pan. Double-click to fit the page.",
+        "", "Drag the page to pan. Press p to fit the page.",
     ]),
     ("Make yourself at home.", "READING", [
         "p                 Fit the whole page.",

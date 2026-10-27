@@ -99,7 +99,10 @@ def run(binary):
                 keyboard.key("r", shift=True); keyboard.key("w")
                 wait_for(lambda: saved(lambda book: book["fit"] == "Width"), "normal mode fit width")
                 clicks((170, 540), 2)
-                wait_for(lambda: saved(lambda book: book["fit"] == "Page"), "normal double-click still fits the page")
+                time.sleep(0.4)
+                assert saved(lambda book: book["fit"] == "Width"), "normal double-click preserves zoom"
+                keyboard.key("p")
+                wait_for(lambda: saved(lambda book: book["fit"] == "Page"), "fit page shortcut")
                 # Clipboard still holds the sentence, so an empty query cannot
                 # accidentally pass the search-field copy check with stale text.
                 keyboard.key("v")

@@ -329,9 +329,7 @@ impl Pagewing {
                     }
                     close = ui.button("Close").clicked();
                 });
-                ui.weak(
-                    "Counts work with movement: 5j, 3J, 12gg. Drag to pan. Double-click to fit.",
-                );
+                ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan.");
             });
         if copied {
             self.notify("Copied keyboard shortcuts");

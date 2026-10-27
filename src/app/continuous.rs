@@ -115,14 +115,6 @@ impl Pagewing {
             } else {
                 self.scroll(-scroll, false);
             }
-            if response.double_clicked()
-                && !self.selection.active
-                && !ui.input(|i| i.modifiers.command)
-            {
-                self.reading.fit = Fit::Page;
-                self.pan = Vec2::ZERO;
-                self.dirty = true;
-            }
         }
         self.resolve_view();
         self.continuous_selection(ui, &response, rect);
