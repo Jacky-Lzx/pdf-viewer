@@ -123,7 +123,7 @@ def run(binary):
                 source = document.read_bytes()
                 for original, replacement in [
                     (b"/Title (A little room to read.)", b"/Title (" + b"\xfe\xff" + "Straße".encode("utf-16-be") + b")"),
-                    (b"/S /D /P (A-)", b"/S/D/P(" + b"\xfe\xff" + "Z".encode("utf-16-be") + b")"),
+                    (b"/S /D /P (A-)", b"/S/D/P(" + b"\xfe\xff" + "ß".encode("utf-16-be") + b")"),
                 ]:
                     assert original in source and len(replacement) <= len(original)
                     source = source.replace(original, replacement.ljust(len(original)), 1)
@@ -133,10 +133,10 @@ def run(binary):
                 burst(chapter_keys("strasse") + [(0xFF0D, {})])
                 expect(0, "UTF-16 title decodes before Unicode case-folded filtering")
                 keyboard.key(":", shift=True)
-                for letter in "Z2":
+                for letter in "SS2":
                     keyboard.key(letter.lower(), shift=letter.isupper())
                 keyboard.key(0xFF0D)
-                expect(5, "UTF-16 page-label prefix decodes before label navigation")
+                expect(5, "UTF-16 page-label prefix accepts Unicode case expansion")
                 print("PASS: nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)

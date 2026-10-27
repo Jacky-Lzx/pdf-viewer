@@ -161,44 +161,53 @@ impl PageLabels {
         if label.is_empty() {
             return None;
         }
-        // At most one candidate per range; lookup does not walk every page in a long PDF.
+        // Candidate lookup walks label ranges, not every page in a long PDF.
         let mut folded = None;
+        let mut folded_label = None;
+        let ascii = label.is_ascii();
         for (index, range) in self.ranges.iter().enumerate() {
-            let Some(prefix) = label.get(..range.prefix.len()) else {
-                continue;
-            };
-            if !prefix.eq_ignore_ascii_case(&range.prefix) {
-                continue;
+            if label
+                .get(..range.prefix.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&range.prefix))
+                && let Some((page, candidate)) = self.candidate(index, &label[range.prefix.len()..])
+            {
+                if candidate == label {
+                    return Some(page);
+                }
+                if folded.is_none() && candidate.eq_ignore_ascii_case(label) {
+                    folded = Some(page);
+                }
             }
-            let suffix = &label[range.prefix.len()..];
-            let Some(value) = parse_number(range.style, suffix, range.first) else {
-                continue;
-            };
-            let Some(offset) = value
-                .checked_sub(range.first)
-                .and_then(|value| usize::try_from(value).ok())
-            else {
-                continue;
-            };
-            let Some(page) = range.page.checked_add(offset) else {
-                continue;
-            };
-            let end = self
-                .ranges
-                .get(index + 1)
-                .map_or(self.count, |next| next.page);
-            if page >= end {
-                continue;
-            }
-            let candidate = self.label(page)?;
-            if candidate == label {
-                return Some(page);
-            }
-            if folded.is_none() && candidate.eq_ignore_ascii_case(label) {
-                folded = Some(page);
+            // Only non-ASCII lookup needs Unicode folding. Keep checking later
+            // exact labels even after finding the earliest folded candidate.
+            if folded.is_none() && (!ascii || !range.prefix.is_ascii()) {
+                let normalized =
+                    folded_label.get_or_insert_with(|| caseless::default_case_fold_str(label));
+                let prefix = caseless::default_case_fold_str(&range.prefix);
+                if let Some(suffix) = normalized.strip_prefix(&prefix)
+                    && let Some((page, candidate)) = self.candidate(index, suffix)
+                    && caseless::default_case_fold_str(&candidate) == *normalized
+                {
+                    folded = Some(page);
+                }
             }
         }
         folded
+    }
+
+    fn candidate(&self, index: usize, suffix: &str) -> Option<(usize, String)> {
+        let range = &self.ranges[index];
+        let value = parse_number(range.style, suffix, range.first)?;
+        let offset = usize::try_from(value.checked_sub(range.first)?).ok()?;
+        let page = range.page.checked_add(offset)?;
+        let end = self
+            .ranges
+            .get(index + 1)
+            .map_or(self.count, |next| next.page);
+        if page >= end {
+            return None;
+        }
+        Some((page, self.label(page)?))
     }
 }
 
@@ -375,6 +384,53 @@ mod tests {
         assert_eq!(labels.resolve_input("iiii", 8), None);
         assert_eq!(labels.resolve_input("99", 8), None);
         assert_eq!(PageLabels::default().resolve_input("2", 8), Some(1));
+    }
+
+    #[test]
+    fn unicode_label_lookup_handles_expansion_and_prefers_later_exact_labels() {
+        let labels = PageLabels {
+            count: 12,
+            ranges: [
+                (0, 1, "Straße-", Style::Decimal),
+                (2, 1, "STRASSE-", Style::Decimal),
+                (4, 1, "ΟΣ-", Style::LowerRoman),
+                (6, 3, "ος-", Style::LowerRoman),
+                (8, 27, "附录-", Style::Letters),
+                (10, 1, "é-", Style::None),
+            ]
+            .into_iter()
+            .map(|(page, first, prefix, style)| LabelRange {
+                page,
+                first,
+                prefix: prefix.into(),
+                style,
+            })
+            .collect(),
+        };
+        for (input, page) in [
+            ("strasse-1", 0),
+            ("Straße-2", 1),
+            ("STRASSE-1", 2),
+            ("Ος-I", 4),
+            ("οσ-iii", 6),
+            ("附录-bb", 9),
+            ("É-", 10),
+        ] {
+            assert_eq!(labels.resolve_input(input, 12), Some(page), "{input}");
+        }
+        for input in ["strasse-01", "strasse-3", "οσ-iiii", "É-1", "e\u{301}-"] {
+            assert_eq!(labels.resolve_input(input, 12), None, "{input}");
+        }
+        let letters = PageLabels {
+            count: 1,
+            ranges: vec![LabelRange {
+                page: 0,
+                first: 19,
+                prefix: String::new(),
+                style: Style::Letters,
+            }],
+        };
+        assert_eq!(letters.resolve_input("ſ", 1), Some(0));
     }
 
     #[test]
