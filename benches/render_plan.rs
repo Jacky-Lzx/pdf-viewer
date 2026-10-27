@@ -50,16 +50,55 @@ fn main() {
         "{passes} passes, median µs/plan, 10000 operations/sample; no PDF parsing, rasterization, UI or GPU"
     );
     let dimensions = vec![[600.0, 800.0]; 100_000];
-    for (name, fit, viewport, density, count) in [
-        ("single fit", Fit::Page, [1000.0, 700.0], 2.0, 1),
-        ("single zoom", Fit::Custom(8.0), [1000.0, 700.0], 2.0, 1),
-        ("HiDPI zoom", Fit::Custom(8.0), [7680.0, 4320.0], 3.0, 1),
+    for (name, fit, viewport, density, count, budget) in [
+        ("single fit", Fit::Page, [1000.0, 700.0], 2.0, 1, 96 << 20),
+        (
+            "single zoom",
+            Fit::Custom(8.0),
+            [1000.0, 700.0],
+            2.0,
+            1,
+            96 << 20,
+        ),
+        (
+            "HiDPI zoom",
+            Fit::Custom(8.0),
+            [7680.0, 4320.0],
+            3.0,
+            1,
+            96 << 20,
+        ),
+        (
+            "HiDPI tight budget",
+            Fit::Custom(8.0),
+            [7680.0, 4320.0],
+            3.0,
+            1,
+            8 << 20,
+        ),
+        (
+            "two-page HiDPI",
+            Fit::Custom(8.0),
+            [7680.0, 9000.0],
+            4.0,
+            2,
+            16 << 20,
+        ),
+        (
+            "dense large viewport",
+            Fit::Custom(8.0),
+            [30000.0, 30000.0],
+            8.0,
+            1,
+            96 << 20,
+        ),
         (
             "continuous overview",
             Fit::Custom(0.05),
             [1000.0, 700.0],
             2.0,
             16,
+            96 << 20,
         ),
     ] {
         let view = RenderView {
@@ -80,7 +119,6 @@ fn main() {
             })
             .collect();
         let clip = Rect::from_min_size(pos2(0.0, 0.0), Vec2::from(viewport));
-        let budget = 96 * 1024 * 1024;
         let build = |pages: &[(usize, Rect)]| {
             let detail = black_box(view).detail_plan(
                 black_box(pages),
@@ -102,6 +140,21 @@ fn main() {
             PlanMode::Continuous
         };
         let expected = build(&pages);
+        let checksum: u64 = expected.iter().fold(0, |hash, key| {
+            let tile = key.tile;
+            [
+                key.page as u64,
+                key.width as u64,
+                tile.map_or(0, |t| t.scale_bits as u64),
+                tile.map_or(0, |t| t.x as u64),
+                tile.map_or(0, |t| t.y as u64),
+                tile.map_or(0, |t| t.bytes() as u64),
+            ]
+            .into_iter()
+            .fold(hash, |hash, value| {
+                hash.wrapping_mul(31).wrapping_add(value)
+            })
+        });
         let mut planner = RenderPlanner::default();
         let result = planner.plan(mode, view, &pages, &dimensions, clip, budget);
         assert_eq!(*result.plan, expected);
@@ -152,7 +205,7 @@ fn main() {
             },
         );
         println!(
-            "{name}: {} keys; stable rebuild {uncached:.4}, hit {hit:.4}; moving rebuild {moving_raw:.4}, miss {miss:.4}",
+            "{name}: {} keys, checksum {checksum:016x}; stable rebuild {uncached:.4}, hit {hit:.4}; moving rebuild {moving_raw:.4}, miss {miss:.4}",
             expected.len()
         );
     }

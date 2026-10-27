@@ -7,6 +7,8 @@ use std::sync::Arc;
 
 pub use crate::document::Tile;
 
+const MAX_DETAIL_KEYS: usize = 512;
+
 /// Visible pages followed by optional neighbors, in render priority order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderPlan {
@@ -134,6 +136,7 @@ impl RenderView {
         budget: usize,
     ) -> Option<RenderPlan> {
         if visible.is_empty()
+            || visible.len() > MAX_DETAIL_KEYS
             || budget < 4096
             || !visible.iter().any(|&(page, _)| {
                 self.key_and_size(page, dimensions[page])
@@ -161,8 +164,11 @@ impl RenderView {
             preview.pixels_per_point *= 0.75;
         }
         let mut density = self.pixels_per_point;
-        for _ in 0..128 {
-            let mut plan = RenderPlan::new();
+        let mut plan = RenderPlan::new();
+        'density: for _ in 0..128 {
+            // Failed densities share this bounded buffer instead of allocating
+            // a full tile list before discovering that it exceeds the budget.
+            plan.keys.clear();
             let mut bytes = 0;
             // Finish previews first so a large old fallback can be replaced
             // before the visible detail tiles reserve their share of the cache.
@@ -195,6 +201,10 @@ impl RenderView {
                             size: [(right - left) as u16, (bottom - top) as u16],
                         };
                         bytes += tile.bytes();
+                        if bytes > budget || plan.len() >= MAX_DETAIL_KEYS {
+                            density *= 0.75;
+                            continue 'density;
+                        }
                         plan.push(RenderKey {
                             tile: Some(tile),
                             ..key
@@ -202,7 +212,7 @@ impl RenderView {
                     }
                 }
             }
-            if bytes <= budget && plan.len() <= 512 {
+            if bytes <= budget {
                 return Some(plan);
             }
             // Very large/HiDPI windows still have a bounded working set.
@@ -578,6 +588,60 @@ mod tests {
 
     fn egui_pos(x: f32, y: f32) -> eframe::egui::Pos2 {
         eframe::egui::pos2(x, y)
+    }
+
+    #[test]
+    fn extreme_detail_requests_stay_bounded_and_cover_the_view_at_a_lower_density() {
+        let dimensions = [[1_000_000.0, 1_000_000.0]];
+        let view = RenderView {
+            pixels_per_point: 64.0,
+            viewport: [1_000_000.0; 2],
+            ..view(Fit::Custom(8.0))
+        };
+        let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::splat(1_000_000.0));
+        let page = Rect::from_min_size(
+            egui_pos(-2_000_000.0, -3_000_000.0),
+            Vec2::splat(8_000_000.0),
+        );
+        // Exercise the byte limit and the independent entry limit. Exhaustively
+        // building the first density would require billions of tile entries.
+        for budget in [96 << 20, usize::MAX] {
+            let plan = view
+                .detail_plan(&[(0, page)], &dimensions, clip, budget)
+                .unwrap();
+            assert!(plan.len() <= MAX_DETAIL_KEYS);
+            assert!(plan.keys.capacity() <= MAX_DETAIL_KEYS);
+            assert!(plan[0].tile.is_none(), "The preview still has priority");
+            let bytes: usize = plan
+                .iter()
+                .map(|key| {
+                    key.tile.map_or_else(
+                        || RasterSize::new(dimensions[0], key.width).unwrap().bytes(),
+                        Tile::bytes,
+                    )
+                })
+                .sum();
+            assert!(bytes <= budget);
+            let tiles: Vec<_> = plan.iter().filter_map(|key| key.tile).collect();
+            assert!(!tiles.is_empty());
+            let density = tiles[0].scale() / view.scale(dimensions[0]);
+            assert!(density < view.pixels_per_point);
+            assert!(tiles.iter().all(|tile| tile.scale() == tiles[0].scale()));
+            for y in [0.0, 500_000.0, 999_999.0] {
+                for x in [0.0, 500_000.0, 999_999.0] {
+                    let point = (egui_pos(x, y) - page.min) * density;
+                    assert!(tiles.iter().any(|tile| point.x >= tile.x as f32
+                        && point.y >= tile.y as f32
+                        && point.x < tile.x as f32 + f32::from(tile.size[0])
+                        && point.y < tile.y as f32 + f32::from(tile.size[1])));
+                }
+            }
+        }
+        let visible = vec![(0, page); MAX_DETAIL_KEYS + 1];
+        assert!(
+            view.detail_plan(&visible, &dimensions, clip, 96 << 20)
+                .is_none()
+        );
     }
 
     #[test]

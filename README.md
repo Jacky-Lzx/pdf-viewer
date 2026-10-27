@@ -350,7 +350,7 @@ cargo bench --locked --bench outline_filter -- 9
 cargo bench --locked --bench link_reading -- 9
 # 批注导航与页面绘制索引，比较逐帧重建、全表扫描和缓存命中
 cargo bench --locked --bench comments -- 7
-# 阅读视图渲染规划，比较重复计算、当前视图缓存命中与滚动失效
+# 阅读视图渲染规划，比较重复计算、缓存命中与滚动失效，包含高分屏和紧张预算
 cargo bench --locked --bench render_plan -- 9
 # 多页和分块的纹理保护准入，另测重复保护列表更新
 cargo bench --locked --bench texture_protection -- 7
