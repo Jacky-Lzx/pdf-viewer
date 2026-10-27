@@ -65,6 +65,15 @@ struct CachedView {
     result: PlannedView,
 }
 
+/// Retain a geometry allocation only while its length matches the current view.
+fn update_buffer<T: Copy>(buffer: &mut Vec<T>, source: &[T]) {
+    if buffer.len() == source.len() {
+        buffer.copy_from_slice(source);
+    } else {
+        *buffer = source.to_vec();
+    }
+}
+
 /// Keep only the current view's plan. Request retries and texture residency are
 /// deliberately independent: a cached plan may still need to be sent again.
 #[derive(Default)]
@@ -111,15 +120,25 @@ impl RenderPlanner {
             plan: Arc::new(plan),
             detailed,
         };
-        self.cached = Some(CachedView {
-            mode,
-            view,
-            visible: visible.to_vec(),
-            dimensions: relevant.to_vec(),
-            clip,
-            budget,
-            result: result.clone(),
-        });
+        if let Some(cached) = &mut self.cached {
+            cached.mode = mode;
+            cached.view = view;
+            update_buffer(&mut cached.visible, visible);
+            update_buffer(&mut cached.dimensions, relevant);
+            cached.clip = clip;
+            cached.budget = budget;
+            cached.result = result.clone();
+        } else {
+            self.cached = Some(CachedView {
+                mode,
+                view,
+                visible: visible.to_vec(),
+                dimensions: relevant.to_vec(),
+                clip,
+                budget,
+                result: result.clone(),
+            });
+        }
         result
     }
 }
@@ -494,6 +513,71 @@ mod tests {
             clip,
             budget,
         );
+    }
+
+    #[test]
+    fn changing_visible_ranges_preserves_prior_plans_and_tracks_neighbors() {
+        let dimensions = [[600.0, 800.0]; 24];
+        let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(1000.0, 700.0));
+        let view = view(Fit::Custom(0.05));
+        let budget = 96 << 20;
+        let mut planner = RenderPlanner::default();
+        let mut snapshots: Vec<(Arc<RenderPlan>, RenderPlan)> = Vec::new();
+        for (iteration, (start, count)) in [
+            (1, 1),
+            (1, 16),
+            (2, 2),
+            (0, 2),
+            (0, 8),
+            (22, 2),
+            (23, 1),
+            (2, 1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let pages: Vec<_> = (start..start + count)
+                .map(|page| {
+                    (
+                        page,
+                        Rect::from_min_size(
+                            egui_pos(iteration as f32, (page - start) as f32 * 64.0),
+                            Vec2::new(30.0, 40.0),
+                        ),
+                    )
+                })
+                .collect();
+            let result = planner.plan(
+                PlanMode::Continuous,
+                view,
+                &pages,
+                &dimensions,
+                clip,
+                budget,
+            );
+            assert_matches_uncached(
+                &result,
+                PlanMode::Continuous,
+                view,
+                &pages,
+                &dimensions,
+                clip,
+                budget,
+            );
+            let again = planner.plan(
+                PlanMode::Continuous,
+                view,
+                &pages,
+                &dimensions,
+                clip,
+                budget,
+            );
+            assert!(Arc::ptr_eq(&result.plan, &again.plan));
+            for (prior, expected) in &snapshots {
+                assert_eq!(prior.as_ref(), expected);
+            }
+            snapshots.push((Arc::clone(&result.plan), result.plan.as_ref().clone()));
+        }
     }
 
     #[test]
