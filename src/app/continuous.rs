@@ -119,10 +119,21 @@ impl Folio {
         let visible = self
             .continuous_layout
             .visible(self.nav.page, self.pan.y, 24.0);
-        let plan = self
-            .continuous_view(ui.ctx().pixels_per_point())
-            .continuous_plan(visible.clone(), &self.dimensions, self.cache.budget());
-        self.cache.protect_many(&plan[..visible.len()]);
+        let pages: Vec<_> = visible
+            .clone()
+            .map(|page| (page, self.continuous_rect(page, rect)))
+            .collect();
+        let view = self.continuous_view(ui.ctx().pixels_per_point());
+        let detail = view.detail_plan(&pages, &self.dimensions, ui.max_rect(), self.cache.budget());
+        let detailed = detail.is_some();
+        let plan = detail.unwrap_or_else(|| {
+            view.continuous_plan(visible.clone(), &self.dimensions, self.cache.budget())
+        });
+        self.cache.protect_many(if detailed {
+            &plan
+        } else {
+            &plan[..visible.len()]
+        });
         if !self.loading && self.requested.as_ref() != Some(&plan) {
             let keys = plan
                 .iter()
@@ -147,7 +158,7 @@ impl Folio {
         let active_scale = self.scale;
         let active_page = self.nav.page;
         let painter = ui.painter_at(ui.max_rect());
-        for (page, key) in visible.zip(plan.iter()) {
+        for (page, key) in visible.zip(plan.iter().filter(|key| key.tile.is_none())) {
             let page_rect = self.continuous_rect(page, rect);
             let dimensions = self.dimensions[page];
             self.scale = self.continuous_layout.pages[page].scale;
@@ -172,6 +183,7 @@ impl Folio {
                     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                     Color32::WHITE,
                 );
+                self.paint_tiles(&painter, &plan, page, page_rect, self.scale);
                 self.highlights(&painter, page, page_rect, dimensions);
                 if self.selection.active && self.selection_page == page {
                     let clip = painter.clip_rect().intersect(page_rect);

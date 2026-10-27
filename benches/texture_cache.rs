@@ -22,6 +22,7 @@ fn key(page: usize) -> RenderKey {
         width: 128,
         rotation: 0,
         night: false,
+        tile: None,
     }
 }
 

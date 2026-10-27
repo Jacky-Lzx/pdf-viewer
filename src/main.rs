@@ -122,6 +122,7 @@ fn headless(command: cli::Command) -> Result<(), String> {
                     width,
                     rotation: 0,
                     night: false,
+                    tile: None,
                 },
             )?;
             let elapsed = start.elapsed();
@@ -147,6 +148,7 @@ fn headless(command: cli::Command) -> Result<(), String> {
                             width: 1200,
                             rotation: 0,
                             night: false,
+                            tile: None,
                         },
                     )?);
                     times.push(start.elapsed().as_secs_f64() * 1000.0);

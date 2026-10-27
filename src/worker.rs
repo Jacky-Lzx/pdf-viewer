@@ -514,7 +514,11 @@ fn session(
                 let thumbnail = matches!(job, Job::Thumbnail(..));
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    document::rasterize_pixels(pdf, &render_cache, key.page, key.width)
+                    if let Some(tile) = key.tile {
+                        document::rasterize_tile(pdf, &render_cache, key, tile)
+                    } else {
+                        document::rasterize_pixels(pdf, &render_cache, key.page, key.width)
+                    }
                 }));
                 let relevant = {
                     let pending = shared.0.lock().unwrap();
@@ -530,8 +534,13 @@ fn session(
                 // Discard obsolete work before transforming the raster target.
                 // The receiver only uploads finished texture images.
                 let result = result.map(|result| {
-                    result
-                        .map(|image| crate::texture_pixels::prepare(image, key.rotation, key.night))
+                    result.map(|image| {
+                        crate::texture_pixels::prepare(
+                            image,
+                            if key.tile.is_some() { 0 } else { key.rotation },
+                            key.night,
+                        )
+                    })
                 });
                 // Requests can change during pixel preparation too. Consume any
                 // duplicate still-needed job only when its final image is ready.
@@ -894,6 +903,7 @@ mod tests {
             width: 300,
             rotation: 0,
             night: false,
+            tile: None,
         }
     }
 
@@ -1030,6 +1040,7 @@ mod tests {
                     width: 96,
                     rotation,
                     night,
+                    tile: None,
                 };
                 let expected = document::rasterize(&pdf, &cache, key).unwrap();
                 worker.update(|pending| {
@@ -1354,6 +1365,7 @@ mod tests {
             width: 300,
             rotation: 1,
             night: false,
+            tile: None,
         }]);
         let (mut rendered, mut copied, mut complete, mut count) = (false, false, false, 0);
         while !(rendered && copied && complete) {

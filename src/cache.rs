@@ -113,7 +113,9 @@ impl TextureCache {
         self.entries
             .keys()
             .filter(|candidate| {
-                candidate.page == key.page
+                candidate.tile.is_none()
+                    && key.tile.is_none()
+                    && candidate.page == key.page
                     && candidate.rotation == key.rotation
                     && candidate.night == key.night
             })
@@ -212,6 +214,7 @@ mod tests {
             width: 32,
             rotation: 0,
             night: false,
+            tile: None,
         }
     }
     fn texture(ctx: &Context) -> TextureHandle {
@@ -220,6 +223,33 @@ mod tests {
             ColorImage::filled([4, 4], Color32::WHITE),
             TextureOptions::LINEAR,
         )
+    }
+
+    #[test]
+    fn viewport_tiles_never_substitute_for_full_pages_or_other_tiles() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::default();
+        let tile = RenderKey {
+            tile: Some(crate::document::Tile {
+                scale_bits: 16.0_f32.to_bits(),
+                x: 0,
+                y: 0,
+                size: [16, 16],
+            }),
+            ..key(0)
+        };
+        assert!(cache.insert(tile, texture(&ctx)));
+        assert!(cache.fallback(key(0)).is_none());
+        let adjacent = RenderKey {
+            tile: Some(crate::document::Tile {
+                x: 16,
+                ..tile.tile.unwrap()
+            }),
+            ..tile
+        };
+        assert!(cache.fallback(adjacent).is_none());
+        assert!(cache.insert(key(0), texture(&ctx)));
+        assert!(cache.fallback(adjacent).is_none());
     }
 
     #[test]

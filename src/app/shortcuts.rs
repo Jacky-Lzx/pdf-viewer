@@ -1,5 +1,14 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
+/// Keep document shortcuts out of egui's whole-UI zoom. Wheel zoom uses Alt
+/// (Option on macOS); native touchpad pinch events remain independent.
+pub(super) fn configure_input(context: &eframe::egui::Context) {
+    context.options_mut(|options| {
+        options.zoom_with_keyboard = false;
+        options.input_options.zoom_modifier = Modifiers::ALT;
+    });
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InputButton {
     Help,
@@ -317,6 +326,46 @@ pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn alt_wheel_zooms_ctrl_wheel_scrolls_and_native_pinch_still_zooms() {
+        use eframe::egui::{Context, MouseWheelUnit, RawInput, Vec2};
+        for (modifiers, pinch, zooms) in [
+            (Modifiers::ALT, false, true),
+            (Modifiers::CTRL, false, false),
+            (Modifiers::COMMAND, false, false),
+            (Modifiers::NONE, false, false),
+            (Modifiers::NONE, true, true),
+        ] {
+            let context = Context::default();
+            configure_input(&context);
+            let event = if pinch {
+                Event::Zoom(1.2)
+            } else {
+                Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: Vec2::new(0.0, 5.0),
+                    modifiers,
+                }
+            };
+            let _ = context.run(
+                RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ctx| {
+                    ctx.input(|input| {
+                        assert_eq!(
+                            input.zoom_delta() > 1.0,
+                            zooms,
+                            "{modifiers:?}, pinch={pinch}"
+                        );
+                        assert_eq!(input.smooth_scroll_delta != Vec2::ZERO, !zooms);
+                    });
+                },
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

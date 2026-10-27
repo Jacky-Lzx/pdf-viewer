@@ -5,6 +5,7 @@ mod recent;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
+mod tiles;
 mod toolbar;
 
 use crate::{
@@ -115,10 +116,7 @@ impl Folio {
         let config = state::config_path();
         let library = Library::load(&config);
         set_theme(&cc.egui_ctx, library.dark);
-        // Reader zoom shortcuts must not fall through to egui's whole-UI zoom
-        // when text inputs or dialogs intentionally ignore document commands.
-        cc.egui_ctx
-            .options_mut(|options| options.zoom_with_keyboard = false);
+        shortcuts::configure_input(&cc.egui_ctx);
         crate::fonts::install(cc.egui_ctx.clone());
         let mut app = Self {
             worker: Worker::new(cc.egui_ctx.clone()),
@@ -848,7 +846,7 @@ impl Folio {
                         .requested
                         .as_ref()
                         .is_some_and(|keys| keys.contains(&key));
-                    if (!wanted && key.page != self.nav.page)
+                    if (!wanted && (key.tile.is_some() || key.page != self.nav.page))
                         || key.rotation != self.reading.rotation
                         || key.night != self.library.night
                     {
@@ -1992,9 +1990,21 @@ impl Folio {
                     self.reading.offset = offset;
                     self.dirty = true;
                 }
-                let key = view.key(self.nav.page, dimensions);
-                self.cache.protect(key);
-                let plan = view.plan(self.nav.page, &self.dimensions, self.cache.budget());
+                let detailed = view.detail_plan(
+                    &[(self.nav.page, page_rect)],
+                    &self.dimensions,
+                    ui.max_rect(),
+                    self.cache.budget(),
+                );
+                let plan = detailed.unwrap_or_else(|| {
+                    view.plan(self.nav.page, &self.dimensions, self.cache.budget())
+                });
+                let key = plan[0];
+                if plan.iter().any(|key| key.tile.is_some()) {
+                    self.cache.protect_many(&plan);
+                } else {
+                    self.cache.protect(key);
+                }
                 if !self.loading && self.requested.as_ref() != Some(&plan) {
                     if !self.links.contains_key(&self.nav.page) {
                         self.worker.links(self.nav.page);
@@ -2004,7 +2014,7 @@ impl Folio {
                         .copied()
                         .filter(|key| !self.cache.contains(key))
                         .collect();
-                    self.requested = Some(plan);
+                    self.requested = Some(plan.clone());
                     self.worker.render(keys);
                 }
                 let texture = self.cache.get(&key).or_else(|| self.cache.fallback(key));
@@ -2030,6 +2040,7 @@ impl Folio {
                         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                         Color32::WHITE,
                     );
+                    self.paint_tiles(&painter, &plan, self.nav.page, page_rect, self.scale);
                     self.highlights(&painter, self.nav.page, page_rect, dimensions);
                     let clip = painter.clip_rect().intersect(page_rect);
                     painter.extend(self.selection.rects.iter().filter_map(|rect| {

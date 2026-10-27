@@ -95,12 +95,33 @@ fn parse(data: Vec<u8>, password: &str) -> Result<Pdf, String> {
     Ok(pdf)
 }
 
+/// A small target in the rotated page's physical pixel coordinates. One pixel
+/// of overlap keeps linear texture filtering from introducing tile seams.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct Tile {
+    pub scale_bits: u32,
+    pub x: u32,
+    pub y: u32,
+    pub size: [u16; 2],
+}
+
+impl Tile {
+    pub fn scale(self) -> f32 {
+        f32::from_bits(self.scale_bits)
+    }
+
+    pub fn bytes(self) -> usize {
+        usize::from(self.size[0]) * usize::from(self.size[1]) * 4
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct RenderKey {
     pub page: usize,
     pub width: u32,
     pub rotation: u8,
     pub night: bool,
+    pub tile: Option<Tile>,
 }
 
 pub use crate::bitmap::Bitmap;
@@ -152,20 +173,57 @@ pub(crate) fn rasterize_pixels<'a>(
     page: usize,
     width: u32,
 ) -> Result<eframe::egui::ColorImage, String> {
-    use eframe::egui::{Color32, ColorImage};
-    use hayro::{
-        hayro_interpret::util::TransformExt,
-        kurbo::Affine,
-        vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit},
-    };
+    use hayro::{hayro_interpret::util::TransformExt, kurbo::Affine};
 
     let page = pdf.pages().get(page).ok_or("Page is out of range")?;
     let (w, h) = page.render_dimensions();
     let raster = RasterSize::new([w, h], width)?;
-    let [w, h] = raster.size.map(|side| side as u16);
-    let mut context = RenderContext::new(w, h);
     let transform = Affine::scale_non_uniform(f64::from(raster.scale), f64::from(raster.scale))
         * page.initial_transform(true).to_kurbo();
+    render_pixels(page, cache, raster.size, transform)
+}
+
+/// Render directly into a small viewport tile, without allocating a zoomed
+/// full-page surface. Crop boxes and intrinsic PDF rotation are applied first.
+pub(crate) fn rasterize_tile<'a>(
+    pdf: &'a Pdf,
+    cache: &RenderCache<'a>,
+    key: RenderKey,
+    tile: Tile,
+) -> Result<eframe::egui::ColorImage, String> {
+    use hayro::{hayro_interpret::util::TransformExt, kurbo::Affine};
+    let page = pdf.pages().get(key.page).ok_or("Page is out of range")?;
+    if !tile.scale().is_finite()
+        || tile.scale() <= 0.0
+        || tile.size.contains(&0)
+        || tile.size.iter().any(|&side| side > 1026)
+    {
+        return Err("Invalid PDF render tile".into());
+    }
+    let (w, h) = page.render_dimensions();
+    let rotation = Affine::new(match key.rotation % 4 {
+        1 => [0.0, 1.0, -1.0, 0.0, f64::from(h), 0.0],
+        2 => [-1.0, 0.0, 0.0, -1.0, f64::from(w), f64::from(h)],
+        3 => [0.0, -1.0, 1.0, 0.0, 0.0, f64::from(w)],
+        _ => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    });
+    let transform = Affine::translate((-f64::from(tile.x), -f64::from(tile.y)))
+        * Affine::scale(f64::from(tile.scale()))
+        * rotation
+        * page.initial_transform(true).to_kurbo();
+    render_pixels(page, cache, tile.size.map(usize::from), transform)
+}
+
+fn render_pixels<'a>(
+    page: &'a hayro::hayro_syntax::page::Page<'a>,
+    cache: &RenderCache<'a>,
+    size: [usize; 2],
+    transform: hayro::kurbo::Affine,
+) -> Result<eframe::egui::ColorImage, String> {
+    use eframe::egui::{Color32, ColorImage};
+    use hayro::vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit};
+    let [w, h] = size.map(|side| side as u16);
+    let mut context = RenderContext::new(w, h);
     hayro::render_into(
         page,
         cache,
@@ -175,7 +233,7 @@ pub(crate) fn rasterize_pixels<'a>(
         transform,
     );
     context.flush();
-    let mut image = ColorImage::filled(raster.size, Color32::TRANSPARENT);
+    let mut image = ColorImage::filled(size, Color32::TRANSPARENT);
     let target = PixmapMut::new(w, h, bytemuck::cast_slice_mut(&mut image.pixels))
         .expect("texture buffer matches the validated raster size");
     context.render_with(
@@ -310,6 +368,61 @@ mod tests {
     }
 
     #[test]
+    fn viewport_tiles_match_full_resolution_text_crops_and_rotations() {
+        for pdf in [
+            sample(),
+            Pdf::new(include_bytes!("../tests/fixtures/render-crop.pdf").to_vec()).unwrap(),
+        ] {
+            let cache = RenderCache::new();
+            for page in 0..pdf.pages().len() {
+                let (w, _) = pdf.pages()[page].render_dimensions();
+                for rotation in 0..4 {
+                    let key = RenderKey {
+                        page,
+                        width: (w * 2.0) as u32,
+                        rotation,
+                        night: false,
+                        tile: None,
+                    };
+                    let full = rasterize(&pdf, &cache, key).unwrap();
+                    // Odd, nonzero offsets exercise translated glyphs, image filtering,
+                    // PDF CropBox, UserUnit, and intrinsic/reader rotations together.
+                    let tile = Tile {
+                        scale_bits: 2.0_f32.to_bits(),
+                        x: 17,
+                        y: 23,
+                        size: [
+                            (full.size[0] - 34).min(301) as u16,
+                            (full.size[1] - 46).min(257) as u16,
+                        ],
+                    };
+                    let image = rasterize_tile(&pdf, &cache, key, tile).unwrap();
+                    let mut max_diff = 0;
+                    let mut differing = 0;
+                    for y in 0..usize::from(tile.size[1]) {
+                        for x in 0..usize::from(tile.size[0]) {
+                            let expected = &full.rgba[((y + tile.y as usize) * full.size[0]
+                                + x
+                                + tile.x as usize)
+                                * 4..][..4];
+                            let actual = image.pixels[y * image.size[0] + x].to_array();
+                            for (actual, expected) in actual.iter().zip(expected) {
+                                let diff = actual.abs_diff(*expected);
+                                max_diff = max_diff.max(diff);
+                                differing += usize::from(diff > 3);
+                            }
+                        }
+                    }
+                    assert!(
+                        max_diff <= 3 || differing * 1000 < image.pixels.len(),
+                        "page={page}, rotation={rotation}, max difference={max_diff}, differing channels={differing}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn direct_texture_targets_match_rasters_for_cropped_rotated_and_translucent_content() {
         for pdf in [
             sample(),
@@ -341,6 +454,7 @@ mod tests {
                 width: 300,
                 rotation: 0,
                 night: false,
+                tile: None,
             },
         )
         .unwrap();
@@ -365,7 +479,8 @@ mod tests {
                     page: 99,
                     width: 300,
                     rotation: 0,
-                    night: false
+                    night: false,
+                    tile: None,
                 }
             )
             .is_err()
@@ -378,6 +493,7 @@ mod tests {
                 width: 300,
                 rotation: 1,
                 night: true,
+                tile: None,
             },
         )
         .unwrap();

@@ -25,6 +25,7 @@ pub fn key(page: usize, dimensions: [f32; 2], rotation: u8, night: bool, dpi: f3
         width,
         rotation,
         night,
+        tile: None,
     }
 }
 

@@ -2,6 +2,9 @@ use crate::{
     document::{RasterSize, RenderKey},
     navigation::Fit,
 };
+use eframe::egui::{Rect, Vec2};
+
+pub use crate::document::Tile;
 
 /// Visible pages followed by optional neighbors, in render priority order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +41,93 @@ pub struct RenderView {
 }
 
 impl RenderView {
+    /// When an entire page cannot be rasterized at display density, keep a
+    /// modest full-page preview and render only visible tiles at native density.
+    /// Previews and tiles share the existing texture budget and cancellation.
+    pub fn detail_plan(
+        self,
+        visible: &[(usize, Rect)],
+        dimensions: &[[f32; 2]],
+        clip: Rect,
+        budget: usize,
+    ) -> Option<RenderPlan> {
+        if visible.is_empty()
+            || budget < 4096
+            || !visible.iter().any(|&(page, _)| {
+                self.key_and_size(page, dimensions[page])
+                    .1
+                    .is_ok_and(|raster| {
+                        raster.scale < self.scale(dimensions[page]) * self.pixels_per_point * 0.99
+                    })
+            })
+        {
+            return None;
+        }
+        let mut preview = self;
+        let preview_budget = budget / 4 / visible.len();
+        let mut attempts = 0;
+        while visible.iter().any(|&(page, _)| {
+            preview
+                .key_and_size(page, dimensions[page])
+                .1
+                .is_ok_and(|raster| raster.bytes() > preview_budget)
+        }) {
+            if attempts == 128 {
+                return None;
+            }
+            attempts += 1;
+            preview.pixels_per_point *= 0.75;
+        }
+        let mut density = self.pixels_per_point;
+        for _ in 0..128 {
+            let mut plan = RenderPlan::new();
+            let mut bytes = 0;
+            // Finish previews first so a large old fallback can be replaced
+            // before the visible detail tiles reserve their share of the cache.
+            for &(page, _) in visible {
+                let (key, raster) = preview.key_and_size(page, dimensions[page]);
+                bytes += raster.ok().map_or(0, |raster| raster.bytes());
+                plan.push(key);
+            }
+            for &(page, rect) in visible {
+                let intersection = rect.intersect(clip);
+                if !intersection.is_positive() {
+                    continue;
+                }
+                let scale = self.scale(dimensions[page]) * density;
+                let extent = (rect.size() * density).ceil();
+                let start = ((intersection.min - rect.min) * density).max(Vec2::ZERO);
+                let end = ((intersection.max - rect.min) * density).min(extent);
+                const SIDE: u32 = 1024;
+                for y in (start.y as u32 / SIDE)..(end.y.ceil() as u32).div_ceil(SIDE) {
+                    for x in (start.x as u32 / SIDE)..(end.x.ceil() as u32).div_ceil(SIDE) {
+                        let left = (x * SIDE).saturating_sub(1);
+                        let top = (y * SIDE).saturating_sub(1);
+                        let right = ((x + 1) * SIDE + 1).min(extent.x as u32);
+                        let bottom = ((y + 1) * SIDE + 1).min(extent.y as u32);
+                        let tile = Tile {
+                            scale_bits: scale.to_bits(),
+                            x: left,
+                            y: top,
+                            size: [(right - left) as u16, (bottom - top) as u16],
+                        };
+                        bytes += tile.bytes();
+                        plan.push(RenderKey {
+                            tile: Some(tile),
+                            ..self.key(page, dimensions[page])
+                        });
+                    }
+                }
+            }
+            if bytes <= budget && plan.len() <= 512 {
+                return Some(plan);
+            }
+            // Very large/HiDPI windows still have a bounded working set.
+            density *= 0.75;
+        }
+        None
+    }
+
     pub fn scale(self, dimensions: [f32; 2]) -> f32 {
         let rotated = if self.rotation % 2 == 1 {
             [dimensions[1], dimensions[0]]
@@ -73,6 +163,7 @@ impl RenderView {
                 width,
                 rotation: self.rotation,
                 night: self.night,
+                tile: None,
             },
             raster,
         )
@@ -163,6 +254,125 @@ impl RenderView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn high_zoom_tiles_cover_the_viewport_at_native_density_within_the_shared_budget() {
+        let dimensions = [[600.0, 800.0], [1200.0, 600.0]];
+        let budget = 96 * 1024 * 1024;
+        for rotation in 0..4 {
+            let view = RenderView {
+                rotation,
+                ..view(Fit::Custom(8.0))
+            };
+            let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(1000.0, 700.0));
+            let page = Rect::from_min_size(
+                egui_pos(-1777.0, -2321.0),
+                if rotation % 2 == 0 {
+                    Vec2::new(4800.0, 6400.0)
+                } else {
+                    Vec2::new(6400.0, 4800.0)
+                },
+            );
+            let plan = view
+                .detail_plan(&[(0, page)], &dimensions, clip, budget)
+                .unwrap();
+            let tiles: Vec<_> = plan.iter().filter_map(|key| key.tile).collect();
+            assert!(!tiles.is_empty());
+            assert!(tiles.iter().all(|tile| tile.scale() == 16.0));
+            let bytes: usize = plan
+                .iter()
+                .map(|key| {
+                    key.tile.map_or_else(
+                        || {
+                            RasterSize::new(dimensions[key.page], key.width)
+                                .unwrap()
+                                .bytes()
+                        },
+                        Tile::bytes,
+                    )
+                })
+                .sum();
+            assert!(bytes <= budget);
+            // Every visible pixel is covered, including tile boundaries after panning.
+            for y in [0.0, 0.5, 200.0, 699.5] {
+                for x in [0.0, 0.5, 270.0, 999.5] {
+                    let p = (egui_pos(x, y) - page.min) * 2.0;
+                    assert!(tiles.iter().any(|tile| p.x >= tile.x as f32
+                        && p.y >= tile.y as f32
+                        && p.x < tile.x as f32 + f32::from(tile.size[0])
+                        && p.y < tile.y as f32 + f32::from(tile.size[1])));
+                }
+            }
+            let shifted = view
+                .detail_plan(
+                    &[(0, page.translate(Vec2::new(-1024.0, 0.0)))],
+                    &dimensions,
+                    clip,
+                    budget,
+                )
+                .unwrap();
+            assert_ne!(plan, shifted);
+        }
+    }
+
+    fn egui_pos(x: f32, y: f32) -> eframe::egui::Pos2 {
+        eframe::egui::pos2(x, y)
+    }
+
+    #[test]
+    fn details_handle_multiple_visible_pages_large_windows_and_page_edges() {
+        let dimensions = [[600.0, 800.0]; 2];
+        let budget = 96 * 1024 * 1024;
+        let view = view(Fit::Custom(8.0));
+        for size in [Vec2::new(1000.0, 700.0), Vec2::new(7680.0, 4320.0)] {
+            let clip = Rect::from_min_size(egui_pos(0.0, 0.0), size);
+            let pages = [
+                (
+                    0,
+                    Rect::from_min_size(egui_pos(0.0, -6200.0), Vec2::new(4800.0, 6400.0)),
+                ),
+                (
+                    1,
+                    Rect::from_min_size(egui_pos(0.0, 224.0), Vec2::new(4800.0, 6400.0)),
+                ),
+            ];
+            let plan = view.detail_plan(&pages, &dimensions, clip, budget).unwrap();
+            assert_eq!(
+                plan[..2].iter().map(|key| key.page).collect::<Vec<_>>(),
+                [0, 1]
+            );
+            let bytes: usize = plan
+                .iter()
+                .map(|key| {
+                    key.tile.map_or_else(
+                        || {
+                            RasterSize::new(dimensions[key.page], key.width)
+                                .unwrap()
+                                .bytes()
+                        },
+                        Tile::bytes,
+                    )
+                })
+                .sum();
+            assert!(bytes <= budget);
+            for key in plan.iter().filter(|key| key.tile.is_some()) {
+                let tile = key.tile.unwrap();
+                assert!(!tile.size.contains(&0));
+                assert!(tile.x + u32::from(tile.size[0]) <= (600.0 * tile.scale()).ceil() as u32);
+                assert!(tile.y + u32::from(tile.size[1]) <= (800.0 * tile.scale()).ceil() as u32);
+            }
+        }
+        let rect = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(600.0, 800.0));
+        assert!(
+            view.detail_plan(&[(0, rect)], &dimensions, rect, 4096)
+                .is_none()
+        );
+        assert!(
+            super::tests::view(Fit::Page)
+                .detail_plan(&[(0, rect)], &dimensions, rect, budget)
+                .is_none()
+        );
+    }
 
     fn view(fit: Fit) -> RenderView {
         RenderView {
