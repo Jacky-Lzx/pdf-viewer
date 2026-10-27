@@ -1,6 +1,6 @@
 use super::{ACCENT, Pagewing};
 use eframe::egui::{self, RichText, Vec2};
-use std::{fmt::Write, sync::OnceLock};
+use std::fmt::Write;
 
 const SHORTCUTS: &[(&str, &str)] = &[
     ("j / k / h / l", "Scroll down / up / left / right"),
@@ -110,6 +110,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("F, then a label", "Copy a visible web-link address"),
     ("F11", "Toggle fullscreen"),
     ("? / F1 / Escape", "Find keyboard shortcuts / close dialog"),
+    ("Ctrl/Cmd+,", "Open Settings"),
     ("Right-click web link", "Copy link address"),
     (
         "Ctrl/Cmd+click PDF",
@@ -121,11 +122,16 @@ const SHORTCUTS: &[(&str, &str)] = &[
 pub(super) struct HelpFilter {
     query: String,
     visible: Vec<usize>,
+    catalog: Vec<(String, String)>,
     pub(super) focus: bool,
 }
 
 impl HelpFilter {
     fn reset(&mut self) {
+        self.catalog = SHORTCUTS
+            .iter()
+            .map(|(keys, action)| ((*keys).into(), (*action).into()))
+            .collect();
         self.query.clear();
         self.focus = true;
         self.filter();
@@ -135,30 +141,75 @@ impl HelpFilter {
         self.visible.clear();
         let query = self.query.to_ascii_lowercase();
         let words: Vec<_> = query.split_whitespace().collect();
-        if words.is_empty() {
-            self.visible.extend(0..SHORTCUTS.len());
-            return;
-        }
-        // The shortcut catalog is static. Normalize it once, then only rebuild
-        // the visible indices when the query changes.
-        static FOLDED: OnceLock<Vec<String>> = OnceLock::new();
-        let folded = FOLDED.get_or_init(|| {
-            SHORTCUTS
+        if self.catalog.is_empty() {
+            self.catalog = SHORTCUTS
                 .iter()
-                .map(|(keys, action)| format!("{keys} {action}").to_ascii_lowercase())
-                .collect()
-        });
+                .map(|(keys, action)| ((*keys).into(), (*action).into()))
+                .collect();
+        }
         self.visible
-            .extend(folded.iter().enumerate().filter_map(|(index, text)| {
-                words
+            .extend(
+                self.catalog
                     .iter()
-                    .all(|word| text.contains(word))
-                    .then_some(index)
-            }));
+                    .enumerate()
+                    .filter_map(|(index, (keys, action))| {
+                        let text = format!("{keys} {action}").to_ascii_lowercase();
+                        words
+                            .iter()
+                            .all(|word| text.contains(word))
+                            .then_some(index)
+                    }),
+            );
     }
 
-    fn rows(&self) -> impl ExactSizeIterator<Item = (&'static str, &'static str)> + '_ {
-        self.visible.iter().map(|&index| SHORTCUTS[index])
+    fn configure(&mut self, shortcuts: &crate::settings::Shortcuts) {
+        if shortcuts.overrides.is_empty() {
+            return;
+        }
+        self.catalog = crate::settings::commands()
+            .iter()
+            .map(|command| (shortcuts.label(command.id), command.label.into()))
+            .collect();
+        // These interactions have their own grammar and remain fixed.
+        for &(keys, action) in &[
+            ("gg / 42gg / 42 Enter", "First page / counted page"),
+            ("Backspace", "Edit count and cancel unfinished g/z command"),
+            ("50%", "Jump to a percentage of the document's pages"),
+            ("zt / zz / zb", "Align current page top / center / bottom"),
+            (
+                "zH / zL / z0 / z$",
+                "Scroll half a screen / align horizontal edges",
+            ),
+            ("Alt + wheel / pinch", "Zoom at the pointer"),
+            (
+                "Mouse back / forward",
+                "Restore previous / next reading view",
+            ),
+            ("ma / 'a / `a", "Save / restore named position a–z"),
+            ("'' / ``", "Toggle the last two jump positions"),
+            ("Ctrl/Cmd+a / Ctrl/Cmd+c", "Select all / copy selected text"),
+            (
+                "Double / triple click in selection mode",
+                "Select word / line",
+            ),
+            ("Ctrl/Cmd+Enter", "Save current comment"),
+            ("Alt+c / Alt+w", "Match case / whole words (search open)"),
+            ("Escape", "Close dialog / cancel current mode"),
+            ("Right-click web link", "Copy link address"),
+            ("Ctrl/Cmd+click PDF", "SyncTeX reverse search"),
+        ] {
+            self.catalog.push((keys.into(), action.into()));
+        }
+        self.catalog
+            .push(("Ctrl/Cmd+,".into(), "Open Settings".into()));
+        self.filter();
+    }
+
+    fn rows(&self) -> impl ExactSizeIterator<Item = (&str, &str)> + '_ {
+        self.visible.iter().map(|&index| {
+            let (keys, action) = &self.catalog[index];
+            (keys.as_str(), action.as_str())
+        })
     }
 
     fn copy_text(&self) -> String {
@@ -186,8 +237,10 @@ impl Pagewing {
         self.search_open = false;
         self.search_focus = false;
         self.pending_search_jump = None;
+        self.settings = None;
         self.help = true;
         self.help_filter.reset();
+        self.help_filter.configure(&self.library.shortcuts);
         context.memory_mut(|memory| {
             if let Some(id) = memory.focused() {
                 memory.surrender_focus(id);
@@ -302,12 +355,35 @@ mod tests {
         help.filter();
         let rows: Vec<_> = help.rows().collect();
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().any(|(keys, _)| *keys == "F, then a label"));
-        assert!(rows.iter().any(|(keys, _)| *keys == "Right-click web link"));
+        assert!(rows.iter().any(|(keys, _)| keys == &"F, then a label"));
+        assert!(rows.iter().any(|(keys, _)| keys == &"Right-click web link"));
         help.query = "zoom 0".into();
         help.filter();
         assert_eq!(help.rows().next().unwrap().0, "a / Ctrl/Cmd+0");
         assert_eq!(help.rows().len(), 1);
+    }
+
+    #[test]
+    fn custom_bindings_replace_the_default_help_and_copy_output() {
+        let mut shortcuts = crate::settings::Shortcuts::default();
+        shortcuts.overrides.insert(
+            "next_page".into(),
+            vec![crate::settings::Binding::from_event(
+                egui::Key::X,
+                egui::Modifiers::NONE,
+                None,
+            )],
+        );
+        let mut help = HelpFilter::default();
+        help.reset();
+        help.configure(&shortcuts);
+        help.query = "next page".into();
+        help.filter();
+        assert_eq!(help.rows().collect::<Vec<_>>(), vec![("X", "Next page")]);
+        assert!(help.copy_text().contains("X\tNext page"));
+        help.query = "zt".into();
+        help.filter();
+        assert_eq!(help.rows().len(), 1, "fixed Vim sequences stay documented");
     }
 
     #[test]

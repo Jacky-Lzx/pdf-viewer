@@ -388,7 +388,10 @@ impl Pagewing {
                     self.contents(ui);
                     ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
                     if self.reading.bookmarks.is_empty() {
-                        ui.weak("Press b to bookmark a page.");
+                        ui.weak(format!(
+                            "Press {} to bookmark a page.",
+                            self.library.shortcuts.label("bookmark")
+                        ));
                     }
                     if !self.bookmark_pages.is_empty() {
                         self.bookmark_list(ui);

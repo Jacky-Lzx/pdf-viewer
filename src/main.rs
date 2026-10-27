@@ -27,6 +27,7 @@ mod recent;
 mod render_plan;
 mod selection;
 mod selection_index;
+mod settings;
 mod state;
 mod state_writer;
 mod synctex;

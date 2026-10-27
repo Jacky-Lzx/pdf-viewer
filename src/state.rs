@@ -102,6 +102,8 @@ pub struct Library {
     pub sidebar: bool,
     pub thumbnails: bool,
     pub search_options: SearchOptions,
+    pub display: crate::settings::DisplaySettings,
+    pub shortcuts: crate::settings::Shortcuts,
 }
 
 impl Library {

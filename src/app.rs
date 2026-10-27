@@ -5,6 +5,7 @@ mod properties;
 mod recent;
 mod reload;
 mod selection_scroll;
+mod settings;
 mod shortcuts;
 mod sidebar;
 mod spread;
@@ -105,6 +106,7 @@ pub struct Pagewing {
     goto_open: bool,
     goto_focus: bool,
     help: bool,
+    settings: Option<settings::SettingsUi>,
     help_filter: help::HelpFilter,
     input_buttons: shortcuts::InputButtons,
     recent_picker: Option<crate::recent::RecentPicker>,
@@ -198,6 +200,7 @@ impl Pagewing {
             goto_open: false,
             goto_focus: false,
             help: false,
+            settings: None,
             help_filter: help::HelpFilter::default(),
             input_buttons: shortcuts::InputButtons::default(),
             recent_picker: None,
@@ -235,6 +238,19 @@ impl Pagewing {
                 path,
                 ..Default::default()
             });
+        if !self.library.display.remember_documents {
+            self.reading.page = 0;
+            self.reading.rotation = 0;
+            self.reading.offset = [0.0; 2];
+            self.library.display.apply(&mut self.reading);
+        } else if !self
+            .library
+            .recent
+            .iter()
+            .any(|item| item.path == self.reading.path)
+        {
+            self.library.display.apply(&mut self.reading);
+        }
         self.reading.rotation %= 4;
         self.synctex.server =
             crate::synctex_ipc::Server::bind(&self.reading.path, context.clone()).ok();
@@ -1117,6 +1133,13 @@ impl Pagewing {
                     self.open_help(context);
                 }
             }
+            Some(shortcuts::InputButton::Settings) => {
+                if self.settings.is_some() {
+                    self.settings = None;
+                } else {
+                    self.open_settings(context);
+                }
+            }
             Some(shortcuts::InputButton::Find) => self.find(),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
             Some(shortcuts::InputButton::ReloadChanged) => {
@@ -1158,6 +1181,11 @@ impl Pagewing {
                     break;
                 }
             }
+        }
+        // A settings draft owns keyboard input, including shortcut recording.
+        if self.settings.is_some() {
+            self.settings_keys(context);
+            return;
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
@@ -1215,9 +1243,38 @@ impl Pagewing {
             else {
                 continue;
             };
+            let raw_key = key;
+            let raw_modifiers = modifiers;
+            if modifiers.command && key == Key::Comma {
+                shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
+                self.open_settings(context);
+                break;
+            }
+            // Adapt configured bindings to the existing reader commands, but
+            // consume the original physical press so text cannot leak to egui.
+            // Sequences and text fields retain their own keyboard vocabulary.
+            let reader_ready = !typing
+                && !self.help
+                && !self.properties_open
+                && !popup_open
+                && !self.hints.active
+                && self.mark_action.is_none()
+                && !self.nav.pending_z;
+            let binding = crate::settings::Binding::from_event(key, modifiers, symbol);
+            let (key, modifiers, key_text) =
+                match self.library.shortcuts.resolve(&binding, !reader_ready) {
+                    crate::settings::Resolution::Mapped(key, modifiers) => {
+                        (key, modifiers, shortcuts::KeyText::None)
+                    }
+                    crate::settings::Resolution::Disabled => {
+                        shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
+                        continue;
+                    }
+                    crate::settings::Resolution::Unmatched => (key, modifiers, key_text),
+                };
             if popup_open && key == Key::Escape {
                 egui::Popup::close_all(context);
-                context.input_mut(|input| input.consume_key(modifiers, key));
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
             if popup_open
@@ -1229,7 +1286,7 @@ impl Pagewing {
             }
             if (typing || !(self.help || self.properties_open || popup_open))
                 && matches!(
-                    key,
+                    raw_key,
                     Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
                 )
             {
@@ -1256,13 +1313,17 @@ impl Pagewing {
                         !self.library.search_options.whole_word;
                 }
                 self.dirty = true;
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.change_search();
                 continue;
             }
             if !popup_open && key == Key::M && modifiers.command && modifiers.shift {
                 self.comments.open = !self.comments.open;
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 continue;
             }
             if !popup_open
@@ -1272,7 +1333,9 @@ impl Pagewing {
                 && self.nav.count > 0
             {
                 self.add_comment();
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 continue;
             }
             if self.comments.open
@@ -1281,7 +1344,7 @@ impl Pagewing {
                 && self.comments.editor.is_some()
             {
                 self.save_comment();
-                context.input_mut(|input| input.consume_key(modifiers, key));
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
             if key == Key::Escape && self.comments.open {
@@ -1290,7 +1353,7 @@ impl Pagewing {
                 context.memory_mut(|memory| {
                     memory.surrender_focus(egui::Id::new("pagewing-comment-input"))
                 });
-                context.input_mut(|input| input.consume_key(modifiers, key));
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
             if key == Key::Escape {
@@ -1321,12 +1384,16 @@ impl Pagewing {
                 continue;
             }
             if modifiers.command && key == Key::F {
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.find();
                 continue;
             }
             if modifiers.command && key == Key::P {
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.toggle_recent(context);
                 continue;
             }
@@ -1335,18 +1402,22 @@ impl Pagewing {
                 continue;
             }
             if modifiers.command && key == Key::W {
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.close_document(context);
                 continue;
             }
             if modifiers.command && modifiers.shift && key == Key::T {
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.reopen_closed(context);
                 continue;
             }
             if modifiers.command && key == Key::Q {
                 context.input_mut(|input| {
-                    input.consume_key(modifiers, key);
+                    input.consume_key(raw_modifiers, raw_key);
                 });
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
                 continue;
@@ -1357,7 +1428,7 @@ impl Pagewing {
             if let Some(picker) = &mut self.recent_picker {
                 if key == Key::Enter {
                     picker.confirm = true;
-                    context.input_mut(|input| input.consume_key(modifiers, key));
+                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
                     || (modifiers.ctrl && matches!(key, Key::J | Key::K))
                 {
@@ -1367,8 +1438,9 @@ impl Pagewing {
                         1
                     };
                     picker.motions.push(delta);
-                    context
-                        .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                    context.input_mut(|input| {
+                        shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                    });
                 }
                 continue;
             }
@@ -1382,7 +1454,7 @@ impl Pagewing {
             {
                 if key == Key::Enter {
                     self.outline.confirm = true;
-                    context.input_mut(|input| input.consume_key(modifiers, key));
+                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
                     || (modifiers.ctrl && matches!(key, Key::J | Key::K))
                 {
@@ -1392,8 +1464,9 @@ impl Pagewing {
                         1
                     };
                     self.outline.motions.push(delta);
-                    context
-                        .input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                    context.input_mut(|input| {
+                        shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                    });
                 }
                 continue;
             }
@@ -1407,7 +1480,9 @@ impl Pagewing {
                 continue;
             }
             if modifiers.command && key == Key::A && self.nav.count > 0 {
-                context.input_mut(|input| shortcuts::consume_text_shortcut(input, key, modifiers));
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
                 self.nav.clear_prefix();
                 self.hints.cancel();
                 self.mark_action = None;
@@ -1424,11 +1499,11 @@ impl Pagewing {
             if modifiers.command && key == Key::C && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
-                    input.consume_key(modifiers, key);
+                    input.consume_key(raw_modifiers, raw_key);
                 });
                 continue;
             }
-            shortcuts::consume_reader_shortcut(context, key, modifiers);
+            shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
             if let Some(action) = shortcuts::zoom_action(key, modifiers) {
                 self.nav.clear_prefix();
                 self.mark_action = None;
@@ -1539,7 +1614,10 @@ impl Pagewing {
                     ) {
                         self.jump(page);
                     } else {
-                        self.notify("No bookmarks yet · b to add one");
+                        self.notify(format!(
+                            "No bookmarks yet · {} to add one",
+                            self.library.shortcuts.label("bookmark")
+                        ));
                     }
                 }
                 continue;
@@ -1803,7 +1881,7 @@ impl Pagewing {
                     ui.add_space(16.0);
                     if ui
                         .button("Open")
-                        .on_hover_text("Open PDF · Ctrl/Cmd+O")
+                        .on_hover_text(self.library.shortcuts.label("open"))
                         .clicked()
                     {
                         self.choose_file();
@@ -1811,13 +1889,17 @@ impl Pagewing {
                     if !self.reading.path.as_os_str().is_empty()
                         && ui
                             .button("Close")
-                            .on_hover_text("Close PDF · Ctrl/Cmd+W")
+                            .on_hover_text(self.library.shortcuts.label("close"))
                             .clicked()
                     {
                         self.close_document(context);
                     }
                     if self.nav.count > 0 {
-                        if ui.button("Sidebar").on_hover_text("Tab").clicked() {
+                        if ui
+                            .button("Sidebar")
+                            .on_hover_text(self.library.shortcuts.label("sidebar"))
+                            .clicked()
+                        {
                             self.library.sidebar = !self.library.sidebar;
                             self.dirty = true;
                         }
@@ -1839,18 +1921,22 @@ impl Pagewing {
                         ui.separator();
                         if ui
                             .button("‹")
-                            .on_hover_text("Previous page · K / [")
+                            .on_hover_text(self.library.shortcuts.label("previous_page"))
                             .clicked()
                         {
                             self.step(-1);
                         }
-                        if ui.button("›").on_hover_text("Next page · J / ]").clicked() {
+                        if ui
+                            .button("›")
+                            .on_hover_text(self.library.shortcuts.label("next_page"))
+                            .clicked()
+                        {
                             self.step(1);
                         }
                         ui.separator();
                         if ui
                             .button("Rotate")
-                            .on_hover_text("Rotate · r / Shift+R")
+                            .on_hover_text(self.library.shortcuts.label("rotate"))
                             .clicked()
                         {
                             self.rotate_page(false, 1);
@@ -1858,10 +1944,15 @@ impl Pagewing {
                     }
                     toolbar::right_group(
                         ui,
-                        if self.nav.count > 0 { 240.0 } else { 100.0 },
+                        if self.nav.count > 0 { 360.0 } else { 190.0 },
                         |ui| {
                             ui.add_space(12.0);
                             self.input_buttons.help = Some(ui.button("?").id);
+                            self.input_buttons.settings = Some(
+                                ui.button("Settings")
+                                    .on_hover_text("Preferences · Ctrl/Cmd+,")
+                                    .id,
+                            );
                             if ui
                                 .button(if self.library.dark { "Light" } else { "Dark" })
                                 .clicked()
@@ -1873,7 +1964,7 @@ impl Pagewing {
                             if self.nav.count > 0 {
                                 self.input_buttons.find = Some(
                                     ui.button("Find")
-                                        .on_hover_text("Search · / or Ctrl/Cmd+F")
+                                        .on_hover_text(self.library.shortcuts.label("find"))
                                         .id,
                                 );
                                 if ui
@@ -1881,7 +1972,7 @@ impl Pagewing {
                                         self.reading.bookmarks.contains(&self.nav.page),
                                         "Bookmark",
                                     )
-                                    .on_hover_text("b")
+                                    .on_hover_text(self.library.shortcuts.label("bookmark"))
                                     .clicked()
                                 {
                                     self.bookmark();
@@ -2222,7 +2313,10 @@ impl Pagewing {
                         ui.label("PDF changed on disk.");
                         let reload = ui
                             .add_enabled(!self.loading, egui::Button::new("Reload"))
-                            .on_hover_text("Ctrl/Cmd+R — keep current reading position");
+                            .on_hover_text(format!(
+                                "{} — keep current reading position",
+                                self.library.shortcuts.label("reload")
+                            ));
                         self.input_buttons.reload_changed = Some(reload.id);
                         self.input_buttons.dismiss_change = Some(ui.button("Dismiss").id);
                     });
@@ -2473,7 +2567,10 @@ impl Pagewing {
                         self.choose_file();
                     }
                     ui.add_space(12.0);
-                    ui.weak("or drop a PDF anywhere · Ctrl / Cmd + O");
+                    ui.weak(format!(
+                        "or drop a PDF anywhere · {}",
+                        self.library.shortcuts.label("open")
+                    ));
                     if !self.library.recent.is_empty() {
                         ui.add_space(32.0);
                         ui.label(
@@ -2498,7 +2595,13 @@ impl Pagewing {
                         if let Some(path) = open {
                             self.open(path, ui.ctx());
                         }
-                        if ui.button("Find recent documents · Ctrl/Cmd+P").clicked() {
+                        if ui
+                            .button(format!(
+                                "Find recent documents · {}",
+                                self.library.shortcuts.label("recent")
+                            ))
+                            .clicked()
+                        {
                             self.toggle_recent(ui.ctx());
                         }
                     }
@@ -2674,6 +2777,7 @@ impl Pagewing {
                 });
         }
         self.help_window(context);
+        self.settings_window(context);
         if let Some(error) = self.error.clone() {
             egui::TopBottomPanel::bottom("error").show(context, |ui| {
                 ui.horizontal_wrapped(|ui| {

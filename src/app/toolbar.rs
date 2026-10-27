@@ -6,7 +6,7 @@ impl Pagewing {
     pub(super) fn view_controls(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("+")
-            .on_hover_text("Zoom in · + / Ctrl/Cmd++")
+            .on_hover_text(self.library.shortcuts.label("zoom_in"))
             .clicked()
         {
             self.zoom(1.2);
@@ -21,7 +21,7 @@ impl Pagewing {
         });
         if ui
             .button("−")
-            .on_hover_text("Zoom out · − / Ctrl/Cmd+−")
+            .on_hover_text(self.library.shortcuts.label("zoom_out"))
             .clicked()
         {
             self.zoom(1.0 / 1.2);
@@ -55,10 +55,28 @@ impl Pagewing {
             ui.separator();
             ui.label("Page size");
             for (label, fit) in [
-                ("Fit page · p", Fit::Page),
-                ("Fit width · w", Fit::Width),
-                ("Fit height · e", Fit::Height),
-                ("Actual size · Ctrl/Cmd+0", Fit::Custom(1.0)),
+                (
+                    format!("Fit page · {}", self.library.shortcuts.label("fit_page")),
+                    Fit::Page,
+                ),
+                (
+                    format!("Fit width · {}", self.library.shortcuts.label("fit_width")),
+                    Fit::Width,
+                ),
+                (
+                    format!(
+                        "Fit height · {}",
+                        self.library.shortcuts.label("fit_height")
+                    ),
+                    Fit::Height,
+                ),
+                (
+                    format!(
+                        "Actual size · {}",
+                        self.library.shortcuts.label("actual_size")
+                    ),
+                    Fit::Custom(1.0),
+                ),
             ] {
                 if ui
                     .selectable_label(self.reading.fit == fit, label)
@@ -158,8 +176,8 @@ mod tests {
                             ] {
                                 left_end = ui.button(label).rect.right();
                             }
-                            right_group(ui, 240.0, |ui| {
-                                for label in ["Help", "Dark", "Find", "Bookmark"] {
+                            right_group(ui, 360.0, |ui| {
+                                for label in ["Help", "Settings", "Dark", "Find", "Bookmark"] {
                                     let response = ui.button(label);
                                     assert!(
                                         response.rect.left() >= left_end,

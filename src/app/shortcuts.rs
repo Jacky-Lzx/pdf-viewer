@@ -12,6 +12,7 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InputButton {
     Help,
+    Settings,
     Find,
     Page,
     ReloadChanged,
@@ -21,6 +22,7 @@ pub(super) enum InputButton {
 #[derive(Default)]
 pub(super) struct InputButtons {
     pub help: Option<Id>,
+    pub settings: Option<Id>,
     pub find: Option<Id>,
     pub page: Option<Id>,
     pub reload_changed: Option<Id>,
@@ -31,6 +33,7 @@ impl InputButtons {
     pub fn clicked(&self, context: &eframe::egui::Context) -> Option<InputButton> {
         for (id, action) in [
             (self.help, InputButton::Help),
+            (self.settings, InputButton::Settings),
             (self.find, InputButton::Find),
             (self.page, InputButton::Page),
             (self.reload_changed, InputButton::ReloadChanged),
