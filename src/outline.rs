@@ -5,7 +5,10 @@ use hayro::hayro_syntax::{
     object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier, String as PdfString},
     page::Page,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::OnceCell,
+    collections::{HashMap, HashSet},
+};
 
 #[derive(Clone, Debug)]
 pub struct OutlineEntry {
@@ -32,7 +35,8 @@ fn decode_title(bytes: &[u8]) -> String {
 
 pub struct DestinationIndex<'a> {
     pages: HashMap<ObjectIdentifier, usize>,
-    named: HashMap<Vec<u8>, Object<'a>>,
+    named: OnceCell<HashMap<Vec<u8>, Object<'a>>>,
+    pdf: &'a Pdf,
     page_data: &'a [Page<'a>],
 }
 
@@ -44,20 +48,26 @@ impl<'a> DestinationIndex<'a> {
             .enumerate()
             .filter_map(|(page, data)| data.raw().obj_id().map(|id| (id, page)))
             .collect();
-        let named = pdf
-            .xref()
-            .get::<Dict<'a>>(pdf.xref().root_id())
-            .map(|catalog| named_destinations(&catalog))
-            .unwrap_or_default();
         Self {
             pages,
-            named,
+            named: OnceCell::new(),
+            pdf,
             page_data: pdf.pages(),
         }
     }
 
     pub fn resolve(&self, object: Object<'a>) -> Option<Destination> {
         self.destination(object, 0)
+    }
+
+    fn named(&self) -> &HashMap<Vec<u8>, Object<'a>> {
+        self.named.get_or_init(|| {
+            self.pdf
+                .xref()
+                .get::<Dict<'a>>(self.pdf.xref().root_id())
+                .map(|catalog| named_destinations(&catalog))
+                .unwrap_or_default()
+        })
     }
 
     fn destination(&self, object: Object<'a>, depth: usize) -> Option<Destination> {
@@ -136,10 +146,10 @@ impl<'a> DestinationIndex<'a> {
             }
             Object::Dict(dict) => self.destination(dict.get::<Object<'_>>(b"D")?, depth + 1),
             Object::Name(name) => {
-                self.destination(self.named.get(name.as_ref())?.clone(), depth + 1)
+                self.destination(self.named().get(name.as_ref())?.clone(), depth + 1)
             }
             Object::String(name) => {
-                self.destination(self.named.get(name.as_bytes())?.clone(), depth + 1)
+                self.destination(self.named().get(name.as_bytes())?.clone(), depth + 1)
             }
             _ => None,
         }
@@ -275,6 +285,31 @@ mod tests {
         DestinationIndex::new(pdf)
             .resolve(catalog.get::<Object<'_>>(b"Target").unwrap())
             .unwrap()
+    }
+
+    #[test]
+    fn direct_destinations_skip_names_and_named_aliases_reuse_one_table() {
+        let pdf = destination_pdf("[3 0 R /XYZ 48 500 2]", "");
+        let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        let source = catalog.get::<Dict<'_>>(b"Dests").unwrap();
+        let direct = source.get::<Object<'_>>(b"test").unwrap();
+        let alias = catalog.get::<Object<'_>>(b"Target").unwrap();
+        let index = DestinationIndex::new(&pdf);
+        assert!(index.named.get().is_none());
+        let target = index.resolve(direct).unwrap();
+        assert_eq!(target.page, 0);
+        assert_eq!(target.position, [Some(48.0), Some(300.0)]);
+        assert!(index.named.get().is_none());
+        assert_eq!(index.resolve(alias.clone()), Some(target));
+        let table = index.named.get().unwrap() as *const HashMap<Vec<u8>, Object<'_>>;
+        assert_eq!(index.resolve(alias), Some(target));
+        assert!(std::ptr::eq(index.named.get().unwrap(), table));
+        assert!(
+            index
+                .resolve(source.get::<Object<'_>>(b"loop").unwrap())
+                .is_none()
+        );
+        assert!(std::ptr::eq(index.named.get().unwrap(), table));
     }
 
     #[test]

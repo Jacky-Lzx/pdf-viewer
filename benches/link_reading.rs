@@ -25,9 +25,19 @@ use links::LinkTarget;
 use std::{hint::black_box, time::Instant};
 
 fn fixture(count: usize, kind: &str) -> Pdf {
+    let names = if kind == "direct-rich-names" {
+        format!(
+            "/Names << /Dests << /Names [{}] >> >>",
+            (0..9999)
+                .map(|index| format!("(unused{index:05}) [3 0 R /Fit] "))
+                .collect::<String>()
+        )
+    } else {
+        String::new()
+    };
     let mut objects = vec![
         format!(
-            "<< /Type /Catalog /Pages 2 0 R /Dests << /target [{} 0 R /Fit] >> >>",
+            "<< /Type /Catalog /Pages 2 0 R /Dests << /target [{} 0 R /Fit] >> {names} >>",
             count + 2
         ),
         format!(
@@ -38,12 +48,17 @@ fn fixture(count: usize, kind: &str) -> Pdf {
         ),
     ];
     for page in 0..count {
+        let direct = format!(
+            "/Annots [<< /Subtype /Link /Rect [10 10 30 30] /Dest [{} 0 R /Fit] >>]",
+            count + 2
+        );
         let annotation = if page == 0 {
             match kind {
                 "web" => {
                     "/Annots [<< /Subtype /Link /Rect [10 10 30 30] /A << /S /URI /URI (https://example.com/) >> >>]"
                 }
                 "internal" => "/Annots [<< /Subtype /Link /Rect [10 10 30 30] /Dest /target >>]",
+                "direct" | "direct-rich-names" => &direct,
                 _ => "",
             }
         } else {
@@ -90,7 +105,7 @@ fn main() {
         "{passes} passes; 100 fresh link sessions/sample, index construction, first-page links, checksum and drop; warmed parsed PDF, no parsing, rendering, widgets or GPU."
     );
     for pages in [6, 10_000] {
-        for kind in ["none", "web", "internal"] {
+        for kind in ["none", "web", "internal", "direct", "direct-rich-names"] {
             let pdf = fixture(pages, kind);
             let expected = first_links(&pdf);
             assert_eq!(expected.len(), usize::from(kind != "none"));
