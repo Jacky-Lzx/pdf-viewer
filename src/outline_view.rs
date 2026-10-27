@@ -129,10 +129,11 @@ impl OutlineView {
         self.visible.clear();
         if self.filtering() {
             let query = caseless::default_case_fold_str(self.query.trim());
+            let words: Vec<_> = query.split_whitespace().collect();
             let mut keep: Vec<_> = self
                 .folded_titles
                 .iter()
-                .map(|title| title.contains(&query))
+                .map(|title| words.iter().all(|word| title.contains(word)))
                 .collect();
             // Ancestors provide context, but Enter should initially follow a
             // title match rather than the first retained parent.
@@ -241,6 +242,51 @@ mod tests {
         tree.set_entries(Vec::new());
         assert!(tree.is_empty());
         assert!(tree.query.is_empty());
+    }
+
+    #[test]
+    fn multiword_filters_match_one_title_and_preserve_context_selection_and_folds() {
+        let mut tree = OutlineView::default();
+        tree.set_entries(
+            [
+                (0, "Part one"),
+                (1, "Straße — ΟΣ chapter"),
+                (1, "Straße appendix"),
+                (0, "Part two"),
+                (1, "chapter Straße ΟΣ"),
+            ]
+            .into_iter()
+            .map(|(depth, title)| OutlineEntry {
+                title: title.into(),
+                depth,
+                destination: None,
+            })
+            .collect(),
+        );
+        tree.fold_all(true);
+        tree.query = "  CHAPTER\tstrasse\u{2003}ος  ".into();
+        tree.refilter();
+        assert_eq!(tree.visible(), [0, 1, 3, 4]);
+        assert_eq!(tree.selected(), Some(1), "skip context-only parents");
+        tree.select(4);
+        tree.query = "STRASSE chapter σ".into();
+        tree.refilter();
+        assert_eq!(tree.visible(), [0, 1, 3, 4]);
+        assert_eq!(tree.selected(), Some(4), "retain a still-matching title");
+        tree.query = "part strasse".into();
+        tree.refilter();
+        assert!(
+            tree.visible().is_empty(),
+            "tokens cannot span parent and child"
+        );
+        assert_eq!(tree.selected(), None);
+        tree.query = "chapter missing".into();
+        tree.refilter();
+        assert!(tree.visible().is_empty(), "every keyword must match");
+        tree.query = "\t\u{2003} ".into();
+        tree.refilter();
+        assert_eq!(tree.visible(), [0, 3], "restore the original folds");
+        assert_eq!(tree.selected(), Some(0));
     }
 
     #[test]

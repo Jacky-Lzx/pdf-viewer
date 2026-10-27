@@ -51,7 +51,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Tab", "Toggle sidebar"),
     ("ma   /   'a or `a", "Save / restore named position a–z"),
     ("t", "Toggle page previews and open sidebar"),
-    ("c", "Find chapter · ↑/↓ or Ctrl+j/k · Enter to follow"),
+    (
+        "c",
+        "Find chapter by keywords · ↑/↓ or Ctrl+j/k · Enter to follow",
+    ),
     (
         "v, drag, then y",
         "Select and copy text (Ctrl/Cmd+C also works)",

@@ -64,6 +64,8 @@ impl Folio {
                         .hint_text("Filter chapters · c")
                         .desired_width(f32::INFINITY),
                 );
+                let response =
+                    response.on_hover_text("Match all keywords in any order, ignoring letter case");
                 if clear {
                     self.outline.query.clear();
                 }
