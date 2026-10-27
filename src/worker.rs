@@ -1,5 +1,6 @@
 use crate::{
     document::{self, RenderKey},
+    file_watch::FileWatch,
     text::{self, PageText, SearchHit, SearchOptions, SearchQuery},
 };
 use eframe::egui;
@@ -15,6 +16,9 @@ use std::{
 };
 
 pub enum Event {
+    FileChanged {
+        id: u64,
+    },
     Opened {
         id: u64,
         dimensions: Vec<[f32; 2]>,
@@ -185,7 +189,7 @@ impl Worker {
         std::thread::Builder::new()
             .name("folio-render".into())
             .spawn(move || {
-                let mut active: Option<(Pdf, u64)> = None;
+                let mut active: Option<(Pdf, u64, FileWatch)> = None;
                 loop {
                     let (close, request) = {
                         let (lock, wake) = &*state;
@@ -211,6 +215,7 @@ impl Worker {
                         active = None;
                     }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let watch = FileWatch::new(request.path.clone(), Instant::now());
                         let pdf = document::load(&request.path, &request.password)?;
                         let dimensions: Vec<_> = pdf
                             .pages()
@@ -229,14 +234,14 @@ impl Worker {
                         let outline = crate::outline::read(&pdf);
                         let labels = crate::page_labels::PageLabels::read(&pdf);
                         let info = crate::document_info::DocumentInfo::read(&pdf);
-                        Ok::<_, String>((pdf, dimensions, outline, labels, info))
+                        Ok::<_, String>((pdf, dimensions, outline, labels, info, watch))
                     }))
                     .unwrap_or_else(|_| {
                         Err("The PDF engine could not process this document.".into())
                     });
                     match result {
-                        Ok((pdf, dimensions, outline, labels, info)) => {
-                            active = Some((pdf, id));
+                        Ok((pdf, dimensions, outline, labels, info, watch)) => {
+                            active = Some((pdf, id, watch));
                             emit(
                                 &tx,
                                 &context,
@@ -259,9 +264,9 @@ impl Worker {
                             },
                         ),
                     }
-                    if let Some((pdf, active_id)) = &active
+                    if let Some((pdf, active_id, watch)) = &mut active
                         && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            session(pdf, *active_id, &state, &tx, &context);
+                            session(pdf, *active_id, watch, &state, &tx, &context);
                         }))
                         .is_err()
                     {
@@ -370,7 +375,14 @@ enum Job {
     Inspect(Inspection),
 }
 
-fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context: &egui::Context) {
+fn session(
+    pdf: &Pdf,
+    id: u64,
+    watch: &mut FileWatch,
+    shared: &Shared,
+    tx: &SyncSender<Event>,
+    context: &egui::Context,
+) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
     let destinations = crate::outline::DestinationIndex::new(pdf);
@@ -383,6 +395,16 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
             loop {
                 if pending.stop || pending.close || pending.open.is_some() {
                     return;
+                }
+                if watch.remaining(Instant::now()).is_zero() {
+                    // Filesystem I/O and bounded event sends must not hold the
+                    // task lock. Check between jobs too, even during searches.
+                    drop(pending);
+                    if watch.poll(Instant::now()) {
+                        emit(tx, context, Event::FileChanged { id });
+                    }
+                    pending = lock.lock().unwrap();
+                    continue;
                 }
                 if let Some(request) = pending.search.take() {
                     search = if request.query.is_empty() {
@@ -409,7 +431,10 @@ fn session(pdf: &Pdf, id: u64, shared: &Shared, tx: &SyncSender<Event>, context:
                 if let Some(key) = pending.thumbnails.pop_front() {
                     break Job::Thumbnail(key, pending.thumbnail_revision);
                 }
-                pending = wake.wait(pending).unwrap();
+                pending = wake
+                    .wait_timeout(pending, watch.remaining(Instant::now()))
+                    .unwrap()
+                    .0;
             }
         };
         if matches!(job, Job::Search(_)) {
@@ -1088,6 +1113,64 @@ mod tests {
         assert!(matches!(receive(&worker), Event::Opened { id: 4, .. }));
         worker.copy(0);
         assert!(matches!(receive(&worker), Event::Text { id: 4, .. }));
+    }
+
+    #[test]
+    fn file_changes_notify_without_replacing_the_snapshot_and_survive_failed_reload() {
+        let file = dense_sample(1);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(31, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 31, .. }));
+        let old = std::fs::read(file.path()).unwrap();
+        let new = String::from_utf8(old.clone())
+            .unwrap()
+            .replace("dense", "fresh");
+        std::fs::write(file.path(), new).unwrap();
+        assert!(matches!(receive(&worker), Event::FileChanged { id: 31 }));
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { text, .. } if text.contains("dense")));
+        worker.reload(31, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 31, .. }));
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { text, .. } if text.contains("fresh")));
+
+        std::fs::remove_file(file.path()).unwrap();
+        assert!(matches!(receive(&worker), Event::FileChanged { id: 31 }));
+        worker.reload(31, file.path().into(), String::new());
+        assert!(matches!(
+            receive(&worker),
+            Event::Error {
+                id: 31,
+                opening: true,
+                ..
+            }
+        ));
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { text, .. } if text.contains("fresh")));
+        std::fs::write(file.path(), old).unwrap();
+        assert!(matches!(receive(&worker), Event::FileChanged { id: 31 }));
+        worker.reload(31, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 31, .. }));
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { text, .. } if text.contains("dense")));
+
+        worker.open(32, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 32, .. }));
+        std::fs::write(file.path(), b"changed after switching").unwrap();
+        assert!(
+            worker
+                .events
+                .recv_timeout(Duration::from_millis(1200))
+                .is_err()
+        );
+        worker.close();
+        worker.copy(0);
+        assert!(
+            worker
+                .events
+                .recv_timeout(Duration::from_millis(100))
+                .is_err()
+        );
     }
 
     #[test]

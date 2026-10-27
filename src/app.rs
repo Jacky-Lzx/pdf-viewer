@@ -62,6 +62,7 @@ pub struct Folio {
     id: u64,
     loading: bool,
     reloading: bool,
+    file_changed: bool,
     error: Option<String>,
     message: Option<(String, Instant)>,
     pan: Vec2,
@@ -141,6 +142,7 @@ impl Folio {
             id: 0,
             loading: false,
             reloading: false,
+            file_changed: false,
             error: None,
             message: None,
             pan: Vec2::ZERO,
@@ -256,6 +258,7 @@ impl Folio {
         self.render_ms = 0.0;
         self.loading = false;
         self.reloading = false;
+        self.file_changed = false;
         self.error = None;
         self.message = None;
         self.goto.clear();
@@ -715,6 +718,9 @@ impl Folio {
         }
         while let Ok(event) = self.worker.events.try_recv() {
             match event {
+                Event::FileChanged { id } if id == self.id => {
+                    self.file_changed = true;
+                }
                 Event::PageText { id, page, text }
                     if id == self.id && page == self.nav.page && self.selection.active =>
                 {
@@ -739,6 +745,7 @@ impl Folio {
                         self.pending_offset = Some(self.current_offset());
                     }
                     self.reloading = false;
+                    self.file_changed = false;
                     self.loading = false;
                     self.error = None;
                     self.cache.clear();
@@ -909,7 +916,7 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        // Apply toolbar input actions before routing this frame's keyboard input.
+        // Apply button actions before routing this frame's keyboard input.
         // Otherwise a click that releases search focus can send following text
         // to reader commands before the new input has opened.
         match self.input_buttons.clicked(context) {
@@ -922,6 +929,12 @@ impl Folio {
             }
             Some(shortcuts::InputButton::Find) => self.find(),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
+            Some(shortcuts::InputButton::ReloadChanged) => {
+                if self.file_changed {
+                    self.reload();
+                }
+            }
+            Some(shortcuts::InputButton::DismissChange) => self.file_changed = false,
             None => {}
         }
         if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
@@ -1753,7 +1766,7 @@ impl Folio {
         } else {
             Color32::from_rgb(234, 233, 229)
         };
-        egui::CentralPanel::default()
+        let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(context, |ui| {
                 if self.nav.count == 0 {
@@ -1942,6 +1955,28 @@ impl Folio {
                         Color32::GRAY,
                     );
                 }
+            });
+        if self.file_changed && self.nav.count > 0 {
+            self.file_change_notice(context, canvas.response.rect);
+        }
+    }
+
+    fn file_change_notice(&mut self, context: &egui::Context, canvas: egui::Rect) {
+        egui::Area::new(egui::Id::new("file-change-notice"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(canvas.center_top() + Vec2::new(0.0, 12.0))
+            .pivot(egui::Align2::CENTER_TOP)
+            .show(context, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("PDF changed on disk.");
+                        let reload = ui
+                            .add_enabled(!self.loading, egui::Button::new("Reload"))
+                            .on_hover_text("Ctrl/Cmd+R — keep current reading position");
+                        self.input_buttons.reload_changed = Some(reload.id);
+                        self.input_buttons.dismiss_change = Some(ui.button("Dismiss").id);
+                    });
+                });
             });
     }
 

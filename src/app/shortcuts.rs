@@ -5,6 +5,8 @@ pub(super) enum InputButton {
     Help,
     Find,
     Page,
+    ReloadChanged,
+    DismissChange,
 }
 
 #[derive(Default)]
@@ -12,6 +14,8 @@ pub(super) struct InputButtons {
     pub help: Option<Id>,
     pub find: Option<Id>,
     pub page: Option<Id>,
+    pub reload_changed: Option<Id>,
+    pub dismiss_change: Option<Id>,
 }
 
 impl InputButtons {
@@ -20,13 +24,16 @@ impl InputButtons {
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),
             (self.page, InputButton::Page),
+            (self.reload_changed, InputButton::ReloadChanged),
+            (self.dismiss_change, InputButton::DismissChange),
         ] {
             let Some(response) = id.and_then(|id| context.read_response(id)) else {
                 continue;
             };
             if response.clicked() {
                 if !response.clicked_by(eframe::egui::PointerButton::Primary) {
-                    // Activation keys belong to the button, not its new input.
+                    // Activation keys belong to the button, not reader commands
+                    // or the newly opened input.
                     context.input_mut(|input| {
                         let activation = input.events.iter().find_map(|event| match event {
                             Event::Key {

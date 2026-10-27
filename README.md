@@ -40,6 +40,8 @@ NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择�
 
 `folio --page 12 [--] document.pdf` 从第 12 个物理页打开，页码从 1 开始，超过文档页数时打开末页。指定页会覆盖上次页码和页内滚动，保留已保存的缩放、旋转、书签与命名位置；加密文档在解锁后定位。普通启动继续恢复上次阅读位置。
 
+文档被编辑器或编译工具更新后，页面顶部会显示变化提示。点击 Reload 或按 `Ctrl/Cmd+r` 重新加载，保留当前页码、缩放、旋转和阅读位置；Dismiss 隐藏本次提示，后续更新仍会提示。文件尚未写完或暂时被移走时，加载失败仍可继续阅读旧内容。变化提示不会自动重载或打断输入。
+
 ## 键盘操作
 
 页面导航快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
@@ -192,6 +194,7 @@ xvfb-run -a python3 scripts/smoke-paths.py target/release/folio
 xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
 xvfb-run -a python3 scripts/smoke-close.py target/release/folio
 xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
+xvfb-run -a python3 scripts/smoke-file-watch.py target/release/folio
 xvfb-run -a python3 scripts/smoke-help.py target/release/folio
 xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
 xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio

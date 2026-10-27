@@ -49,6 +49,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
           xvfb-run -a python3 scripts/smoke-close.py target/release/folio
           xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-file-watch.py target/release/folio
           xvfb-run -a python3 scripts/smoke-help.py target/release/folio
           xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
           xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio

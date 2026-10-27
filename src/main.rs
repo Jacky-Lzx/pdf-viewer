@@ -5,6 +5,7 @@ mod cli;
 mod destination;
 mod document;
 mod document_info;
+mod file_watch;
 mod fonts;
 mod geometry;
 mod history;
