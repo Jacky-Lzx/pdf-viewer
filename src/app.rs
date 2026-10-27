@@ -496,6 +496,14 @@ impl Folio {
         self.zoom_at(factor, self.viewport * 0.5);
     }
 
+    fn zoom_steps(&mut self, count: usize, out: bool) {
+        let Some(dimensions) = self.resolve_view() else {
+            return;
+        };
+        let target = crate::navigation::zoom_target(self.scale, count, out);
+        self.apply_zoom(target, dimensions, self.viewport * 0.5);
+    }
+
     fn align_axis(&mut self, axis: usize, fraction: f32) {
         // Apply any saved/search/PDF position before changing only one axis.
         if self.resolve_view().is_none() {
@@ -1440,8 +1448,10 @@ impl Folio {
                     let page = self.nav.take_count() - 1;
                     self.jump(page);
                 }
-                Key::Plus | Key::Equals => self.zoom(1.2),
-                Key::Minus => self.zoom(1.0 / 1.2),
+                Key::Plus | Key::Equals | Key::Minus => {
+                    let count = self.nav.take_count();
+                    self.zoom_steps(count, key == Key::Minus);
+                }
                 Key::A => self.actual_size(),
                 Key::W => {
                     self.reading.fit = Fit::Width;

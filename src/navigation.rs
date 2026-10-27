@@ -5,6 +5,13 @@ pub const MAX_SCALE: f32 = 8.0;
 // Single-precision UI coordinates retain pixel precision up to this extent.
 pub const MAX_PAGE_EXTENT: f32 = 16_000_000.0;
 
+/// Compute counted zoom without intermediate views. Fit::Custom clamps the
+/// possible zero/infinite target using the actual page and viewport limits.
+pub fn zoom_target(scale: f32, count: usize, out: bool) -> f32 {
+    let exponent = count.min(i32::MAX as usize) as i32;
+    scale * 1.2_f32.powi(if out { -exponent } else { exponent })
+}
+
 /// Zero-based page at a percentage of the physical page count, rounded up.
 pub fn percentage_page(pages: usize, percentage: usize) -> usize {
     let percentage = percentage.min(100);
@@ -159,6 +166,48 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counted_zoom_matches_steps_and_extreme_counts_use_actual_fit_limits() {
+        for count in [0, 1, 2, 3, 7, 10] {
+            for out in [false, true] {
+                let factor = if out { 1.0 / 1.2 } else { 1.2 };
+                let mut expected = 1.0;
+                for _ in 0..count {
+                    expected *= factor;
+                }
+                let target = zoom_target(1.0, count, out);
+                assert!((target - expected).abs() <= expected * 0.000001);
+            }
+        }
+        let viewport = [1000.0, 700.0];
+        for page in [[600.0, 800.0], [600_000.0, 800_000.0], [f32::MAX, f32::MAX]] {
+            let current = Fit::Page.scale(page, viewport);
+            for count in [1, 3, 100, 9_999_999, usize::MAX] {
+                for out in [false, true] {
+                    let scale = Fit::Custom(zoom_target(current, count, out)).scale(page, viewport);
+                    assert!(scale.is_finite() && scale > 0.0);
+                    assert!(if out {
+                        scale <= current
+                    } else {
+                        scale >= current
+                    });
+                    assert!(
+                        page.into_iter()
+                            .all(|dimension| dimension * scale <= MAX_PAGE_EXTENT + 1.0)
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            Fit::Custom(zoom_target(1.0, usize::MAX, false)).scale([600.0, 800.0], viewport),
+            MAX_SCALE
+        );
+        assert_eq!(
+            Fit::Custom(zoom_target(1.0, usize::MAX, true)).scale([600.0, 800.0], viewport),
+            MIN_SCALE
+        );
+    }
 
     #[test]
     fn relative_jumps_use_physical_offsets_preserve_zero_and_clamp_extreme_counts() {

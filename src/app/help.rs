@@ -32,6 +32,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Alt+Left / Alt+Right", "Jump history back / forward"),
     ("+ / −  ·  Ctrl/Cmd++ / −", "Zoom in / out"),
+    (
+        "3+ / 3−   or   4=",
+        "Zoom by a count, preserving the viewport center",
+    ),
     ("p / w / e", "Fit page / width / height"),
     ("r / Shift+r", "Rotate clockwise / counterclockwise"),
     (

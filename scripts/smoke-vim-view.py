@@ -43,6 +43,14 @@ def run(binary):
                     and (horizontal is None or abs(book["offset"][0] - horizontal) < 0.001)
                     and not book["bookmarks"] and not config["thumbnails"]), description)
 
+            def zoom_scale(value, description, vertical=0.5, rotation=0):
+                return wait_for(lambda: saved(lambda config, book:
+                    book["page"] == 0 and book["rotation"] == rotation
+                    and isinstance(book["fit"], dict)
+                    and abs(book["fit"].get("Custom", -1) - value) < 0.00001
+                    and abs(book["offset"][1] - vertical) < 0.001
+                    and not book["bookmarks"] and not config["thumbnails"]), description)
+
             def sequence(value, burst=False):
                 if burst:
                     application.send_signal(signal.SIGSTOP)
@@ -180,6 +188,32 @@ def run(binary):
                 sequence("ggp")
                 position(0, 0, "reset after page-only scrolling", fit="Page")
                 sequence("a")
+                zoom_scale(1.0, "prepare counted zoom at 100%")
+                sequence("3+")
+                zoom_scale(1.2 ** 3, "three zoom-in steps preserve the viewport center")
+                sequence("3-")
+                zoom_scale(1.0, "three zoom-out steps reverse the count")
+                sequence("4=")
+                zoom_scale(1.2 ** 4, "Equals supports counted zoom without Shift")
+                sequence("4-")
+                zoom_scale(1.0, "counted Minus restores the starting scale")
+                sequence("0+")
+                zoom_scale(1.2, "zero count uses one zoom step")
+                sequence("9999999+")
+                zoom_scale(8.0, "large zoom-in count reaches the maximum directly")
+                sequence("9999999-")
+                zoom_scale(0.05, "large zoom-out count reaches the minimum directly", vertical=0)
+                sequence("9999999+J", burst=True)
+                position(1, 0, "counted zoom consumes its prefix before same-frame page navigation", fit={"Custom": 8.0})
+                sequence("Kp")
+                position(0, 0, "reset after extreme counted zoom", fit="Page")
+                sequence("a")
+                zoom_scale(1.0, "prepare rotated counted zoom")
+                sequence("r2+", burst=True)
+                zoom_scale(1.2 ** 2, "counted zoom preserves the rotated viewport center", rotation=1)
+                sequence("Rp")
+                position(0, 0, "reset after counted zoom", fit="Page")
+                sequence("a")
                 position(0, 0.5, "100% zoom preserves the fitted page center", fit={"Custom": 1.0}, horizontal=0)
                 sequence("+a", burst=True)
                 position(0, 0.5, "same-frame relative and 100% zoom preserve the center", fit={"Custom": 1.0}, horizontal=0)
@@ -202,13 +236,13 @@ def run(binary):
                 keyboard.key("0", ctrl=True)
                 position(0, 0.5, "Ctrl+0 preserves the fitted page center", fit={"Custom": 1.0}, horizontal=0)
                 input_background = keyboard.pixel((275, 450))
-                sequence("/jkg0-=")
+                sequence("/jkg0-=3+")
                 keyboard.key("0", ctrl=True)
                 keyboard.key("-", ctrl=True)
                 keyboard.key("=", ctrl=True)
                 keyboard.key("+", ctrl=True, shift=True)
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
-                assert keyboard.clipboard() == "jkg0-=", "zoom shortcuts must preserve search input focus and contents"
+                assert keyboard.clipboard() == "jkg0-=3+", "zoom shortcuts and counts must preserve search input focus and contents"
                 time.sleep(0.3)
                 assert keyboard.pixel((275, 450)) == input_background, "zoom shortcuts in text inputs must not resize the whole interface"
                 keyboard.key(0xFF1B)
@@ -290,7 +324,7 @@ def run(binary):
                 position(3, 0, "restored zoom and horizontal position remain navigable", fit, horizontal, rotation=1)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: counted clockwise/counterclockwise and full-turn rotations, large counts and toolbar cleanup, counted zH/zL half-screen distance, z0/z$ edges and same-frame restored alignment, standard zoom shortcuts and input/UI-scale guards, edge clamping, restored/rotated horizontal scrolling, toolbar/keyboard and same-frame restored rotation, counted Ctrl+e/y with no edge page turns, same-frame fit/scroll/alignment/zoom/restore, zt/zz/zb, invalid/cancelled prefixes, preserved zoom/pan and restart")
+                print("PASS: counted zoom, extreme zoom limits and count cleanup, counted clockwise/counterclockwise and full-turn rotations, large counts and toolbar cleanup, counted zH/zL half-screen distance, z0/z$ edges and same-frame restored alignment, standard zoom shortcuts and input/UI-scale guards, edge clamping, restored/rotated horizontal scrolling, toolbar/keyboard and same-frame restored rotation, counted Ctrl+e/y with no edge page turns, same-frame fit/scroll/alignment/zoom/restore, zt/zz/zb, invalid/cancelled prefixes, preserved zoom/pan and restart")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
