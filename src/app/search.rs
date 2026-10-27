@@ -225,12 +225,18 @@ mod tests {
     }
 
     fn frame(app: &mut Pagewing, context: &egui::Context, events: Vec<Event>) {
+        sized_frame(app, context, egui::vec2(1180.0, 820.0), events);
+    }
+
+    fn sized_frame(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+        events: Vec<Event>,
+    ) {
         let _ = context.run(
             egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1180.0, 820.0),
-                )),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 events,
                 ..Default::default()
             },
@@ -270,6 +276,46 @@ mod tests {
         assert_eq!(app.nav.page, 2);
         assert_eq!(app.pan, before);
         assert_eq!(app.query, "");
+    }
+
+    #[test]
+    fn narrow_search_bar_keeps_each_tabbed_button_visible() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        let size = egui::vec2(240.0, 240.0);
+        for _ in 0..4 {
+            sized_frame(&mut app, &context, size, Vec::new());
+        }
+        let ids = [
+            app.input_buttons.search_case.unwrap(),
+            app.input_buttons.search_word.unwrap(),
+            app.input_buttons.search_previous.unwrap(),
+            app.input_buttons.search_next.unwrap(),
+            app.input_buttons.search_results.unwrap(),
+            app.input_buttons.close_search.unwrap(),
+        ];
+        for id in ids {
+            sized_frame(&mut app, &context, size, key(Key::Tab));
+            for _ in 0..4 {
+                sized_frame(&mut app, &context, size, Vec::new());
+            }
+            assert!(context.memory(|memory| memory.has_focus(id)));
+            let rect = context.read_response(id).unwrap().rect;
+            assert!(
+                rect.left() >= 0.0 && rect.right() <= size.x,
+                "focused search button must be visible: {rect:?}"
+            );
+        }
+        let close = app.input_buttons.close_search.unwrap();
+        for width in [1180.0, 360.0, 240.0] {
+            let size = egui::vec2(width, 240.0);
+            for _ in 0..4 {
+                sized_frame(&mut app, &context, size, Vec::new());
+            }
+            let response = context.read_response(close).unwrap();
+            assert!(response.has_focus());
+            assert!(response.rect.left() >= 0.0 && response.rect.right() <= width);
+        }
     }
 
     #[test]
@@ -414,5 +460,31 @@ mod tests {
         assert_eq!(app.pending_search_jump, Some((false, 1)));
         assert_eq!(app.nav.page, 2);
         assert_eq!(app.pan, before);
+    }
+
+    #[test]
+    fn option_click_keeps_query_focus_for_enter_on_the_following_frame() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        app.query = "Rust".into();
+        context.memory_mut(|memory| memory.surrender_focus(egui::Id::new("pagewing-search-input")));
+        frame(&mut app, &context, Vec::new());
+        let pos = context
+            .read_response(app.input_buttons.search_word.unwrap())
+            .unwrap()
+            .rect
+            .center();
+        let mut events = vec![Event::PointerMoved(pos)];
+        events.extend([true, false].map(|pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }));
+        frame(&mut app, &context, events);
+        assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
+        frame(&mut app, &context, key(Key::Enter));
+        assert_eq!(app.pending_search_jump, Some((false, 1)));
+        assert_eq!(app.query, "Rust");
     }
 }

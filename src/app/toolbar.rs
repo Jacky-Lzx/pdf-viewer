@@ -120,7 +120,36 @@ pub(super) fn horizontal_bar<R>(
         .min_scrolled_width(0.0)
         .show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            ui.horizontal_centered(contents).inner
+            ui.horizontal_centered(|ui| {
+                let inner = contents(ui);
+                let state_id = ui.id().with("focused-control");
+                let state = (ui.memory(|memory| memory.focused()), ui.clip_rect().width());
+                let previous = ui.data_mut(|data| {
+                    let previous = data.get_temp::<(Option<egui::Id>, f32)>(state_id);
+                    data.insert_temp(state_id, state);
+                    previous
+                });
+                // Reveal a newly focused control or preserve it across a
+                // resize. Do not undo a user's subsequent wheel/drag scroll.
+                if previous != Some(state)
+                    && let Some(id) = state.0
+                {
+                    let response = {
+                        // read_response also processes outside clicks. Inspect
+                        // geometry without undoing an input's explicit focus.
+                        let _focus = super::shortcuts::preserve_pointer_focus(ui.ctx());
+                        ui.ctx().read_response(id)
+                    };
+                    if let Some(response) = response
+                        && response.layer_id == ui.layer_id()
+                        && ui.min_rect().contains_rect(response.rect)
+                    {
+                        response.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
+                    }
+                }
+                inner
+            })
+            .inner
         })
 }
 
@@ -150,9 +179,9 @@ mod tests {
         context: &Context,
         width: f32,
         events: Vec<Event>,
-    ) -> (ScrollAreaOutput<()>, Rect, bool) {
+    ) -> (ScrollAreaOutput<()>, egui::Response, bool) {
         let mut output = None;
-        let mut last = Rect::NOTHING;
+        let mut last = None;
         let mut clicked = false;
         let _ = context.run(
             RawInput {
@@ -192,8 +221,8 @@ mod tests {
                                         "trailing controls must not overlap the left group"
                                     );
                                     if label == "Help" {
-                                        last = response.rect;
                                         clicked = response.clicked();
+                                        last = Some(response);
                                     }
                                 }
                             });
@@ -223,7 +252,7 @@ mod tests {
         assert!(output.inner_rect.width() <= width);
         assert!(output.content_size.x.is_finite());
         assert!(output.content_size.y < 56.0, "buttons must stay on one row");
-        (output, last, clicked)
+        (output, last.unwrap(), clicked)
     }
 
     #[test]
@@ -254,14 +283,14 @@ mod tests {
             state.store(&context, output.id);
             // Reach the right edge, then click the previously hidden last control.
             let (output, last, _) = frame(&context, width, Vec::new());
-            assert!(output.inner_rect.contains(last.center()));
+            assert!(output.inner_rect.contains(last.rect.center()));
             frame(
                 &context,
                 width,
                 vec![
-                    Event::PointerMoved(last.center()),
+                    Event::PointerMoved(last.rect.center()),
                     Event::PointerButton {
-                        pos: last.center(),
+                        pos: last.rect.center(),
                         button: PointerButton::Primary,
                         pressed: true,
                         modifiers: Modifiers::NONE,
@@ -272,13 +301,50 @@ mod tests {
                 &context,
                 width,
                 vec![Event::PointerButton {
-                    pos: last.center(),
+                    pos: last.rect.center(),
                     button: PointerButton::Primary,
                     pressed: false,
                     modifiers: Modifiers::NONE,
                 }],
             );
             assert!(clicked, "last control must remain usable at width {width}");
+        }
+    }
+
+    #[test]
+    fn focused_control_is_revealed_on_resize_but_manual_scrolling_is_preserved() {
+        let context = Context::default();
+        let (_, target, _) = frame(&context, 1180.0, Vec::new());
+        context.memory_mut(|memory| memory.request_focus(target.id));
+        for width in [1180.0, 360.0, 240.0, 860.0, 240.0] {
+            for _ in 0..3 {
+                frame(&context, width, Vec::new());
+            }
+            let (output, target, _) = frame(&context, width, Vec::new());
+            assert!(target.has_focus());
+            assert!(
+                output.inner_rect.contains_rect(target.rect),
+                "focused control must remain visible at width {width}: {:?}",
+                target.rect
+            );
+        }
+        let (output, _, _) = frame(
+            &context,
+            240.0,
+            vec![
+                Event::PointerMoved(egui::pos2(120.0, 24.0)),
+                Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: Vec2::new(0.0, 4000.0),
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(output.state.offset.x, 0.0);
+        for _ in 0..3 {
+            let (output, target, _) = frame(&context, 240.0, Vec::new());
+            assert!(target.has_focus());
+            assert_eq!(output.state.offset.x, 0.0, "do not fight manual scrolling");
         }
     }
 }

@@ -158,6 +158,51 @@ def run(binary):
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "Rust", "activation keys leaked into the query"
                 keyboard.key(0xFF1B)
+                # At minimum width, focus must reveal the entire button rather
+                # than merely accepting keys while it remains off screen.
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key("f", ctrl=True)
+
+                def focused_span(width):
+                    # Both options are off: only the focused button has a
+                    # broad green fill near the top of the search-control row.
+                    spans, start = [], None
+                    for x in range(width + 1):
+                        color = keyboard.pixel((x, 69)) if x < width else (0, 0, 0)
+                        red, green, blue = color
+                        filled = green > red + 8 and green > blue + 6
+                        if filled and start is None:
+                            start = x
+                        elif not filled and start is not None:
+                            if x - start >= 12:
+                                spans.append((start, x))
+                            start = None
+                    return spans
+
+                for label in ("Aa", "Word", "Prev", "Next", "Results", "Close"):
+                    keyboard.key(0xFF09)
+                    spans = focused_span(240)
+                    assert len(spans) == 1 and 3 < spans[0][0] < spans[0][1] < 237, (label, spans)
+                # Wheel scrolling may intentionally hide a focused button.
+                keyboard.wheel((120, 77), down=False, steps=20)
+                time.sleep(0.2)
+                assert not focused_span(240), "focus reveal must not undo a manual scroll"
+                for width in (860, 240, 360, 240):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, width, 240)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.2)
+                    spans = focused_span(width)
+                    assert len(spans) == 1 and 3 < spans[0][0] < spans[0][1] < width - 3, (width, spans)
+                # Clicking the revealed control verifies that its pixels and
+                # actual interaction rectangle agree after resize/scroll.
+                keyboard.click(((spans[0][0] + spans[0][1]) // 2, 77))
+                keyboard.key("j", shift=True)
+                expect(5, "revealed close button is clickable at 240x240")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 860, 540)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
                 first(); find("absent")
                 keyboard.key("n")
                 time.sleep(0.5)
@@ -193,7 +238,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert json.loads(config_path.read_text())["recent"][0]["page"] == 0
-                print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
+                print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, actual focused-button visibility and click after 240x240 resize, manual scrolling, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

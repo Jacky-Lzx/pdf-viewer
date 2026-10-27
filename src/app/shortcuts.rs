@@ -280,7 +280,7 @@ pub(super) fn preserve_side_button_focus(
     Some(preserve_pointer_focus(context))
 }
 
-fn preserve_pointer_focus(context: &eframe::egui::Context) -> PointerFocusGuard {
+pub(super) fn preserve_pointer_focus(context: &eframe::egui::Context) -> PointerFocusGuard {
     let previous = context.options_mut(|options| {
         std::mem::replace(
             &mut options.input_options.surrender_focus_on,
