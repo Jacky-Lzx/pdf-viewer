@@ -50,11 +50,14 @@ impl TextureCache {
     }
 
     pub fn can_insert(&self, key: RenderKey, bytes: usize) -> bool {
-        let pinned = self
-            .pinned_for_insert(key)
+        bytes <= self.available_for_insert(self.pinned_for_insert(key))
+    }
+
+    fn available_for_insert(&self, pinned: Option<RenderKey>) -> usize {
+        let pinned = pinned
             .and_then(|pinned| self.entries.get(&pinned))
             .map_or(0, |entry| entry.bytes);
-        bytes <= self.budget.saturating_sub(pinned)
+        self.budget.saturating_sub(pinned)
     }
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -160,10 +163,10 @@ impl TextureCache {
 
     pub fn insert(&mut self, key: RenderKey, texture: TextureHandle) -> bool {
         let bytes = texture.size()[0] * texture.size()[1] * 4;
-        if !self.can_insert(key, bytes) {
+        let pinned = self.pinned_for_insert(key);
+        if bytes > self.available_for_insert(pinned) {
             return false;
         }
-        let pinned = self.pinned_for_insert(key);
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
