@@ -96,7 +96,7 @@ impl TextSelection {
             if let Some(text) = &self.text {
                 let range = 0..text.text.len();
                 if self.range.as_ref() != Some(&range) {
-                    self.rects = text.rects_for_range(range.clone());
+                    text.rects_for_range_into(range.clone(), &mut self.rects);
                     self.range = Some(range);
                 }
             }
@@ -126,7 +126,7 @@ impl TextSelection {
             }
         }
         if self.range.as_ref() != Some(&range) {
-            self.rects = text.rects_for_range(range.clone());
+            text.rects_for_range_into(range.clone(), &mut self.rects);
             self.range = Some(range);
         }
     }
@@ -156,6 +156,44 @@ mod tests {
             })
             .collect();
         Arc::new(page)
+    }
+
+    #[test]
+    fn shrinking_and_reversing_drags_reuse_highlights_without_stale_rectangles() {
+        let mut selection = TextSelection::default();
+        selection.start();
+        selection.set_text(text());
+        selection.select_all();
+        let full = vec![
+            Rect::new(0.0, 0.0, 60.0, 10.0),
+            Rect::new(0.0, 20.0, 60.0, 30.0),
+        ];
+        assert_eq!(selection.rects, full);
+        let buffer = selection.rects.as_ptr();
+        let capacity = selection.rects.capacity();
+        let same_storage = |selection: &TextSelection| {
+            assert_eq!(selection.rects.as_ptr(), buffer);
+            assert_eq!(selection.rects.capacity(), capacity);
+        };
+        selection.begin(Point::new(5.0, 5.0));
+        same_storage(&selection);
+        assert_eq!(selection.selected_text(), Some("R"));
+        assert_eq!(selection.rects, [Rect::new(0.0, 0.0, 10.0, 10.0)]);
+        selection.extend(Point::new(55.0, 25.0));
+        same_storage(&selection);
+        assert_eq!(selection.rects, full);
+        selection.begin(Point::new(55.0, 25.0));
+        selection.extend(Point::new(5.0, 5.0));
+        same_storage(&selection);
+        assert_eq!(selection.rects, full);
+        assert_eq!(selection.selected_text(), Some("Rust 中文\nreader"));
+        selection.set_text(Arc::new(PageText::default()));
+        same_storage(&selection);
+        assert!(selection.rects.is_empty());
+        assert!(selection.selected_text().is_none());
+        selection.set_text(text());
+        assert_eq!(selection.rects, full);
+        same_storage(&selection);
     }
 
     #[test]

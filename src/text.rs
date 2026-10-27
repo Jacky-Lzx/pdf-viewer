@@ -190,10 +190,17 @@ impl PageText {
     }
 
     pub fn rects_for_range(&self, range: Range<usize>) -> Vec<Rect> {
+        let mut rects = Vec::new();
+        self.rects_for_range_into(range, &mut rects);
+        rects
+    }
+
+    /// Reuse the selection's highlight allocation as a drag grows or shrinks.
+    pub fn rects_for_range_into(&self, range: Range<usize>, rects: &mut Vec<Rect>) {
+        rects.clear();
         let first = self
             .spans
             .partition_point(|span| span.range.end <= range.start);
-        let mut rects: Vec<Rect> = Vec::new();
         for rect in self.spans[first..]
             .iter()
             .take_while(|span| span.range.start < range.end)
@@ -210,7 +217,6 @@ impl PageText {
                 rects.push(rect);
             }
         }
-        rects
     }
 
     pub fn memory_bytes(&self) -> usize {
