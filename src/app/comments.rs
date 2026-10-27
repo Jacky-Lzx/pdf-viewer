@@ -1503,13 +1503,8 @@ mod tests {
                 Vec2::new(240.0, 240.0),
             );
         }
-        assert!(
-            app.comments.saving,
-            "the pinned action must accept clicks: loading {}, editor {}, message {:?}",
-            app.loading,
-            app.comments.editor.is_some(),
-            app.message
-        );
+        // A fast worker may already have saved and started reloading between
+        // pointer frames. Verify the resulting PDF, not that transient state.
         wait(&mut app, &context, |app| {
             !app.comments.saving && !app.loading && app.comments.loaded
         });
