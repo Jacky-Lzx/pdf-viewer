@@ -55,15 +55,12 @@ impl Folio {
                     .small_button("×")
                     .on_hover_text("Clear chapter filter")
                     .clicked();
-                super::shortcuts::focus_text_input(
+                let (response, _) = super::shortcuts::text_input(
                     ui,
                     egui::Id::new("folio-outline-input"),
                     &mut self.outline.focus,
                     &mut self.deferred_input,
-                );
-                let response = ui.add(
                     egui::TextEdit::singleline(&mut self.outline.query)
-                        .id(egui::Id::new("folio-outline-input"))
                         .hint_text("Filter chapters · c")
                         .desired_width(f32::INFINITY),
                 );

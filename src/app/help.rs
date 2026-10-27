@@ -183,26 +183,16 @@ impl Folio {
                         .color(ACCENT),
                 );
                 ui.add_space(8.0);
-                let focused_now = super::shortcuts::focus_text_input(
+                let (input, _) = super::shortcuts::text_input(
                     ui,
                     egui::Id::new("folio-help-input"),
                     &mut self.help_filter.focus,
                     &mut self.deferred_input,
+                    egui::TextEdit::singleline(&mut self.help_filter.query)
+                        .desired_width(f32::INFINITY)
+                        .char_limit(256)
+                        .hint_text("Filter by a key or action…"),
                 );
-                let input = {
-                    // The toolbar click that opened this window is outside
-                    // its input. Do not let it undo our explicit focus request
-                    // before the field can process this frame's typing.
-                    let _focus =
-                        focused_now.then(|| super::shortcuts::preserve_pointer_focus(context));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.help_filter.query)
-                            .id(egui::Id::new("folio-help-input"))
-                            .desired_width(f32::INFINITY)
-                            .char_limit(256)
-                            .hint_text("Filter by a key or action…"),
-                    )
-                };
                 if input.changed() {
                     self.help_filter.filter();
                 }

@@ -89,7 +89,7 @@ pub struct Folio {
     goto_focus: bool,
     help: bool,
     help_filter: help::HelpFilter,
-    help_button: Option<egui::Id>,
+    input_buttons: shortcuts::InputButtons,
     recent_picker: Option<crate::recent::RecentPicker>,
     password: String,
     password_open: bool,
@@ -164,7 +164,7 @@ impl Folio {
             goto_focus: false,
             help: false,
             help_filter: help::HelpFilter::default(),
-            help_button: None,
+            input_buttons: shortcuts::InputButtons::default(),
             recent_picker: None,
             password: String::new(),
             password_open: false,
@@ -597,6 +597,29 @@ impl Folio {
             .extend(self.reading.bookmarks.iter().copied());
     }
 
+    fn open_goto(&mut self) {
+        if self.nav.count == 0 {
+            return;
+        }
+        self.outline.cancel_input();
+        self.nav.clear_prefix();
+        self.hints.cancel();
+        self.selection.cancel();
+        self.mark_action = None;
+        self.recent_picker = None;
+        self.properties_open = false;
+        self.help = false;
+        self.password_open = false;
+        self.password_focus = false;
+        self.password.clear();
+        self.search_open = false;
+        self.search_focus = false;
+        self.pending_search_jump = None;
+        self.goto_open = true;
+        self.goto_focus = true;
+        self.goto.clear();
+    }
+
     fn find(&mut self) {
         self.outline.cancel_input();
         let selected = self
@@ -868,23 +891,20 @@ impl Folio {
     }
 
     fn keys(&mut self, context: &egui::Context) {
-        // Apply the toolbar toggle before routing this frame's keyboard input.
+        // Apply toolbar input actions before routing this frame's keyboard input.
         // Otherwise a click that releases search focus can send following text
-        // to reader commands before the help filter has opened.
-        if let Some(response) = self.help_button.and_then(|id| context.read_response(id))
-            && response.clicked()
-        {
-            if !response.clicked_by(egui::PointerButton::Primary) {
-                context.input_mut(|input| {
-                    input.consume_key(egui::Modifiers::NONE, Key::Enter);
-                    input.consume_key(egui::Modifiers::NONE, Key::Space);
-                });
+        // to reader commands before the new input has opened.
+        match self.input_buttons.clicked(context) {
+            Some(shortcuts::InputButton::Help) => {
+                if self.help {
+                    self.close_help(context);
+                } else {
+                    self.open_help(context);
+                }
             }
-            if self.help {
-                self.close_help(context);
-            } else {
-                self.open_help(context);
-            }
+            Some(shortcuts::InputButton::Find) => self.find(),
+            Some(shortcuts::InputButton::Page) => self.open_goto(),
+            None => {}
         }
         if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
             for (visible, name) in [
@@ -1471,11 +1491,7 @@ impl Folio {
                 Key::Y if self.selection.active => self.copy_selection(context),
                 Key::Y => self.worker.copy(self.nav.page),
                 Key::O => self.choose_file(),
-                Key::Colon => {
-                    self.goto_open = true;
-                    self.goto_focus = true;
-                    self.goto.clear();
-                }
+                Key::Colon => self.open_goto(),
                 Key::Questionmark | Key::F1 => self.open_help(context),
                 Key::F11 => {
                     let fullscreen =
@@ -1491,6 +1507,7 @@ impl Folio {
     }
 
     fn toolbar(&mut self, context: &egui::Context) {
+        self.input_buttons = shortcuts::InputButtons::default();
         egui::TopBottomPanel::top("toolbar")
             .exact_height(56.0)
             .show(context, |ui| {
@@ -1530,8 +1547,8 @@ impl Folio {
                         {
                             self.step(-1);
                         }
-                        if ui
-                            .button(format!(
+                        self.input_buttons.page = Some(
+                            ui.button(format!(
                                 "{} / {}",
                                 self.page_name(self.nav.page),
                                 self.nav.count
@@ -1543,12 +1560,8 @@ impl Folio {
                                     self.labels.label(self.nav.page).unwrap_or_default()
                                 ));
                             })
-                            .clicked()
-                        {
-                            self.goto_open = true;
-                            self.goto_focus = true;
-                            self.goto.clear();
-                        }
+                            .id,
+                        );
                         if ui.button("›").on_hover_text("Next page · J / ]").clicked() {
                             self.step(1);
                         }
@@ -1596,7 +1609,7 @@ impl Folio {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(12.0);
-                        self.help_button = Some(ui.button("?").id);
+                        self.input_buttons.help = Some(ui.button("?").id);
                         if ui
                             .button(if self.library.dark { "Light" } else { "Dark" })
                             .clicked()
@@ -1606,13 +1619,11 @@ impl Folio {
                             self.dirty = true;
                         }
                         if self.nav.count > 0 {
-                            if ui
-                                .button("Find")
-                                .on_hover_text("Search · / or Ctrl/Cmd+F")
-                                .clicked()
-                            {
-                                self.find();
-                            }
+                            self.input_buttons.find = Some(
+                                ui.button("Find")
+                                    .on_hover_text("Search · / or Ctrl/Cmd+F")
+                                    .id,
+                            );
                             if ui
                                 .selectable_label(
                                     self.reading.bookmarks.contains(&self.nav.page),
@@ -1639,15 +1650,12 @@ impl Folio {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(16.0);
                     ui.label("Find");
-                    let focused_now = shortcuts::focus_text_input(
+                    let (response, focused_now) = shortcuts::text_input(
                         ui,
                         egui::Id::new("folio-search-input"),
                         &mut self.search_focus,
                         &mut self.deferred_input,
-                    );
-                    let response = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
-                            .id(egui::Id::new("folio-search-input"))
                             .desired_width((ui.available_width() - 600.0).clamp(100.0, 280.0))
                             .hint_text("Search this document…"),
                     );
@@ -2249,15 +2257,12 @@ impl Folio {
                 .show(context, |ui| {
                     ui.label(format!("Physical page 1–{}", self.nav.count));
                     ui.weak("Or a PDF label: iv, A-3. Use =1 for label 1.");
-                    let focused_now = shortcuts::focus_text_input(
+                    let (response, focused_now) = shortcuts::text_input(
                         ui,
                         egui::Id::new("folio-page-input"),
                         &mut self.goto_focus,
                         &mut self.deferred_input,
-                    );
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.goto)
-                            .id(egui::Id::new("folio-page-input")),
+                        egui::TextEdit::singleline(&mut self.goto),
                     );
                     let go = ui.button("Go").clicked();
                     if !ui.is_sizing_pass()
@@ -2281,16 +2286,12 @@ impl Folio {
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
                     ui.label("This document is encrypted.");
-                    let focused_now = shortcuts::focus_text_input(
+                    let (response, focused_now) = shortcuts::text_input(
                         ui,
                         egui::Id::new("folio-password-input"),
                         &mut self.password_focus,
                         &mut self.deferred_input,
-                    );
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.password)
-                            .id(egui::Id::new("folio-password-input"))
-                            .password(true),
+                        egui::TextEdit::singleline(&mut self.password).password(true),
                     );
                     let unlock = ui.button("Unlock").clicked();
                     if !ui.is_sizing_pass()

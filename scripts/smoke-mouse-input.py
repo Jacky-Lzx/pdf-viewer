@@ -34,7 +34,7 @@ def run(binary):
                         config = json.loads(config_path.read_text())
                         book = config["recent"][0]
                         return (book["page"] == page and book["rotation"] == 0
-                                and book["fit"] == "Page"
+                                and book["fit"] == "Page" and not book["marks"] and not book["bookmarks"]
                                 and not any(config[name] for name in ("dark", "night", "thumbnails")))
                     except (OSError, ValueError, KeyError, IndexError):
                         return False
@@ -86,7 +86,15 @@ def run(binary):
                 keyboard.key(0xFF1B)
                 keyboard.key("j", shift=True)
                 expect(1)
-                print("PASS: same-frame mouse click plus chapter/search text, actual clipboard content, immediate search Enter, no reader action leakage and Escape focus release")
+                # Opening a toolbar input and typing can arrive in one busy frame.
+                click_burst((1050, 28), "jkgditoolbar")
+                copied_query("jkgditoolbar")
+                expect(1)
+                keyboard.key(0xFF1B)
+                keyboard.key("9"); keyboard.key("9"); keyboard.key("m")
+                click_burst((370, 28), "4", enter=True)
+                expect(3)
+                print("PASS: same-frame mouse click plus chapter/search text, toolbar search/page input, actual clipboard content, immediate Enter, no reader action leakage and Escape focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

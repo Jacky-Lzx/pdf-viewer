@@ -38,15 +38,12 @@ impl Folio {
             .default_width(580.0)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(context, |ui| {
-                super::shortcuts::focus_text_input(
+                let (input, _) = super::shortcuts::text_input(
                     ui,
                     egui::Id::new("folio-recent-input"),
                     &mut picker.focus,
                     &mut self.deferred_input,
-                );
-                let input = ui.add(
                     egui::TextEdit::singleline(&mut picker.query)
-                        .id(egui::Id::new("folio-recent-input"))
                         .desired_width(f32::INFINITY)
                         .hint_text("Filter by filename or path…"),
                 );

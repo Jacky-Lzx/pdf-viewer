@@ -1,5 +1,54 @@
 use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum InputButton {
+    Help,
+    Find,
+    Page,
+}
+
+#[derive(Default)]
+pub(super) struct InputButtons {
+    pub help: Option<Id>,
+    pub find: Option<Id>,
+    pub page: Option<Id>,
+}
+
+impl InputButtons {
+    pub fn clicked(&self, context: &eframe::egui::Context) -> Option<InputButton> {
+        for (id, action) in [
+            (self.help, InputButton::Help),
+            (self.find, InputButton::Find),
+            (self.page, InputButton::Page),
+        ] {
+            let Some(response) = id.and_then(|id| context.read_response(id)) else {
+                continue;
+            };
+            if response.clicked() {
+                if !response.clicked_by(eframe::egui::PointerButton::Primary) {
+                    // Activation keys belong to the button, not its new input.
+                    context.input_mut(|input| {
+                        let activation = input.events.iter().find_map(|event| match event {
+                            Event::Key {
+                                key: key @ (Key::Enter | Key::Space),
+                                pressed: true,
+                                modifiers,
+                                ..
+                            } => Some((*key, *modifiers)),
+                            _ => None,
+                        });
+                        if let Some((key, modifiers)) = activation {
+                            consume_text_shortcut(input, key, modifiers);
+                        }
+                    });
+                }
+                return Some(action);
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum ZoomAction {
     In,
@@ -94,7 +143,7 @@ pub(super) fn preserve_side_button_focus(
     Some(preserve_pointer_focus(context))
 }
 
-pub(super) fn preserve_pointer_focus(context: &eframe::egui::Context) -> PointerFocusGuard {
+fn preserve_pointer_focus(context: &eframe::egui::Context) -> PointerFocusGuard {
     let previous = context.options_mut(|options| {
         std::mem::replace(
             &mut options.input_options.surrender_focus_on,
@@ -107,12 +156,7 @@ pub(super) fn preserve_pointer_focus(context: &eframe::egui::Context) -> Pointer
     }
 }
 
-pub(super) fn focus_text_input(
-    ui: &Ui,
-    id: Id,
-    requested: &mut bool,
-    deferred: &mut Vec<Event>,
-) -> bool {
+fn focus_text_input(ui: &Ui, id: Id, requested: &mut bool, deferred: &mut Vec<Event>) -> bool {
     if !*requested {
         return false;
     }
@@ -143,6 +187,20 @@ pub(super) fn focus_text_input(
         memory.move_focus(eframe::egui::FocusDirection::None);
     });
     true
+}
+
+pub(super) fn text_input(
+    ui: &mut Ui,
+    id: Id,
+    requested: &mut bool,
+    deferred: &mut Vec<Event>,
+    field: eframe::egui::TextEdit<'_>,
+) -> (eframe::egui::Response, bool) {
+    let focused_now = focus_text_input(ui, id, requested, deferred);
+    // Opening a field with a button must not let that outside click undo
+    // the explicit focus request before this frame's text is processed.
+    let _focus = focused_now.then(|| preserve_pointer_focus(ui.ctx()));
+    (ui.add(field.id(id)), focused_now)
 }
 
 pub(super) fn focus_clicked_input(context: &eframe::egui::Context, id: Id) -> bool {
@@ -188,6 +246,122 @@ pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn button_opening_routes_text_and_consumes_keyboard_activation_without_leaking_focus_rules() {
+        use eframe::egui::{
+            CentralPanel, Context, PointerButton, RawInput, SurrenderFocusOn, TextEdit,
+        };
+
+        for (activation, submit) in [
+            (None, false),
+            (Some(Key::Enter), false),
+            (Some(Key::Space), false),
+            (None, true),
+            (Some(Key::Enter), true),
+            (Some(Key::Space), true),
+        ] {
+            let context = Context::default();
+            let id = Id::new("button-input");
+            let mut requested = false;
+            let mut text = String::new();
+            let mut deferred = Vec::new();
+            let mut button = None;
+            let mut pos = Default::default();
+            let _ = context.run(RawInput::default(), |context| {
+                CentralPanel::default().show(context, |ui| {
+                    let response = ui.button("Find");
+                    button = Some(response.id);
+                    pos = response.rect.center();
+                    text_input(
+                        ui,
+                        id,
+                        &mut requested,
+                        &mut deferred,
+                        TextEdit::singleline(&mut text),
+                    );
+                });
+            });
+            let buttons = InputButtons {
+                find: button,
+                ..Default::default()
+            };
+            let click = || {
+                [true, false].map(|pressed| Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                })
+            };
+            let mut events = if let Some(activation_key) = activation {
+                context.memory_mut(|memory| memory.request_focus(button.unwrap()));
+                vec![key(activation_key, Modifiers::NONE, true)]
+            } else {
+                let mut events = vec![Event::PointerMoved(pos)];
+                events.extend(click());
+                events
+            };
+            if activation == Some(Key::Space) {
+                events.push(Event::Text(" ".into()));
+            }
+            events.extend([key(Key::J, Modifiers::NONE, true), Event::Text("j".into())]);
+            if submit {
+                events.push(key(Key::Enter, Modifiers::NONE, true));
+            }
+            let _ = context.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    assert_eq!(buttons.clicked(context), Some(InputButton::Find));
+                    requested = true;
+                    CentralPanel::default().show(context, |ui| {
+                        let _ = ui.button("Find");
+                        text_input(
+                            ui,
+                            id,
+                            &mut requested,
+                            &mut deferred,
+                            TextEdit::singleline(&mut text),
+                        );
+                    });
+                    assert_eq!(
+                        context.options(|options| options.input_options.surrender_focus_on),
+                        SurrenderFocusOn::Clicks
+                    );
+                },
+            );
+            assert_eq!(text, "j");
+            assert_eq!(context.memory(|memory| memory.has_focus(id)), !submit);
+
+            // An ordinary outside click on the next frame still releases focus.
+            let mut events = vec![Event::PointerMoved(pos)];
+            events.extend(click());
+            events.push(Event::Text("k".into()));
+            let _ = context.run(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    CentralPanel::default().show(context, |ui| {
+                        let _ = ui.button("Find");
+                        text_input(
+                            ui,
+                            id,
+                            &mut requested,
+                            &mut deferred,
+                            TextEdit::singleline(&mut text),
+                        );
+                    });
+                },
+            );
+            assert_eq!(text, "j");
+            assert!(!context.memory(|memory| memory.has_focus(id)));
+        }
+    }
 
     #[test]
     fn zoom_shortcuts_use_platform_command_and_preserve_altgr_and_shifted_zero() {
