@@ -8,6 +8,11 @@ use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
 
 impl Pagewing {
+    pub(super) fn clear_multi_page_buffers(&mut self) {
+        self.continuous_geometry = crate::page_geometry::PageGeometry::default();
+        self.other_visible_links = crate::link_visibility::LinkVisibility::default();
+    }
+
     fn continuous_view(&self, pixels_per_point: f32) -> RenderView {
         RenderView {
             fit: if self.reading.facing {
@@ -336,6 +341,101 @@ mod tests {
     use super::*;
     use crate::navigation::Navigation;
 
+    #[test]
+    fn neighboring_link_overlays_reuse_storage_but_refresh_replaced_metadata() {
+        use crate::links::{LinkTarget, PageLink};
+        use hayro::kurbo::Rect as PdfRect;
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.dimensions = vec![[600.0, 500.0]; 3];
+        app.nav = Navigation::new(3, 0);
+        app.reading.fit = Fit::Custom(1.0);
+        app.set_display_mode(true, false);
+        app.scale = 1.0;
+        let links = |count, offset| {
+            (0..count)
+                .map(|index| PageLink {
+                    rect: PdfRect::new(
+                        offset,
+                        40.0 + index as f64 * 30.0,
+                        offset + 50.0,
+                        60.0 + index as f64 * 30.0,
+                    ),
+                    target: LinkTarget::Url("https://example.com".into()),
+                })
+                .collect()
+        };
+        for (page, count) in [(0, 1), (1, 2), (2, 1)] {
+            app.links.insert(page, links(count, 40.0), 0);
+        }
+        let draw = |app: &mut Pagewing, page| {
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(700.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| {
+                        app.link_overlays(
+                            ui,
+                            page,
+                            egui::Rect::from_min_size(
+                                egui::pos2(20.0, 30.0),
+                                egui::vec2(600.0, 500.0),
+                            ),
+                            [600.0, 500.0],
+                        );
+                    });
+                },
+            );
+        };
+        draw(&mut app, 0);
+        assert_eq!(app.visible_links.indices, [0]);
+        draw(&mut app, 1);
+        assert_eq!(app.other_visible_links.indices, [0, 1]);
+        let indices = app.other_visible_links.indices.as_ptr();
+        let rects = app.other_visible_links.rects.as_ptr();
+        draw(&mut app, 2);
+        assert_eq!(app.other_visible_links.indices, [0]);
+        assert_eq!(app.other_visible_links.indices.as_ptr(), indices);
+        assert_eq!(app.other_visible_links.rects.as_ptr(), rects);
+        assert_eq!(app.visible_links.indices, [0]);
+        let before = app.other_visible_links.rects[0];
+        app.links.insert(2, links(1, 140.0), 0);
+        draw(&mut app, 2);
+        assert_eq!(
+            app.other_visible_links.rects[0],
+            before.translate(egui::vec2(100.0, 0.0))
+        );
+        app.links.insert(2, Vec::new(), 0);
+        draw(&mut app, 2);
+        assert!(app.other_visible_links.indices.is_empty());
+        draw(&mut app, 1);
+        assert_eq!(app.other_visible_links.indices, [0, 1]);
+        assert_eq!(app.other_visible_links.indices.as_ptr(), indices);
+        assert_eq!(app.other_visible_links.rects.as_ptr(), rects);
+        app.set_display_mode(false, false);
+        assert_eq!(app.other_visible_links.indices.capacity(), 0);
+        assert_eq!(app.other_visible_links.rects.capacity(), 0);
+        let single = app.current_position();
+        app.set_display_mode(false, true);
+        draw(&mut app, 1);
+        assert!(!app.other_visible_links.indices.is_empty());
+        app.restore_position(single, false);
+        assert_eq!(app.other_visible_links.indices.capacity(), 0);
+        assert_eq!(app.other_visible_links.rects.capacity(), 0);
+        app.set_display_mode(true, false);
+        draw(&mut app, 1);
+        app.clear_document(&context);
+        assert_eq!(app.other_visible_links.indices.capacity(), 0);
+        assert_eq!(app.other_visible_links.rects.capacity(), 0);
+    }
+
     fn frame(app: &mut Pagewing, context: &egui::Context) {
         let output = context.run(
             egui::RawInput {
@@ -422,9 +522,14 @@ mod tests {
         assert!(app.continuous_geometry.pages().is_empty());
         frame(&mut app, &context);
         assert!(app.continuous_geometry.pages().is_empty());
+        let single = app.current_position();
         app.set_display_mode(true, false);
         frame(&mut app, &context);
         assert!(!app.continuous_geometry.pages().is_empty());
+        app.restore_position(single, false);
+        assert!(app.continuous_geometry.pages().is_empty());
+        app.set_display_mode(true, false);
+        frame(&mut app, &context);
         app.clear_document(&context);
         assert!(app.continuous_geometry.pages().is_empty());
     }

@@ -22,8 +22,12 @@ def fixture():
         (600, 800, "0.24 0.36 0.86"),
     ]):
         stream = f"{color} rg 0 0 {width} {height} re f".encode()
-        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents {4 + index * 2} 0 R >>".encode())
+        annotations = " /Annots [9 0 R]" if index == 1 else ""
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents {4 + index * 2} 0 R{annotations} >>".encode())
         objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
+    # The green neighboring page links to the final blue page. Its borderless
+    # full-page target lets the test exercise actual non-current-page hit areas.
+    objects.append(b"<< /Type /Annot /Subtype /Link /Rect [0 0 900 300] /Border [0 0 0] /Dest [7 0 R /Fit] >>")
     output, offsets = bytearray(b"%PDF-1.4\n"), [0]
     for index, value in enumerate(objects, 1):
         offsets.append(len(output))
@@ -61,9 +65,24 @@ def run(binary):
                 for character in text:
                     keyboard.key(character.lower(), shift=character.isupper(), delay=0.03)
 
+            def follow_neighbor(position, description):
+                def clicked():
+                    try:
+                        book = json.loads(config.read_text())["recent"][0]
+                    except (OSError, ValueError, KeyError, IndexError):
+                        return None
+                    if book["page"] == 2:
+                        return book
+                    # Link metadata is loaded asynchronously. Until it arrives,
+                    # another click on the same green region is harmless.
+                    keyboard.click(position)
+                    return None
+                return wait_for(clicked, description)
+
             try:
                 wait_for(keyboard.focus, "continuous reader")
                 expect(lambda book: book["page"] == 0, "initial page")
+                sequence("ms")
                 sequence("C6j")
                 expect(lambda book: book["continuous"] and book["offset"][1] > 0.4,
                        "continuous mode and partial first page")
@@ -72,6 +91,10 @@ def run(binary):
                          and keyboard.pixel((600, 650))[1] > 150
                          and keyboard.pixel((600, 650))[0] < 100,
                          "red page tail and green next page are drawn together")
+                follow_neighbor((600, 650), "link on the neighboring continuous page opens the blue page")
+                sequence("gg6j")
+                expect(lambda book: book["page"] == 0 and book["offset"][1] > 0.4,
+                       "return to the original continuous view after following a neighboring link")
                 sequence("gg")
                 expect(lambda book: book["page"] == 0 and book["offset"][1] == 0,
                        "first-page command returns to the top even on the same page")
@@ -86,6 +109,12 @@ def run(binary):
                 sequence("'a")
                 first = expect(lambda book: book["page"] == 0 and book["offset"][1] > 0.4,
                                "mark restores the continuous view")
+                sequence("'s")
+                expect(lambda book: not book["continuous"] and not book["facing"]
+                       and book["page"] == 0, "a mark restores the single-page mode")
+                sequence("'a")
+                expect(lambda book: book["continuous"] and abs(book["offset"][1] - first["offset"][1]) < 0.001,
+                       "continuous reading resumes after restoring a single-page mark")
                 sequence("C")
                 expect(lambda book: not book["continuous"], "single page mode remains available")
                 sequence("'a")
@@ -120,6 +149,10 @@ def run(binary):
                     return red[0] > 180 and red[1] < 100 and green[1] > 150 and green[0] < 100
 
                 wait_for(spread_visible, "red and green pages share the spread")
+                follow_neighbor((800, 200), "link on the neighboring spread page opens the blue page")
+                sequence("K")
+                expect(lambda book: book["page"] == 0, "return to the spread after following its neighboring link")
+                wait_for(spread_visible, "both pages return after following the neighboring link")
                 sequence("J")
                 expect(lambda book: book["facing"] and book["page"] == 2, "spread step reaches the final unpaired page")
                 wait_for(lambda: keyboard.pixel((600, 200))[2] > 180
@@ -136,7 +169,7 @@ def run(binary):
                          and keyboard.pixel((600, 200))[1] < 100, "single-page drawing remains available after releasing shared geometry")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: simultaneous mixed-size pages, keyboard/wheel scrolling, edges, marks, mode switching, restart, two-page restore, final unpaired page and rotated spreads")
+                print("PASS: simultaneous mixed-size pages, links on neighboring continuous/spread pages, keyboard/wheel scrolling, edges, marks, mode switching, restart, two-page restore, final unpaired page and rotated spreads")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

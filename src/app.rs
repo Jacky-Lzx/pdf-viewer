@@ -72,6 +72,7 @@ pub struct Pagewing {
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
     visible_links: crate::link_visibility::LinkVisibility,
+    other_visible_links: crate::link_visibility::LinkVisibility,
     hints: LinkHints,
     copy_link_hints: bool,
     mark_action: Option<MarkAction>,
@@ -226,6 +227,7 @@ impl Pagewing {
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
             visible_links: crate::link_visibility::LinkVisibility::default(),
+            other_visible_links: crate::link_visibility::LinkVisibility::default(),
             hints: LinkHints::default(),
             copy_link_hints: false,
             mark_action: None,
@@ -346,7 +348,7 @@ impl Pagewing {
         self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
         self.continuous_layout = crate::continuous::Layout::default();
-        self.continuous_geometry = crate::page_geometry::PageGeometry::default();
+        self.clear_multi_page_buffers();
         self.continuous_link_request = None;
         self.info = crate::document_info::DocumentInfo::default();
         self.properties_open = false;
@@ -504,6 +506,9 @@ impl Pagewing {
         self.reading.rotation = position.rotation % 4;
         self.reading.continuous = position.continuous;
         self.reading.facing = position.facing;
+        if !position.continuous && !position.facing {
+            self.clear_multi_page_buffers();
+        }
         self.pending_offset = Some(position.offset);
     }
 
@@ -923,7 +928,7 @@ impl Pagewing {
                     self.dimensions = dimensions;
                     self.synctex.geometry = sync_geometry;
                     self.continuous_layout = crate::continuous::Layout::default();
-                    self.continuous_geometry = crate::page_geometry::PageGeometry::default();
+                    self.clear_multi_page_buffers();
                     self.continuous_link_request = None;
                     self.info = info;
                     self.comments.reset(reloaded);
@@ -2255,11 +2260,13 @@ impl Pagewing {
             return;
         }
         let links = self.links.get(&page).map(Vec::as_slice).unwrap_or(&[]);
-        let mut other_links = crate::link_visibility::LinkVisibility::default();
         let visible = if page == self.nav.page {
             &mut self.visible_links
         } else {
-            &mut other_links
+            // Reuse one scratch buffer across neighboring pages. Recompute
+            // every time so replacement or eviction of metadata stays visible.
+            self.other_visible_links.invalidate();
+            &mut self.other_visible_links
         };
         let changed = visible.update(
             crate::link_visibility::LinkView {
@@ -2279,7 +2286,7 @@ impl Pagewing {
         let visible = if page == self.nav.page {
             &self.visible_links
         } else {
-            &other_links
+            &self.other_visible_links
         };
         let matching = self.hints.matching_range();
         let mut follow = None;

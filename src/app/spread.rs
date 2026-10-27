@@ -80,7 +80,7 @@ impl Pagewing {
         self.reading.continuous = continuous;
         self.reading.facing = facing;
         if !continuous && !facing {
-            self.continuous_geometry = crate::page_geometry::PageGeometry::default();
+            self.clear_multi_page_buffers();
         }
         self.page_changed();
         self.continuous_link_request = None;
