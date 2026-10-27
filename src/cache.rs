@@ -17,7 +17,7 @@ pub struct TextureCache {
     pub bytes: usize,
     pub hits: u64,
     budget: usize,
-    protected: Option<RenderKey>,
+    protected: Vec<RenderKey>,
 }
 
 impl Default for TextureCache {
@@ -28,7 +28,7 @@ impl Default for TextureCache {
             bytes: 0,
             hits: 0,
             budget: BUDGET,
-            protected: None,
+            protected: Vec::new(),
         }
     }
 }
@@ -50,39 +50,49 @@ impl TextureCache {
     }
 
     pub fn can_insert(&self, key: RenderKey, bytes: usize) -> bool {
-        bytes <= self.available_for_insert(self.pinned_for_insert(key))
+        bytes <= self.available_for_insert(&self.pinned_for_insert(key))
     }
 
-    fn available_for_insert(&self, pinned: Option<RenderKey>) -> usize {
-        let pinned = pinned
-            .and_then(|pinned| self.entries.get(&pinned))
-            .map_or(0, |entry| entry.bytes);
-        self.budget.saturating_sub(pinned)
+    fn available_for_insert(&self, pinned: &[RenderKey]) -> usize {
+        let bytes: usize = pinned
+            .iter()
+            .filter_map(|key| self.entries.get(key))
+            .map(|entry| entry.bytes)
+            .sum();
+        self.budget.saturating_sub(bytes)
     }
     pub fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
         self.hits = 0;
-        self.protected = None;
+        self.protected.clear();
     }
 
     pub fn protect(&mut self, key: RenderKey) {
-        self.protected = Some(key);
+        self.protect_many(&[key]);
     }
 
-    fn pinned_for_insert(&self, key: RenderKey) -> Option<RenderKey> {
-        let target = self.protected?;
-        // The desired raster may replace a displayed fallback. Other jobs must
-        // preserve whichever texture is currently usable for this view.
-        if target == key {
-            return None;
-        }
-        let pinned = if self.entries.contains_key(&target) {
-            target
-        } else {
-            self.fallback_key(target)?
-        };
-        (pinned != key).then_some(pinned)
+    pub fn protect_many(&mut self, keys: &[RenderKey]) {
+        self.protected.clear();
+        self.protected.extend_from_slice(keys);
+    }
+
+    fn pinned_for_insert(&self, key: RenderKey) -> Vec<RenderKey> {
+        self.protected
+            .iter()
+            .filter_map(|&target| {
+                // A target may replace its own displayed zoom fallback.
+                if target == key {
+                    return None;
+                }
+                let pinned = if self.entries.contains_key(&target) {
+                    target
+                } else {
+                    self.fallback_key(target)?
+                };
+                (pinned != key).then_some(pinned)
+            })
+            .collect()
     }
 
     /// Drawing needs only the ID; the cache retains ownership until eviction.
@@ -116,14 +126,14 @@ impl TextureCache {
             .copied()
     }
 
-    fn make_room(&mut self, bytes: usize, pinned: Option<RenderKey>) -> bool {
+    fn make_room(&mut self, bytes: usize, pinned: &[RenderKey]) -> bool {
         let remaining = self.budget.saturating_sub(bytes);
         let fits = |cache: &Self| cache.bytes <= remaining && cache.entries.len() < MAX_ENTRIES;
         while !fits(self) {
             let Some(oldest) = self
                 .entries
                 .iter()
-                .filter(|(key, _)| Some(**key) != pinned)
+                .filter(|(key, _)| !pinned.contains(key))
                 .min_by_key(|(_, entry)| entry.used)
                 .map(|(key, _)| *key)
             else {
@@ -133,9 +143,13 @@ impl TextureCache {
             if fits(self) {
                 return true;
             }
-            let protected = pinned.and_then(|key| self.entries.get(&key));
-            let eligible = self.entries.len() - usize::from(protected.is_some());
-            let eligible_bytes = self.bytes - protected.map_or(0, |entry| entry.bytes);
+            let protected_bytes: usize = pinned
+                .iter()
+                .filter_map(|key| self.entries.get(key))
+                .map(|entry| entry.bytes)
+                .sum();
+            let eligible = self.entries.len() - pinned.len();
+            let eligible_bytes = self.bytes - protected_bytes;
             // Keep ordinary single/few evictions allocation-free. A large
             // raster can instead release many entries using one sorted scan.
             if eligible < 32
@@ -147,7 +161,7 @@ impl TextureCache {
             let mut oldest: Vec<_> = self
                 .entries
                 .iter()
-                .filter(|(key, _)| Some(**key) != pinned)
+                .filter(|(key, _)| !pinned.contains(key))
                 .map(|(&key, entry)| (entry.used, key))
                 .collect();
             oldest.sort_unstable_by_key(|(used, _)| *used);
@@ -164,13 +178,13 @@ impl TextureCache {
     pub fn insert(&mut self, key: RenderKey, texture: TextureHandle) -> bool {
         let bytes = texture.size()[0] * texture.size()[1] * 4;
         let pinned = self.pinned_for_insert(key);
-        if bytes > self.available_for_insert(pinned) {
+        if bytes > self.available_for_insert(&pinned) {
             return false;
         }
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
-        if !self.make_room(bytes, pinned) {
+        if !self.make_room(bytes, &pinned) {
             return false;
         }
         self.clock += 1;
@@ -206,6 +220,38 @@ mod tests {
             ColorImage::filled([4, 4], Color32::WHITE),
             TextureOptions::LINEAR,
         )
+    }
+
+    #[test]
+    fn continuous_view_protects_all_visible_pages_and_their_zoom_fallbacks() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::with_budget(192);
+        for page in 0..3 {
+            assert!(cache.insert(key(page), texture(&ctx)));
+        }
+        let targets = [
+            RenderKey {
+                width: 64,
+                ..key(0)
+            },
+            RenderKey {
+                width: 64,
+                ..key(1)
+            },
+        ];
+        cache.protect_many(&targets);
+        // Only the invisible page may be replaced by a prefetch.
+        assert!(cache.insert(key(3), texture(&ctx)));
+        assert!(!cache.contains(&key(2)));
+        assert!(cache.fallback(targets[0]).is_some());
+        assert!(cache.fallback(targets[1]).is_some());
+        assert!(!cache.can_insert(key(4), 128));
+        // Each visible target can replace its own fallback, preserving the other.
+        assert!(cache.insert(targets[0], texture(&ctx)));
+        assert!(cache.insert(targets[1], texture(&ctx)));
+        assert!(cache.contains(&targets[0]) && cache.contains(&targets[1]));
+        cache.protect(key(4));
+        assert!(cache.insert(key(4), texture(&ctx)));
     }
 
     #[test]

@@ -14,6 +14,7 @@ fn same_view(left: &ReadingMark, right: &ReadingMark) -> bool {
     left.page == right.page
         && left.fit == right.fit
         && left.rotation == right.rotation
+        && left.continuous == right.continuous
         && left
             .offset
             .iter()
@@ -83,8 +84,23 @@ mod tests {
             page,
             fit: Fit::Custom(2.0),
             rotation: 1,
+            continuous: false,
             offset: [0.25, offset],
         }
+    }
+
+    #[test]
+    fn history_distinguishes_reading_modes_at_the_same_page_and_offset() {
+        let mut history = ViewHistory::default();
+        let paged = position(2, 0.5);
+        let continuous = ReadingMark {
+            continuous: true,
+            ..paged.clone()
+        };
+        history.record(paged);
+        let restored = history.go(false, continuous.clone(), 5).unwrap();
+        assert!(!restored.continuous);
+        assert!(history.go(true, restored, 5).unwrap().continuous);
     }
 
     #[test]

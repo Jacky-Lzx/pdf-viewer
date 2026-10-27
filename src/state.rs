@@ -13,6 +13,7 @@ pub struct ReadingState {
     pub page: usize,
     pub fit: Fit,
     pub rotation: u8,
+    pub continuous: bool,
     pub bookmarks: BTreeSet<usize>,
     pub offset: [f32; 2],
     pub marks: BTreeMap<char, ReadingMark>,
@@ -76,6 +77,7 @@ pub struct ReadingMark {
     pub page: usize,
     pub fit: Fit,
     pub rotation: u8,
+    pub continuous: bool,
     pub offset: [f32; 2],
 }
 
@@ -150,6 +152,7 @@ mod tests {
             path: "文档.pdf".into(),
             page: 7,
             fit: Fit::Height,
+            continuous: true,
             bookmarks: [1, 7].into(),
             offset: [0.25, 0.7],
             marks: [(
@@ -158,6 +161,7 @@ mod tests {
                     page: 3,
                     fit: Fit::Custom(2.0),
                     rotation: 1,
+                    continuous: true,
                     offset: [0.4, 0.8],
                 },
             )]
@@ -169,6 +173,7 @@ mod tests {
         assert_eq!(restored.search_options, library.search_options);
         assert_eq!(restored.recent[0].page, 7);
         assert_eq!(restored.recent[0].fit, Fit::Height);
+        assert!(restored.recent[0].continuous);
         assert_eq!(restored.recent[0].bookmarks.len(), 2);
         assert_eq!(restored.recent[0].path, PathBuf::from("文档.pdf"));
         assert_eq!(restored.recent[0].offset, [0.25, 0.7]);
@@ -176,7 +181,19 @@ mod tests {
         assert_eq!(mark.page, 3);
         assert_eq!(mark.fit, Fit::Custom(2.0));
         assert_eq!(mark.rotation, 1);
+        assert!(mark.continuous);
         assert_eq!(mark.offset, [0.4, 0.8]);
+    }
+
+    #[test]
+    fn legacy_reading_positions_default_to_single_page_mode() {
+        let state: ReadingState = serde_json::from_str(
+            r#"{"path":"book.pdf","page":2,"offset":[0.2,0.4],"marks":{"a":{"page":1}}}"#,
+        )
+        .unwrap();
+        assert!(!state.continuous);
+        assert!(!state.marks[&'a'].continuous);
+        assert_eq!(state.offset, [0.2, 0.4]);
     }
 
     #[cfg(unix)]

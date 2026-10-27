@@ -2,6 +2,7 @@ mod app;
 mod bitmap;
 mod cache;
 mod cli;
+mod continuous;
 mod destination;
 mod document;
 mod document_bytes;

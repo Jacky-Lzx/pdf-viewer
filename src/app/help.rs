@@ -41,6 +41,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Zoom by a count, preserving the viewport center",
     ),
     ("p / w / e", "Fit page / width / height"),
+    ("Shift+C", "Toggle continuous scrolling"),
     ("r / Shift+r", "Rotate clockwise / counterclockwise"),
     (
         "Mouse back / forward",

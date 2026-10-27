@@ -1,3 +1,4 @@
+mod continuous;
 mod help;
 mod properties;
 mod recent;
@@ -57,6 +58,9 @@ pub struct Folio {
     pending_focus: Option<hayro::kurbo::Rect>,
     pending_destination: Option<(crate::destination::Destination, [f64; 2])>,
     selection: TextSelection,
+    selection_page: usize,
+    continuous_layout: crate::continuous::Layout,
+    continuous_link_request: Option<usize>,
     cache: TextureCache,
     thumbnails: crate::thumbnails::Thumbnails,
     reveal_page: Option<usize>,
@@ -138,6 +142,9 @@ impl Folio {
             pending_focus: None,
             pending_destination: None,
             selection: TextSelection::default(),
+            selection_page: 0,
+            continuous_layout: crate::continuous::Layout::default(),
+            continuous_link_request: None,
             cache: TextureCache::default(),
             thumbnails: crate::thumbnails::Thumbnails::default(),
             reveal_page: None,
@@ -223,6 +230,8 @@ impl Folio {
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
+        self.continuous_layout = crate::continuous::Layout::default();
+        self.continuous_link_request = None;
         self.info = crate::document_info::DocumentInfo::default();
         self.properties_open = false;
         self.outline.set_entries(Vec::new());
@@ -369,6 +378,7 @@ impl Folio {
             page: self.nav.page,
             fit: self.reading.fit,
             rotation: self.reading.rotation,
+            continuous: self.reading.continuous,
             offset: self.current_offset(),
         }
     }
@@ -382,6 +392,7 @@ impl Folio {
         self.page_changed();
         self.reading.fit = position.fit;
         self.reading.rotation = position.rotation % 4;
+        self.reading.continuous = position.continuous;
         self.pending_offset = Some(position.offset);
     }
 
@@ -447,7 +458,7 @@ impl Folio {
     fn jump(&mut self, page: usize) {
         let current = self.current_position();
         self.pending_destination = None;
-        if self.nav.jump(page) {
+        if self.nav.jump(page) || (self.reading.continuous && self.pan.y > 0.0) {
             self.history.record(current);
             self.page_changed();
         }
@@ -485,6 +496,10 @@ impl Folio {
             return;
         }
         self.hints.cancel();
+        if self.reading.continuous {
+            self.scroll_continuous(delta);
+            return;
+        }
         let old = self.pan;
         self.pan = (self.pan + delta).clamp(Vec2::ZERO, self.overflow);
         if turn_at_edge && (self.pan.y - old.y).abs() < 0.1 && delta.y.abs() > 0.0 {
@@ -528,6 +543,10 @@ impl Folio {
         self.pending_search_jump = None;
         let mut offset = self.current_offset();
         offset[axis] = fraction;
+        if self.reading.continuous && axis == 1 && self.overflow.y > 0.0 {
+            let height = self.continuous_layout.pages[self.nav.page].size[1];
+            offset[1] = (height - self.viewport.y).max(0.0) / self.overflow.y * fraction;
+        }
         // Apply after this frame's zoom/rotation has established its overflow.
         self.pending_offset = Some(offset);
         self.dirty = true;
@@ -553,8 +572,12 @@ impl Folio {
     fn apply_zoom(&mut self, target: f32, dimensions: [f32; 2], pivot: Vec2) {
         self.hints.cancel();
         let viewport = [self.viewport.x, self.viewport.y];
-        let before = self.scale;
         let after = Fit::Custom(target).scale(dimensions, viewport);
+        if self.reading.continuous {
+            self.zoom_continuous(after, pivot);
+            return;
+        }
+        let before = self.scale;
         let pan = crate::geometry::zoom_pan(
             [self.pan.x, self.pan.y],
             dimensions,
@@ -582,6 +605,10 @@ impl Folio {
             .fit
             .scale(rotated, [self.viewport.x, self.viewport.y]);
         self.overflow = (Vec2::from(rotated) * self.scale - self.viewport).max(Vec2::ZERO);
+        if self.reading.continuous {
+            self.update_continuous_layout();
+            self.overflow.y = self.continuous_layout.limit(self.nav.page);
+        }
         if let Some(offset) = self.pending_offset.take() {
             self.pan =
                 Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0)) * self.overflow;
@@ -745,7 +772,7 @@ impl Folio {
                     self.file_changed = true;
                 }
                 Event::PageText { id, page, text }
-                    if id == self.id && page == self.nav.page && self.selection.active =>
+                    if id == self.id && page == self.selection_page && self.selection.active =>
                 {
                     if text.spans.is_empty() {
                         self.notify("This page has no selectable text");
@@ -753,6 +780,9 @@ impl Folio {
                     self.selection.set_text(text);
                 }
                 Event::Links { id, page, links } if id == self.id => {
+                    if self.continuous_link_request == Some(page) {
+                        self.continuous_link_request = None;
+                    }
                     self.links.insert(page, links, self.nav.page);
                     if page == self.nav.page {
                         self.visible_links.invalidate();
@@ -796,6 +826,8 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
+                    self.continuous_layout = crate::continuous::Layout::default();
+                    self.continuous_link_request = None;
                     self.info = info;
                     self.reveal_page = Some(self.nav.page);
                     self.outline.set_entries(outline);
@@ -1205,7 +1237,11 @@ impl Folio {
                 self.nav.clear_prefix();
                 self.hints.cancel();
                 self.mark_action = None;
+                if self.selection_page != self.nav.page {
+                    self.selection.start();
+                }
                 self.selection.select_all();
+                self.selection_page = self.nav.page;
                 if !self.selection.ready() {
                     self.worker.inspect_all(self.nav.page);
                 }
@@ -1487,6 +1523,7 @@ impl Folio {
                     self.rotate_page(modifiers.shift, count);
                 }
                 Key::Slash => self.find(),
+                Key::C if modifiers.shift => self.toggle_continuous(),
                 Key::C => self.focus_contents(),
                 Key::S => self.show_properties(context),
                 Key::F => {
@@ -1554,6 +1591,7 @@ impl Folio {
                         self.selection.cancel();
                     } else {
                         self.selection.start();
+                        self.selection_page = self.nav.page;
                         self.worker.inspect(self.nav.page);
                         self.notify(
                             "Drag to select · double-click word / triple-click line · y to copy · Escape to exit",
@@ -1677,6 +1715,16 @@ impl Folio {
                                 .clicked()
                         {
                             self.rotate_page(false, 1);
+                        }
+                        if ui
+                            .selectable_label(
+                                self.reading.continuous,
+                                if compact { "Scroll" } else { "Continuous" },
+                            )
+                            .on_hover_text("Toggle continuous scrolling · Shift+C")
+                            .clicked()
+                        {
+                            self.toggle_continuous();
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1812,6 +1860,10 @@ impl Folio {
             .show(context, |ui| {
                 if self.nav.count == 0 {
                     self.welcome(ui);
+                    return;
+                }
+                if self.reading.continuous {
+                    self.continuous_canvas(ui);
                     return;
                 }
                 let rect = ui.max_rect().shrink(24.0);
@@ -1977,7 +2029,7 @@ impl Folio {
                         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                         Color32::WHITE,
                     );
-                    self.highlights(&painter, page_rect, dimensions);
+                    self.highlights(&painter, self.nav.page, page_rect, dimensions);
                     let clip = painter.clip_rect().intersect(page_rect);
                     painter.extend(self.selection.rects.iter().filter_map(|rect| {
                         let rect = self
@@ -1986,7 +2038,7 @@ impl Folio {
                         (rect.is_positive() && clip.intersects(rect))
                             .then(|| egui::Shape::rect_filled(rect, 1.0, SELECTION_COLOR))
                     }));
-                    self.link_overlays(ui, page_rect, dimensions);
+                    self.link_overlays(ui, self.nav.page, page_rect, dimensions);
                 } else {
                     painter.text(
                         page_rect.center(),
@@ -2021,28 +2073,32 @@ impl Folio {
             });
     }
 
-    fn highlights(&self, painter: &egui::Painter, page_rect: egui::Rect, dimensions: [f32; 2]) {
+    fn highlights(
+        &self,
+        painter: &egui::Painter,
+        page: usize,
+        page_rect: egui::Rect,
+        dimensions: [f32; 2],
+    ) {
         let clip = painter.clip_rect().intersect(page_rect);
         if !clip.is_positive() {
             return;
         }
-        painter.extend(
-            crate::text::page_hits(&self.hits, self.nav.page).flat_map(|index| {
-                let hit = &self.hits[index];
-                let color = if self.hit_index == Some(index) {
-                    CURRENT_SEARCH_COLOR
-                } else {
-                    SEARCH_COLOR
-                };
-                hit.rects.iter().filter_map(move |rect| {
-                    let rect = self
-                        .link_rect(*rect, page_rect, dimensions)
-                        .intersect(page_rect);
-                    (rect.is_positive() && clip.intersects(rect))
-                        .then(|| egui::Shape::rect_filled(rect, 1.0, color))
-                })
-            }),
-        );
+        painter.extend(crate::text::page_hits(&self.hits, page).flat_map(|index| {
+            let hit = &self.hits[index];
+            let color = if self.hit_index == Some(index) {
+                CURRENT_SEARCH_COLOR
+            } else {
+                SEARCH_COLOR
+            };
+            hit.rects.iter().filter_map(move |rect| {
+                let rect = self
+                    .link_rect(*rect, page_rect, dimensions)
+                    .intersect(page_rect);
+                (rect.is_positive() && clip.intersects(rect))
+                    .then(|| egui::Shape::rect_filled(rect, 1.0, color))
+            })
+        }));
     }
 
     fn follow_destination(&mut self, destination: crate::destination::Destination) {
@@ -2083,7 +2139,7 @@ impl Folio {
 
     fn copy_selection(&mut self, context: &egui::Context) {
         if self.selection.is_all() && !self.selection.ready() {
-            self.worker.copy(self.nav.page);
+            self.worker.copy(self.selection_page);
             return;
         }
         if let Some(text) = self
@@ -2113,20 +2169,28 @@ impl Folio {
         )
     }
 
-    fn link_overlays(&mut self, ui: &mut egui::Ui, page_rect: egui::Rect, dimensions: [f32; 2]) {
+    fn link_overlays(
+        &mut self,
+        ui: &mut egui::Ui,
+        page: usize,
+        page_rect: egui::Rect,
+        dimensions: [f32; 2],
+    ) {
         if self.selection.active {
             self.visible_links.clear();
             return;
         }
-        let links = self
-            .links
-            .get(&self.nav.page)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let changed = self.visible_links.update(
+        let links = self.links.get(&page).map(Vec::as_slice).unwrap_or(&[]);
+        let mut other_links = crate::link_visibility::LinkVisibility::default();
+        let visible = if page == self.nav.page {
+            &mut self.visible_links
+        } else {
+            &mut other_links
+        };
+        let changed = visible.update(
             crate::link_visibility::LinkView {
                 document: self.id,
-                page: self.nav.page,
+                page,
                 page_rect,
                 clip: ui.clip_rect(),
                 dimensions,
@@ -2135,24 +2199,24 @@ impl Folio {
             },
             links.iter().map(|link| link.rect),
         );
-        if changed {
+        if changed && page == self.nav.page {
             self.hints.cancel();
         }
+        let visible = if page == self.nav.page {
+            &self.visible_links
+        } else {
+            &other_links
+        };
         let matching = self.hints.matching_range();
         let mut follow = None;
         let mut copied = false;
         let mut hint_index = 0;
-        for (&link_index, &rect) in self
-            .visible_links
-            .indices
-            .iter()
-            .zip(&self.visible_links.rects)
-        {
+        for (&link_index, &rect) in visible.indices.iter().zip(&visible.rects) {
             let link = &links[link_index];
             let response = ui
                 .interact(
                     rect,
-                    ui.id().with(("link", self.nav.page, link_index)),
+                    ui.id().with(("link", page, link_index)),
                     egui::Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -2199,7 +2263,7 @@ impl Folio {
             let hint = !self.copy_link_hints || matches!(&link.target, LinkTarget::Url(_));
             let index = hint_index;
             hint_index += usize::from(hint);
-            if hint && matching.contains(&index) {
+            if page == self.nav.page && hint && matching.contains(&index) {
                 let label = crate::link_hints::label(index, self.hints.count);
                 let painter = ui.painter();
                 let text =

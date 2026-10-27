@@ -92,6 +92,7 @@ PNG 导出在读取和渲染前检查输出是否指向源 PDF；同路径、相
 | `3+` / `3-`，`4=` | 连续放大 / 缩小指定级数，保持视口中心；大计数直接到达缩放边界 |
 | `a`，`Ctrl/Cmd+0` | 恢复 100% 缩放并保持视口中心；超大页面仍受尺寸上限约束 |
 | `p` / `w` / `e` | 适合整页 / 适合宽度 / 适合高度 |
+| `Shift+C` | 切换连续滚动 / 单页模式，也可点击工具栏 Continuous（窄窗口显示 Scroll） |
 | `r` / `Shift+r`，`3r` / `3R` | 顺时针 / 逆时针旋转，支持数字前缀，回到页面起点 |
 | `/`，`Ctrl/Cmd+f` | 全文搜索 |
 | 搜索输入框中的 `Enter` / `Shift+Enter` | 下一个 / 上一个匹配；结果尚未就绪时等待扫描 |
@@ -122,6 +123,8 @@ PNG 导出在读取和渲染前检查输出是否指向源 PDF；同路径、相
 | `:+5 Enter` / `:-5 Enter` | 从当前页前进 / 后退 5 个物理页，超过边界时停在首页或末页 |
 | `F11` | 全屏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
+
+点击工具栏 **Continuous** 或按 `Shift+C` 开启连续滚动：页面按纵向排列，滚轮、触控板、拖动和 `j/k`、半屏 / 整屏滚动均可跨页，页码及侧栏随阅读位置更新。模式按文档保存，重新打开时恢复页码和滚动位置；旧阅读记录默认使用单页模式。连续模式仅渲染可见页面并预取相邻页，多个可见页共享 96 MiB 页面纹理缓存。搜索高亮、内部链接、缩放、旋转和单页文本选择同样可用；`f/F` 链接提示针对当前页，文本选择不跨页。`zt/zz/zb` 仍对齐当前页，`Ctrl+e/y` 在连续模式中也可跨页。
 
 鼠标滚轮或触控板滚动，拖动平移，双击恢复适合整页。键盘缩放保持视口中心；`Ctrl`+滚轮或触控板捏合缩放保持指针下的位置。`v` 进入文本选择模式，拖选会高亮选区，支持反向、跨行和旋转后的文字；文本顺序取决于 PDF 的文本层。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。命名位置显示在侧栏，可点击返回或删除。重启后恢复页码与页内滚动，窗口尺寸变化时按相对滚动位置恢复。侧栏目录支持逐章节折叠、全部展开/折叠和 Unicode 标题筛选；筛选会显示命中条目的祖先，清空后恢复原来的折叠状态。目录支持 GoTo 动作和命名目标；内部链接和目录会应用 `XYZ` 的页内位置与缩放，以及 `Fit`、`FitH`、`FitV` 和 `FitR` 目标视图，支持裁剪框、文档自带旋转、阅读旋转及同页重新定位；网页链接在系统浏览器中打开；右键点击网页链接可复制地址，菜单内按回车复制、`Escape` 关闭，选择文字时保留文本操作。
 
@@ -260,6 +263,7 @@ xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
 xvfb-run -a python3 scripts/smoke-long-title.py target/release/folio
 xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
+xvfb-run -a python3 scripts/smoke-continuous.py target/release/folio
 xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio
 xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
 xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio

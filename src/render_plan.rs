@@ -3,29 +3,19 @@ use crate::{
     navigation::Fit,
 };
 
-/// Current page plus at most two neighbors, stored inline for per-frame planning.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Visible pages followed by optional neighbors, in render priority order.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderPlan {
-    keys: [RenderKey; 3],
-    len: usize,
+    keys: Vec<RenderKey>,
 }
 
 impl RenderPlan {
     fn new() -> Self {
-        Self {
-            keys: [RenderKey {
-                page: 0,
-                width: 0,
-                rotation: 0,
-                night: false,
-            }; 3],
-            len: 0,
-        }
+        Self { keys: Vec::new() }
     }
 
     fn push(&mut self, key: RenderKey) {
-        self.keys[self.len] = key;
-        self.len += 1;
+        self.keys.push(key);
     }
 }
 
@@ -33,7 +23,7 @@ impl std::ops::Deref for RenderPlan {
     type Target = [RenderKey];
 
     fn deref(&self) -> &Self::Target {
-        &self.keys[..self.len]
+        &self.keys
     }
 }
 
@@ -88,6 +78,53 @@ impl RenderView {
         )
     }
 
+    /// Reduce raster resolution together when many pages share a viewport,
+    /// reserving enough cache space for every visible page before prefetching.
+    pub fn continuous_plan(
+        self,
+        visible: std::ops::Range<usize>,
+        dimensions: &[[f32; 2]],
+        budget: usize,
+    ) -> RenderPlan {
+        let mut view = self;
+        loop {
+            let bytes: usize = visible
+                .clone()
+                .filter_map(|page| {
+                    view.key_and_size(page, dimensions[page])
+                        .1
+                        .ok()
+                        .map(|raster| raster.bytes())
+                })
+                .sum();
+            if bytes <= budget || view.pixels_per_point <= 0.01 {
+                let mut plan = RenderPlan::new();
+                for page in visible.clone() {
+                    plan.push(view.key(page, dimensions[page]));
+                }
+                let mut remaining = budget.saturating_sub(bytes);
+                let neighbors = if self.backwards {
+                    [visible.start.checked_sub(1), Some(visible.end)]
+                } else {
+                    [Some(visible.end), visible.start.checked_sub(1)]
+                };
+                for page in neighbors.into_iter().flatten() {
+                    if let Some(&size) = dimensions.get(page) {
+                        let (key, raster) = view.key_and_size(page, size);
+                        if let Ok(raster) = raster
+                            && raster.bytes() <= remaining
+                        {
+                            remaining -= raster.bytes();
+                            plan.push(key);
+                        }
+                    }
+                }
+                return plan;
+            }
+            view.pixels_per_point *= 0.75;
+        }
+    }
+
     /// Reserve the visible raster first, then admit neighbors that can coexist with it.
     /// Include cached pages in the reservation to prevent neighbors evicting one another.
     pub fn plan(self, page: usize, dimensions: &[[f32; 2]], budget: usize) -> RenderPlan {
@@ -136,6 +173,38 @@ mod tests {
             night: false,
             backwards: false,
         }
+    }
+
+    #[test]
+    fn continuous_renders_every_visible_page_before_neighbors_within_budget() {
+        let pages = [[600.0, 800.0]; 10];
+        for fit in [Fit::Page, Fit::Width, Fit::Custom(8.0)] {
+            let view = view(fit);
+            let budget = 96 * 1024 * 1024;
+            let plan = view.continuous_plan(2..6, &pages, budget);
+            assert_eq!(
+                plan[..4].iter().map(|key| key.page).collect::<Vec<_>>(),
+                [2, 3, 4, 5]
+            );
+            let bytes: usize = plan
+                .iter()
+                .map(|key| RasterSize::new(pages[key.page], key.width).unwrap().bytes())
+                .sum();
+            assert!(bytes <= budget, "{bytes} > {budget}");
+            assert!(
+                plan.iter()
+                    .all(|key| key.rotation == view.rotation && key.night == view.night)
+            );
+        }
+        let backward = RenderView {
+            backwards: true,
+            ..view(Fit::Page)
+        };
+        let plan = backward.continuous_plan(2..4, &pages, 96 * 1024 * 1024);
+        assert_eq!(
+            plan.iter().map(|key| key.page).collect::<Vec<_>>(),
+            [2, 3, 1, 4]
+        );
     }
 
     #[test]
