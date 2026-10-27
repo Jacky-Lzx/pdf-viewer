@@ -189,6 +189,10 @@ mod tests {
         app.comments.editor = Some(Comment {
             page: 0,
             slot: None,
+            parent: None,
+            review: Default::default(),
+            marked: false,
+            states: Vec::new(),
             kind: "Highlight".into(),
             contents: "unsaved draft".into(),
             author: String::new(),

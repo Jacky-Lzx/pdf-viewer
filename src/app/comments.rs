@@ -1,5 +1,5 @@
 use super::{Pagewing, shortcuts};
-use crate::annotations::{Comment, Comments};
+use crate::annotations::{Comment, Comments, ReviewStatus};
 use eframe::egui::{self, Color32, Vec2};
 
 #[derive(Default)]
@@ -9,15 +9,20 @@ pub(super) struct CommentUi {
     pub comments: Comments,
     pub editor: Option<Comment>,
     original: String,
+    original_review: ReviewStatus,
+    original_marked: bool,
     pub focus: bool,
     pub saving: bool,
 }
 
 impl CommentUi {
     pub fn unsaved(&self) -> bool {
-        self.editor
-            .as_ref()
-            .is_some_and(|c| c.slot.is_none() || c.contents != self.original)
+        self.editor.as_ref().is_some_and(|c| {
+            c.slot.is_none()
+                || c.contents != self.original
+                || c.review != self.original_review
+                || c.marked != self.original_marked
+        })
     }
     pub fn busy(&self) -> bool {
         self.saving
@@ -53,6 +58,10 @@ impl Pagewing {
         self.comments.editor = Some(Comment {
             page: self.selection_page,
             slot: None,
+            parent: None,
+            review: Default::default(),
+            marked: false,
+            states: Vec::new(),
             kind: "Highlight".into(),
             contents: String::new(),
             author: "Pagewing".into(),
@@ -62,6 +71,8 @@ impl Pagewing {
             locked: false,
         });
         self.comments.original.clear();
+        self.comments.original_review = ReviewStatus::None;
+        self.comments.original_marked = false;
         self.comments.open = true;
         self.comments.focus = true;
         self.notify(format!(
@@ -78,6 +89,8 @@ impl Pagewing {
         self.jump(comment.page);
         self.pending_focus = comment.rects.first().copied();
         self.comments.original = comment.contents.clone();
+        self.comments.original_review = comment.review;
+        self.comments.original_marked = comment.marked;
         self.comments.editor = Some(comment);
         self.comments.open = true;
         self.comments.focus = true;
@@ -91,7 +104,7 @@ impl Pagewing {
             .comments
             .editor
             .as_ref()
-            .filter(|c| c.editable())
+            .filter(|c| !c.locked && (c.editable() || c.contents == self.comments.original))
             .cloned()
         else {
             return;
@@ -99,6 +112,26 @@ impl Pagewing {
         self.comments.saving = true;
         self.worker
             .save_comment(self.id, self.reading.path.clone(), comment);
+    }
+
+    fn reply_comment(&mut self) {
+        if self.loading || self.comment_change_blocked() {
+            return;
+        }
+        let Some(reply) = self
+            .comments
+            .editor
+            .as_ref()
+            .filter(|c| !c.locked)
+            .and_then(Comment::reply)
+        else {
+            return;
+        };
+        self.comments.editor = Some(reply);
+        self.comments.original.clear();
+        self.comments.original_review = ReviewStatus::None;
+        self.comments.original_marked = false;
+        self.comments.focus = true;
     }
 
     fn delete_comment(&mut self) {
@@ -127,6 +160,8 @@ impl Pagewing {
         let mut selected = None;
         let mut save = false;
         let mut delete = false;
+        let mut reply = false;
+        let mut discard = false;
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
         egui::SidePanel::right("pagewing-comments-sidebar")
             .default_width(320.0_f32.min(maximum))
@@ -174,16 +209,19 @@ impl Pagewing {
                     .auto_shrink([false, false])
                     .max_height(list_height)
                     .show(ui, |ui| {
-                        for (index, comment) in self.comments.comments.items.iter().enumerate() {
+                        for (index, depth) in self.comments.comments.thread_rows() {
+                            let comment = &self.comments.comments.items[index];
                             let label = format!(
-                                "Page {} · {}{}\n{}",
+                                "Page {} · {}{}{}{}\n{}",
                                 comment.page + 1,
-                                comment.kind,
+                                if comment.parent.is_some() { "Reply" } else { &comment.kind },
                                 if comment.author.is_empty() {
                                     String::new()
                                 } else {
                                     format!(" · {}", comment.author)
                                 },
+                                if comment.review == ReviewStatus::None { String::new() } else { format!(" · {}", comment.review.label()) },
+                                if comment.marked { " · ✓ Marked" } else { "" },
                                 if comment.contents.is_empty() {
                                     "(no comment)"
                                 } else {
@@ -193,17 +231,20 @@ impl Pagewing {
                             let active = self.comments.editor.as_ref().is_some_and(|current| {
                                 current.page == comment.page && current.slot == comment.slot
                             });
-                            if ui
-                                .add_enabled(
-                                    !self.loading && !self.comments.busy(),
-                                    egui::Button::selectable(active, label)
-                                        .wrap()
-                                        .min_size(egui::vec2(ui.available_width(), 0.0)),
-                                )
-                                .clicked()
-                            {
-                                selected = Some(index);
-                            }
+                            ui.horizontal(|ui| {
+                                ui.add_space(depth.min(6) as f32 * 14.0);
+                                if ui
+                                    .add_enabled(
+                                        !self.loading && !self.comments.busy(),
+                                        egui::Button::selectable(active, label)
+                                            .wrap()
+                                            .min_size(egui::vec2(ui.available_width(), 0.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    selected = Some(index);
+                                }
+                            });
                         }
                     });
                 if self.comments.editor.is_some() {
@@ -216,7 +257,7 @@ impl Pagewing {
                                 ui.label(format!(
                                     "{} · page {}",
                                     if comment.slot.is_none() {
-                                        "New highlight"
+                                        if comment.parent.is_some() { "New reply" } else { "New highlight" }
                                     } else {
                                         "Edit comment"
                                     },
@@ -224,7 +265,7 @@ impl Pagewing {
                                 ));
                                 let read_only = !comment.editable();
                                 if read_only {
-                                    ui.label("This annotation is read-only.");
+                                    ui.label(if comment.locked { "This annotation is read-only." } else { "Comment text is read-only." });
                                 }
                                 ui.add_enabled_ui(!busy && !read_only, |ui| {
                                     shortcuts::text_input(
@@ -238,20 +279,38 @@ impl Pagewing {
                                             .hint_text("Write a comment…"),
                                     );
                                 });
+                                ui.add_enabled_ui(!busy && !comment.locked, |ui| {
+                                    egui::ComboBox::from_id_salt("pagewing-comment-status")
+                                        .selected_text(format!("Status: {}", comment.review.label()))
+                                        .show_ui(ui, |ui| {
+                                            for status in ReviewStatus::ALL {
+                                                ui.selectable_value(&mut comment.review, status, status.label());
+                                            }
+                                        });
+                                    ui.checkbox(&mut comment.marked, "Marked (Acrobat checkmark)");
+                                });
+                                if !comment.states.is_empty() {
+                                    egui::CollapsingHeader::new("Status history").show(ui, |ui| {
+                                        for state in &comment.states {
+                                            ui.label(format!("{} · {}: {}", state.author, state.model, state.value));
+                                        }
+                                    });
+                                }
                                 ui.label("Save writes this comment directly to the current PDF.");
                                 let existing = comment.slot.is_some();
                                 let deletable = !comment.locked;
                                 ui.horizontal_wrapped(|ui| {
                                     save = ui
                                         .add_enabled(
-                                            !busy && !read_only,
+                                            !busy && !comment.locked && (comment.editable() || comment.contents == self.comments.original),
                                             egui::Button::new("Save comment"),
                                         )
                                         .clicked();
                                     if existing {
+                                        reply = ui.add_enabled(!busy && deletable, egui::Button::new("Reply")).clicked();
                                         delete = ui.add_enabled(!busy && deletable,
-                                            egui::Button::new("Delete comment & highlight"))
-                                            .on_hover_text("Delete this annotation, its highlight and replies from the current PDF.")
+                                            egui::Button::new(if comment.parent.is_some() { "Delete reply & replies" } else { "Delete comment & highlight" }))
+                                            .on_hover_text("Delete this annotation and all its replies from the current PDF.")
                                             .clicked();
                                     }
                                     if ui
@@ -261,7 +320,7 @@ impl Pagewing {
                                         )
                                         .clicked()
                                     {
-                                        self.comments.editor = None;
+                                        discard = true;
                                     }
                                     if busy {
                                         ui.spinner();
@@ -275,6 +334,9 @@ impl Pagewing {
                 }
             });
         self.comments.open = open;
+        if discard {
+            self.comments.editor = None;
+        }
         if let Some(index) = selected {
             self.edit_comment(index);
         }
@@ -282,6 +344,8 @@ impl Pagewing {
             self.save_comment();
         } else if delete {
             self.delete_comment();
+        } else if reply {
+            self.reply_comment();
         }
     }
 
@@ -299,7 +363,7 @@ impl Pagewing {
             .items
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.page == page)
+            .filter(|(_, c)| c.page == page && c.parent.is_none())
         {
             for (part, rect) in comment.rects.iter().enumerate() {
                 let rect = self
@@ -412,6 +476,139 @@ mod tests {
             frame(app, context, Vec::new());
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    fn click_text(app: &mut Pagewing, context: &Context, label: &str) {
+        let output = frame(app, context, Vec::new());
+        let point = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == label
+                {
+                    Some(text.pos + text.galley.size() * 0.5)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("Missing visible button: {label}"));
+        for pressed in [true, false] {
+            frame(
+                app,
+                context,
+                vec![
+                    Event::PointerMoved(point),
+                    Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn reply_buttons_nested_threads_status_controls_and_draft_protection() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("threads.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let pdf = crate::document::load(&path, "").unwrap();
+        crate::annotations::save(
+            &pdf,
+            &Comment {
+                page: 0,
+                slot: None,
+                parent: None,
+                review: ReviewStatus::None,
+                marked: false,
+                states: Vec::new(),
+                kind: "Highlight".into(),
+                contents: "Root comment".into(),
+                author: "Pagewing".into(),
+                rects: vec![hayro::kurbo::Rect::new(50.0, 80.0, 150.0, 100.0)],
+                has_appearance: false,
+                truncated: false,
+                locked: false,
+            },
+            &path,
+        )
+        .unwrap();
+        let context = Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path.clone()),
+            Some(0),
+            root.path().join("library.json"),
+        );
+        wait(&mut app, &context, |app| app.comments.loaded);
+        app.edit_comment(0);
+        for depth in 1..=2 {
+            click_text(&mut app, &context, "Reply");
+            let editor = app.comments.editor.as_ref().unwrap();
+            assert!(editor.slot.is_none() && editor.parent.is_some());
+            assert!(app.comments.unsaved());
+            frame(
+                &mut app,
+                &context,
+                vec![Event::Text(format!("Nested reply {depth}"))],
+            );
+            click_text(&mut app, &context, "Save comment");
+            wait(&mut app, &context, |app| {
+                !app.comments.busy()
+                    && !app.loading
+                    && app.comments.loaded
+                    && app.comments.editor.is_none()
+            });
+            assert_eq!(app.comments.comments.items.len(), depth + 1);
+            app.edit_comment(depth);
+        }
+        assert_eq!(
+            app.comments.comments.thread_rows(),
+            [(0, 0), (1, 1), (2, 2)]
+        );
+        click_text(&mut app, &context, "Status: None");
+        click_text(&mut app, &context, "Completed / resolved");
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().review,
+            ReviewStatus::Completed
+        );
+        assert!(app.comments.unsaved(), "status changes are drafts too");
+        app.reload();
+        assert!(!app.reloading, "status drafts must defer reloads");
+        app.edit_comment(0);
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().slot,
+            app.comments.comments.items[2].slot,
+            "changing selection must preserve the draft"
+        );
+        click_text(&mut app, &context, "Marked (Acrobat checkmark)");
+        assert!(app.comments.editor.as_ref().unwrap().marked);
+        click_text(&mut app, &context, "Save comment");
+        wait(&mut app, &context, |app| {
+            !app.comments.busy()
+                && !app.loading
+                && app.comments.loaded
+                && app.comments.editor.is_none()
+        });
+        assert_eq!(
+            app.comments.comments.items[2].review,
+            ReviewStatus::Completed
+        );
+        assert!(app.comments.comments.items[2].marked);
+        assert_eq!(app.comments.comments.items.len(), 3);
+        app.edit_comment(1);
+        click_text(&mut app, &context, "Delete reply & replies");
+        wait(&mut app, &context, |app| {
+            !app.comments.busy()
+                && !app.loading
+                && app.comments.loaded
+                && app.comments.editor.is_none()
+        });
+        assert_eq!(app.comments.comments.items.len(), 1);
+        assert_eq!(app.comments.comments.items[0].contents, "Root comment");
     }
 
     #[test]
@@ -598,6 +795,10 @@ mod tests {
                 &Comment {
                     page,
                     slot: None,
+                    parent: None,
+                    review: Default::default(),
+                    marked: false,
+                    states: Vec::new(),
                     kind: "Highlight".into(),
                     contents,
                     author: "Pagewing".into(),

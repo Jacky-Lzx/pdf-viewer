@@ -3,17 +3,81 @@ use hayro::{
     hayro_interpret::util::TransformExt,
     hayro_syntax::{
         Pdf,
-        object::{Array, Dict, MaybeRef, Name, Object, Rect as PdfRect, String as PdfString},
+        object::{
+            Array, Dict, MaybeRef, Name, ObjRef, Object, Rect as PdfRect, String as PdfString,
+        },
     },
     kurbo::{Point, Rect},
 };
+use std::collections::HashMap;
 use std::path::Path;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CommentId {
+    pub page: usize,
+    pub slot: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReviewStatus {
+    #[default]
+    None,
+    Accepted,
+    Rejected,
+    Cancelled,
+    Completed,
+}
+
+impl ReviewStatus {
+    pub const ALL: [Self; 5] = [
+        Self::None,
+        Self::Accepted,
+        Self::Rejected,
+        Self::Cancelled,
+        Self::Completed,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Completed => "Completed / resolved",
+            _ => self.pdf_value(),
+        }
+    }
+
+    fn pdf_value(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Accepted => "Accepted",
+            Self::Rejected => "Rejected",
+            Self::Cancelled => "Cancelled",
+            Self::Completed => "Completed",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.pdf_value() == value)
+    }
+}
+
+/// State changes are separate Text annotations, often themselves in a reply chain.
+#[derive(Clone, Debug)]
+pub struct CommentState {
+    pub id: CommentId,
+    pub author: String,
+    pub model: String,
+    pub value: String,
+    depth: usize,
+}
 
 #[derive(Clone, Debug)]
 pub struct Comment {
     pub page: usize,
-    /// Raw /Annots slot; None creates a new highlight.
+    /// Raw /Annots slot; None creates a new highlight or reply.
     pub slot: Option<usize>,
+    pub parent: Option<CommentId>,
+    pub review: ReviewStatus,
+    pub marked: bool,
+    pub states: Vec<CommentState>,
     pub kind: String,
     pub contents: String,
     pub author: String,
@@ -24,6 +88,31 @@ pub struct Comment {
 }
 
 impl Comment {
+    pub fn id(&self) -> Option<CommentId> {
+        self.slot.map(|slot| CommentId {
+            page: self.page,
+            slot,
+        })
+    }
+
+    pub fn reply(&self) -> Option<Self> {
+        Some(Self {
+            page: self.page,
+            slot: None,
+            parent: Some(self.id()?),
+            kind: "Text".into(),
+            contents: String::new(),
+            author: "Pagewing".into(),
+            rects: self.rects.clone(),
+            has_appearance: false,
+            truncated: false,
+            locked: false,
+            review: ReviewStatus::None,
+            marked: false,
+            states: Vec::new(),
+        })
+    }
+
     pub fn editable(&self) -> bool {
         !self.locked && !self.truncated && self.kind != "FreeText"
     }
@@ -35,12 +124,60 @@ pub struct Comments {
     pub limited: bool,
 }
 
+impl Comments {
+    /// Iterative preorder keeps arbitrary nesting and malformed cycles stack safe.
+    pub fn thread_rows(&self) -> Vec<(usize, usize)> {
+        let indices: HashMap<_, _> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| Some((c.id()?, i)))
+            .collect();
+        let mut children = vec![Vec::new(); self.items.len()];
+        let mut roots = Vec::new();
+        for (index, comment) in self.items.iter().enumerate() {
+            if let Some(parent) = comment
+                .parent
+                .and_then(|p| indices.get(&p))
+                .copied()
+                .filter(|p| *p != index)
+            {
+                children[parent].push(index);
+            } else {
+                roots.push(index);
+            }
+        }
+        let mut rows = Vec::with_capacity(self.items.len());
+        let mut visited = vec![false; self.items.len()];
+        for root in roots.into_iter().chain(0..self.items.len()) {
+            let mut stack = vec![(root, 0)];
+            while let Some((index, depth)) = stack.pop() {
+                if std::mem::replace(&mut visited[index], true) {
+                    continue;
+                }
+                rows.push((index, depth));
+                stack.extend(
+                    children[index]
+                        .iter()
+                        .rev()
+                        .map(|&child| (child, depth + 1)),
+                );
+            }
+        }
+        rows
+    }
+}
+
 pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
     let mut result = Comments::default();
     let mut budget = 100_000usize;
-    for (page_index, page) in pdf.pages().iter().enumerate() {
+    let mut references = HashMap::new();
+    let mut parents = Vec::new();
+    let mut states = Vec::new();
+    let mut state_links = HashMap::new();
+    'pages: for (page_index, page) in pdf.pages().iter().enumerate() {
         if cancelled() {
-            return result;
+            break;
         }
         let Some(array) = page.raw().get::<Array<'_>>(b"Annots") else {
             continue;
@@ -49,12 +186,16 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
         for (slot, object) in array.raw_iter().enumerate() {
             if budget == 0 || result.items.len() >= 10_000 {
                 result.limited = true;
-                return result;
+                break 'pages;
             }
             budget -= 1;
             if cancelled() {
-                return result;
+                break 'pages;
             }
+            let reference = match &object {
+                MaybeRef::Ref(id) => Some(*id),
+                _ => None,
+            };
             let dict = match object {
                 MaybeRef::Ref(id) => pdf.xref().get::<Dict<'_>>(id.into()),
                 MaybeRef::NotRef(Object::Dict(dict)) => Some(dict),
@@ -64,6 +205,40 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
             let Some(kind) = dict.get::<Name<'_>>(b"Subtype") else {
                 continue;
             };
+            let id = CommentId {
+                page: page_index,
+                slot,
+            };
+            let author = pdf_text(&dict, b"T", 1024);
+            let parent = dict.get_ref(b"IRT");
+            let model = pdf_text(&dict, b"StateModel", 64);
+            if kind.as_ref() == b"Text" && !model.is_empty() {
+                let value = dict
+                    .get::<PdfString<'_>>(b"State")
+                    .map(|s| crate::pdf_string::decode_prefix(s.as_bytes(), 64).0)
+                    .unwrap_or_else(|| {
+                        if model == "Marked" {
+                            "Unmarked"
+                        } else {
+                            "None"
+                        }
+                        .into()
+                    });
+                if let Some(reference) = reference {
+                    state_links.insert(reference, parent);
+                }
+                states.push((
+                    parent,
+                    CommentState {
+                        id,
+                        author,
+                        model,
+                        value,
+                        depth: 0,
+                    },
+                ));
+                continue; // State records may be hidden and are never discussion replies.
+            }
             if !matches!(
                 kind.as_ref(),
                 b"Highlight" | b"Text" | b"Underline" | b"StrikeOut" | b"Squiggly" | b"FreeText"
@@ -77,10 +252,6 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
             let (contents, truncated) = dict
                 .get::<PdfString<'_>>(b"Contents")
                 .map(|s| crate::pdf_string::decode_prefix(s.as_bytes(), 65_536))
-                .unwrap_or_default();
-            let author = dict
-                .get::<PdfString<'_>>(b"T")
-                .map(|s| crate::pdf_string::decode_prefix(s.as_bytes(), 1024).0)
                 .unwrap_or_default();
             let mut rects = Vec::new();
             if let Some(quads) = dict.get::<Array<'_>>(b"QuadPoints") {
@@ -116,9 +287,26 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
                     rects.push(r);
                 }
             }
+            if let Some(reference) = reference {
+                references.entry(reference).or_insert(id);
+            }
+            parents.push(
+                if dict
+                    .get::<Name<'_>>(b"RT")
+                    .is_some_and(|n| n.as_ref() == b"Group")
+                {
+                    None
+                } else {
+                    parent
+                },
+            );
             result.items.push(Comment {
                 page: page_index,
                 slot: Some(slot),
+                parent: None,
+                review: ReviewStatus::None,
+                marked: false,
+                states: Vec::new(),
                 kind: String::from_utf8_lossy(kind.as_ref()).into_owned(),
                 contents,
                 author,
@@ -129,7 +317,76 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
             });
         }
     }
+    let indices: HashMap<_, _> = result
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| Some((c.id()?, i)))
+        .collect();
+    for (comment, parent) in result.items.iter_mut().zip(parents) {
+        comment.parent = parent
+            .and_then(|p| references.get(&p).copied())
+            .filter(|p| Some(*p) != comment.id());
+    }
+    // Resolve each state chain once. Broken and cyclic IRT links remain inert.
+    let mut resolved: HashMap<ObjRef, Option<(CommentId, usize)>> = HashMap::new();
+    for (parent, mut state) in states {
+        let mut path = Vec::new();
+        let mut cursor = parent;
+        let mut visiting = std::collections::HashSet::new();
+        let target = loop {
+            let Some(reference) = cursor else { break None };
+            if let Some(id) = references.get(&reference) {
+                break Some((*id, 0));
+            }
+            if let Some(target) = resolved.get(&reference) {
+                break *target;
+            }
+            if !visiting.insert(reference) {
+                break None;
+            }
+            path.push(reference);
+            cursor = state_links.get(&reference).copied().flatten();
+        };
+        let mut target = target;
+        for reference in path.into_iter().rev() {
+            target = target.map(|(id, depth)| (id, depth + 1));
+            resolved.insert(reference, target);
+        }
+        if let Some((id, depth)) = target
+            && let Some(&index) = indices.get(&id)
+        {
+            state.depth = depth;
+            result.items[index].states.push(state);
+        }
+    }
+    for comment in &mut result.items {
+        // Prefer our own user's state; retain every other author's history for display.
+        comment
+            .states
+            .sort_by_key(|s| (s.author == "Pagewing", s.depth, s.id.page, s.id.slot));
+        for state in &comment.states {
+            if state.model == "Review"
+                && let Some(review) = ReviewStatus::parse(&state.value)
+            {
+                comment.review = review;
+            }
+            if state.model == "Marked" {
+                match state.value.as_str() {
+                    "Marked" => comment.marked = true,
+                    "Unmarked" => comment.marked = false,
+                    _ => {}
+                }
+            }
+        }
+    }
     result
+}
+
+fn pdf_text(dict: &Dict<'_>, key: &[u8], limit: usize) -> String {
+    dict.get::<PdfString<'_>>(key)
+        .map(|s| crate::pdf_string::decode_prefix(s.as_bytes(), limit).0)
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,7 +400,7 @@ pub fn save(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
     write(pdf, comment, source, Operation::Save)
 }
 
-/// Remove the selected annotation, its popup and replies from the page.
+/// Remove the selected annotation, its popup, replies and status history.
 pub fn delete(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
     write(pdf, comment, source, Operation::Delete)
 }
@@ -168,7 +425,18 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
                 .into(),
         );
     }
-    if comment.locked || (operation == Operation::Save && !comment.editable()) {
+    let original = if comment.slot.is_some() && operation == Operation::Save {
+        read(pdf, || false)
+            .items
+            .into_iter()
+            .find(|c| c.id() == comment.id())
+    } else {
+        None
+    };
+    let contents_changed = original
+        .as_ref()
+        .is_none_or(|c| c.contents != comment.contents);
+    if comment.locked || (operation == Operation::Save && contents_changed && !comment.editable()) {
         return Err("This annotation is read-only.".into());
     }
     let page = pdf
@@ -194,10 +462,10 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
     };
     use lopdf::{Object as O, dictionary};
     if operation == Operation::Delete {
-        let slot = comment
-            .slot
+        let id = comment
+            .id()
             .ok_or("This comment has not been saved. Use Discard to remove the draft.")?;
-        annots = without_comment(previous, &annots, slot)?;
+        annots = delete_thread(&mut update, id)?;
     } else if let Some(slot) = comment.slot {
         let value = annots.get(slot).ok_or("Annotation no longer exists")?;
         let mut dict = previous
@@ -205,8 +473,10 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
             .and_then(|(_, v)| v.as_dict())
             .map_err(|e| e.to_string())?
             .clone();
-        dict.set("Contents", lopdf::text_string(&comment.contents));
-        dict.remove(b"RC"); // Plain text is now authoritative.
+        if contents_changed {
+            dict.set("Contents", lopdf::text_string(&comment.contents));
+            dict.remove(b"RC"); // Plain text is now authoritative.
+        }
         let id = if let O::Reference(id) = value {
             *id
         } else {
@@ -214,6 +484,32 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
         };
         update.new_document.set_object(id, dict);
         annots[slot] = O::Reference(id);
+    } else if let Some(parent) = comment.parent {
+        if parent.page != comment.page {
+            return Err("Replies must be on the same page as their parent.".into());
+        }
+        if comment.contents.trim().is_empty() {
+            return Err("Write a reply before saving.".into());
+        }
+        let parent_id = annotation_reference(&mut update, &mut annots, parent.slot)?;
+        let parent_dict = update
+            .new_document
+            .get_dictionary(parent_id)
+            .or_else(|_| update.get_prev_documents().get_dictionary(parent_id))
+            .map_err(|e| e.to_string())?;
+        if parent_dict.get(b"F").and_then(O::as_i64).unwrap_or(0) & (64 | 128 | 512) != 0 {
+            return Err("This annotation is read-only.".into());
+        }
+        let rect = parent_dict
+            .get(b"Rect")
+            .cloned()
+            .unwrap_or_else(|_| O::Array(vec![0.into(); 4]));
+        let id = update.new_document.add_object(dictionary! {
+            "Type" => "Annot", "Subtype" => "Text", "IRT" => parent_id, "RT" => "R",
+            "Rect" => rect, "Contents" => lopdf::text_string(&comment.contents),
+            "T" => lopdf::text_string("Pagewing"), "F" => 4, "P" => page_id,
+        });
+        annots.push(O::Reference(id));
     } else {
         if comment.rects.is_empty() {
             return Err("Select some text first.".into());
@@ -269,6 +565,60 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
         });
         annots.push(O::Reference(id));
     }
+    if operation == Operation::Save {
+        let review_changed = original
+            .as_ref()
+            .map_or(comment.review != ReviewStatus::None, |c| {
+                c.review != comment.review
+            });
+        let marked_changed = original
+            .as_ref()
+            .map_or(comment.marked, |c| c.marked != comment.marked);
+        if review_changed || marked_changed {
+            let slot = comment.slot.unwrap_or(annots.len() - 1);
+            let target = annotation_reference(&mut update, &mut annots, slot)?;
+            for (changed, model, value) in [
+                (review_changed, "Review", comment.review.pdf_value()),
+                (
+                    marked_changed,
+                    "Marked",
+                    if comment.marked { "Marked" } else { "Unmarked" },
+                ),
+            ] {
+                if !changed {
+                    continue;
+                }
+                let previous_state = original.as_ref().and_then(|c| {
+                    c.states
+                        .iter()
+                        .rev()
+                        .find(|s| s.author == "Pagewing" && s.model == model)
+                });
+                let parent = if let Some(state) = previous_state {
+                    if state.id.page == comment.page {
+                        annotation_reference(&mut update, &mut annots, state.id.slot)?
+                    } else {
+                        let page =
+                            update.get_prev_documents().get_pages()[&(state.id.page as u32 + 1)];
+                        let entries = page_annotations(update.get_prev_documents(), page)?;
+                        entries
+                            .get(state.id.slot)
+                            .and_then(|v| v.as_reference().ok())
+                            .unwrap_or(target)
+                    }
+                } else {
+                    target
+                };
+                let id = update.new_document.add_object(dictionary! {
+                    "Type" => "Annot", "Subtype" => "Text", "IRT" => parent, "RT" => "R",
+                    "Rect" => vec![O::Integer(0); 4], "F" => 2, "P" => page_id,
+                    "T" => lopdf::text_string("Pagewing"),
+                    "StateModel" => lopdf::text_string(model), "State" => lopdf::text_string(value),
+                });
+                annots.push(O::Reference(id));
+            }
+        }
+    }
     update
         .opt_clone_object_to_new_document(page_id)
         .map_err(|e| e.to_string())?;
@@ -298,13 +648,91 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
     Ok(())
 }
 
+fn page_annotations(
+    document: &lopdf::Document,
+    page: lopdf::ObjectId,
+) -> Result<Vec<lopdf::Object>, String> {
+    match document
+        .get_dictionary(page)
+        .map_err(|e| e.to_string())?
+        .get(b"Annots")
+    {
+        Ok(value) => document
+            .dereference(value)
+            .and_then(|(_, v)| v.as_array())
+            .cloned()
+            .map_err(|e| e.to_string()),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+/// Promote a direct annotation without changing its raw slot or existing objects.
+fn annotation_reference(
+    update: &mut lopdf::IncrementalDocument,
+    annots: &mut [lopdf::Object],
+    slot: usize,
+) -> Result<lopdf::ObjectId, String> {
+    use lopdf::Object;
+    let value = annots.get_mut(slot).ok_or("Annotation no longer exists")?;
+    if let Object::Reference(id) = value {
+        return Ok(*id);
+    }
+    let dict = value.as_dict().map_err(|e| e.to_string())?.clone();
+    let id = update.new_document.add_object(dict);
+    *value = Object::Reference(id);
+    Ok(id)
+}
+
+fn delete_thread(
+    update: &mut lopdf::IncrementalDocument,
+    selected: CommentId,
+) -> Result<Vec<lopdf::Object>, String> {
+    let previous = update.get_prev_documents();
+    let mut entries = Vec::new();
+    let mut ranges = Vec::new();
+    let mut selected_slot = None;
+    for (number, page) in previous.get_pages() {
+        let annots = page_annotations(previous, page)?;
+        if number as usize == selected.page + 1 {
+            if selected.slot >= annots.len() {
+                return Err("Annotation no longer exists".into());
+            }
+            selected_slot = Some(entries.len() + selected.slot);
+        }
+        ranges.push((number, page, entries.len(), annots.len()));
+        entries.extend(annots);
+    }
+    let removed = removed_comments(previous, &entries, selected_slot.ok_or("Missing PDF page")?)?;
+    let mut selected_annots = Vec::new();
+    for (number, page, start, len) in ranges {
+        let annots: Vec<_> = (start..start + len)
+            .filter(|&i| !removed[i])
+            .map(|i| entries[i].clone())
+            .collect();
+        if number as usize == selected.page + 1 {
+            selected_annots = annots.clone();
+        }
+        if annots.len() != len {
+            update
+                .opt_clone_object_to_new_document(page)
+                .map_err(|e| e.to_string())?;
+            update
+                .new_document
+                .get_dictionary_mut(page)
+                .map_err(|e| e.to_string())?
+                .set("Annots", annots);
+        }
+    }
+    Ok(selected_annots)
+}
+
 /// Preserve raw /Annots entries, including unrelated and malformed objects.
-/// A work queue follows popup/reply links without repeatedly scanning the array.
-fn without_comment(
+/// A work queue follows popup/reply links across pages without repeated scans.
+fn removed_comments(
     document: &lopdf::Document,
     annots: &[lopdf::Object],
     slot: usize,
-) -> Result<Vec<lopdf::Object>, String> {
+) -> Result<Vec<bool>, String> {
     use lopdf::{Object, ObjectId};
     use std::collections::{HashMap, VecDeque};
     let selected = annots.get(slot).ok_or("Annotation no longer exists")?;
@@ -347,12 +775,7 @@ fn without_comment(
             queue.extend(references.remove(&popup).unwrap_or_default());
         }
     }
-    Ok(annots
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !removed[*index])
-        .map(|(_, value)| value.clone())
-        .collect())
+    Ok(removed)
 }
 
 /// Never replace a file which another program changed since it was loaded.
@@ -373,6 +796,10 @@ mod tests {
         Comment {
             page: 0,
             slot: None,
+            parent: None,
+            review: Default::default(),
+            marked: false,
+            states: Vec::new(),
             kind: "Highlight".into(),
             contents: "中文批注 📝\nSecond line".into(),
             author: "Pagewing".into(),
@@ -733,5 +1160,231 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn nested_replies_roundtrip_direct_parents_status_history_and_subtree_deletion() {
+        for direct in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (path, pdf) = source(root.path());
+            let baseline_doc = lopdf::Document::load(&path).unwrap();
+            let baseline = page_annotations(&baseline_doc, baseline_doc.get_pages()[&1]).unwrap();
+            save(&pdf, &draft(), &path).unwrap();
+            if direct {
+                let mut doc = lopdf::Document::load(&path).unwrap();
+                let page = doc.get_pages()[&1];
+                let mut entries = page_annotations(&doc, page).unwrap();
+                let dict = doc
+                    .get_dictionary(entries.last().unwrap().as_reference().unwrap())
+                    .unwrap()
+                    .clone();
+                *entries.last_mut().unwrap() = O::Dictionary(dict);
+                doc.get_dictionary_mut(page).unwrap().set("Annots", entries);
+                doc.save(&path).unwrap();
+            }
+            for depth in 1..=3 {
+                let pdf = crate::document::load(&path, "").unwrap();
+                let comments = read(&pdf, || false);
+                let mut reply = comments.items.last().unwrap().reply().unwrap();
+                reply.contents = format!("第 {depth} 层回复");
+                save(&pdf, &reply, &path).unwrap();
+            }
+            for status in ReviewStatus::ALL.into_iter().chain([ReviewStatus::None]) {
+                let pdf = crate::document::load(&path, "").unwrap();
+                let mut comment = read(&pdf, || false).items.remove(1);
+                comment.review = status;
+                comment.marked = !comment.marked;
+                save(&pdf, &comment, &path).unwrap();
+                let pdf = crate::document::load(&path, "").unwrap();
+                let comments = read(&pdf, || false);
+                assert_eq!(comments.items.len(), 4, "status records are not replies");
+                assert_eq!(comments.items[1].review, status);
+                assert_eq!(comments.items[1].marked, comment.marked);
+                assert_eq!(comments.thread_rows(), [(0, 0), (1, 1), (2, 2), (3, 3)]);
+                let doc = lopdf::Document::load(&path).unwrap();
+                let page = doc.get_pages()[&1];
+                let entries = page_annotations(&doc, page).unwrap();
+                let state = doc
+                    .get_dictionary(entries.last().unwrap().as_reference().unwrap())
+                    .unwrap();
+                assert!(matches!(state.get(b"StateModel").unwrap(), O::String(..)));
+                assert!(matches!(state.get(b"State").unwrap(), O::String(..)));
+                assert!(state.get(b"IRT").unwrap().as_reference().is_ok());
+                assert_eq!(state.get(b"F").unwrap().as_i64().unwrap(), 2);
+            }
+            let pdf = crate::document::load(&path, "").unwrap();
+            let comments = read(&pdf, || false);
+            let mut edited = comments.items[2].clone();
+            edited.contents = "Edited nested reply".into();
+            save(&pdf, &edited, &path).unwrap();
+            let pdf = crate::document::load(&path, "").unwrap();
+            let mut sibling = read(&pdf, || false).items[0].reply().unwrap();
+            sibling.contents = "Keep this sibling reply".into();
+            save(&pdf, &sibling, &path).unwrap();
+            let pdf = crate::document::load(&path, "").unwrap();
+            let comments = read(&pdf, || false);
+            assert_eq!(comments.items[2].parent, comments.items[1].id());
+            assert_eq!(comments.items[2].contents, "Edited nested reply");
+            delete(&pdf, &comments.items[1], &path).unwrap();
+            let pdf = crate::document::load(&path, "").unwrap();
+            let comments = read(&pdf, || false);
+            assert_eq!(
+                comments.items.len(),
+                2,
+                "deleting a reply keeps the root highlight and sibling branches"
+            );
+            assert_eq!(comments.items[0].contents, draft().contents);
+            assert_eq!(comments.items[1].contents, "Keep this sibling reply");
+            let doc = lopdf::Document::load(&path).unwrap();
+            let remaining = page_annotations(&doc, doc.get_pages()[&1]).unwrap();
+            assert_eq!(remaining.len(), baseline.len() + 2);
+            assert_eq!(&remaining[..baseline.len()], baseline.as_slice());
+        }
+    }
+
+    #[test]
+    fn reads_acrobat_state_chains_out_of_order_and_deletes_across_pages() {
+        let root = tempfile::tempdir().unwrap();
+        let mut doc =
+            lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
+        let pages = doc.get_pages();
+        let parent = doc.add_object(
+            dictionary! { "Subtype" => "Highlight", "Contents" => lopdf::text_string("Root") },
+        );
+        let reply = doc.add_object(
+            dictionary! { "Subtype" => "Text", "IRT" => parent, "Contents" => lopdf::text_string("Reply") },
+        );
+        let first = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => reply, "T" => lopdf::text_string("Acrobat reviewer"), "F" => 2, "StateModel" => lopdf::text_string("Review"), "State" => lopdf::text_string("Accepted") });
+        let next = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => first, "T" => lopdf::text_string("Acrobat reviewer"), "F" => 2, "StateModel" => lopdf::text_string("Review"), "State" => lopdf::text_string("Completed") });
+        let marked = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => parent, "StateModel" => lopdf::text_string("Marked"), "State" => lopdf::text_string("Marked") });
+        let unrelated = doc.add_object(
+            dictionary! { "Subtype" => "Text", "Contents" => lopdf::text_string("Keep me") },
+        );
+        let grouped = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => parent, "RT" => "Group", "Contents" => lopdf::text_string("Grouped markup") });
+        let orphan = doc.add_object(
+            dictionary! { "Subtype" => "Text", "IRT" => (99999, 0), "Contents" => lopdf::text_string("Orphan") },
+        );
+        let cycle = doc.new_object_id();
+        doc.set_object(cycle, dictionary! { "Subtype" => "Text", "IRT" => cycle, "StateModel" => lopdf::text_string("Review"), "State" => lopdf::text_string("Rejected") });
+        doc.get_dictionary_mut(pages[&1]).unwrap().set(
+            "Annots",
+            vec![
+                O::Reference(next),
+                first.into(),
+                marked.into(),
+                parent.into(),
+                grouped.into(),
+                cycle.into(),
+            ],
+        );
+        doc.get_dictionary_mut(pages[&2]).unwrap().set(
+            "Annots",
+            vec![O::Reference(reply), unrelated.into(), orphan.into()],
+        );
+        let path = root.path().join("acrobat.pdf");
+        doc.save(&path).unwrap();
+        let pdf = crate::document::load(&path, "").unwrap();
+        let comments = read(&pdf, || false);
+        assert_eq!(comments.items.len(), 5);
+        assert!(comments.items[0].marked);
+        assert_eq!(comments.items[2].parent, comments.items[0].id());
+        assert_eq!(comments.items[2].review, ReviewStatus::Completed);
+        assert_eq!(comments.items[2].states.len(), 2);
+        assert_eq!(comments.items[2].states[1].author, "Acrobat reviewer");
+        assert!(
+            comments.items[1].parent.is_none(),
+            "RT Group is not a discussion reply"
+        );
+        assert!(
+            comments.items[4].parent.is_none(),
+            "missing IRT must not hide the annotation"
+        );
+        // A Pagewing change adds its own state without rewriting another author's record.
+        let mut changed = comments.items[2].clone();
+        changed.review = ReviewStatus::Rejected;
+        save(&pdf, &changed, &path).unwrap();
+        let pdf = crate::document::load(&path, "").unwrap();
+        let comments = read(&pdf, || false);
+        assert_eq!(comments.items[2].review, ReviewStatus::Rejected);
+        assert_eq!(comments.items[2].states.len(), 3);
+        delete(&pdf, &comments.items[2], &path).unwrap();
+        let doc = lopdf::Document::load(&path).unwrap();
+        assert_eq!(
+            page_annotations(&doc, pages[&1]).unwrap(),
+            [
+                O::Reference(marked),
+                parent.into(),
+                grouped.into(),
+                cycle.into()
+            ]
+        );
+        assert_eq!(
+            page_annotations(&doc, pages[&2]).unwrap(),
+            [O::Reference(unrelated), orphan.into()]
+        );
+    }
+
+    #[test]
+    fn status_only_edits_preserve_truncated_contents_and_rich_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut doc =
+            lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
+        let page = doc.get_pages()[&1];
+        let contents = "x".repeat(65_537);
+        let id = doc.add_object(dictionary! { "Subtype" => "FreeText", "Contents" => lopdf::text_string(&contents), "RC" => lopdf::text_string("rich text") });
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .set("Annots", vec![O::Reference(id)]);
+        let path = root.path().join("long.pdf");
+        doc.save(&path).unwrap();
+        let pdf = crate::document::load(&path, "").unwrap();
+        let mut comment = read(&pdf, || false).items.remove(0);
+        assert!(comment.truncated && !comment.editable());
+        comment.review = ReviewStatus::Completed;
+        save(&pdf, &comment, &path).unwrap();
+        let saved = lopdf::Document::load(&path).unwrap();
+        assert_eq!(
+            saved
+                .get_dictionary(id)
+                .unwrap()
+                .get(b"Contents")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            contents.as_bytes()
+        );
+        assert_eq!(
+            saved
+                .get_dictionary(id)
+                .unwrap()
+                .get(b"RC")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            b"rich text"
+        );
+        let pdf = crate::document::load(&path, "").unwrap();
+        assert_eq!(
+            read(&pdf, || false).items[0].review,
+            ReviewStatus::Completed
+        );
+    }
+
+    #[test]
+    fn malformed_cycles_and_deep_threads_show_each_comment_once() {
+        let mut comments = Comments::default();
+        for index in 0..10_000 {
+            let mut comment = draft();
+            comment.slot = Some(index);
+            comment.parent = Some(CommentId {
+                page: 0,
+                slot: if index == 0 { 9999 } else { index - 1 },
+            });
+            comments.items.push(comment);
+        }
+        let rows = comments.thread_rows();
+        assert_eq!(rows.len(), 10_000);
+        assert_eq!(rows[0], (0, 0));
+        assert_eq!(rows[9999], (9999, 9999));
     }
 }

@@ -107,11 +107,15 @@ require('tex-tools').setup({
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
 
-打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示所有页面已读取的批注，包含页码、作者与完整 comment 内容；列表可滚动，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
+打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，包含页码、作者、状态与完整 comment 内容；列表可滚动，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
 
-删除批注：在右侧列表中选中已保存的条目，点击 **Delete comment & highlight**。程序会直接更新当前 PDF，删除整条批注及其高亮、关联弹窗和同页回复，列表自动刷新。FreeText 和超长批注也可整条删除，锁定批注不能删除。若只想删除 comment 文字并保留高亮，清空编辑框后点击 **Save comment**。尚未保存的新批注使用 **Discard / close editor** 放弃。
+嵌套回复：选中已保存的批注，点击 **Reply**，输入回复后使用 **Save comment**（或 `Ctrl/Cmd+Enter`）保存。回复也可以继续回复，支持多层嵌套；深层回复的缩进会限制宽度，保留可读空间。回复以标准 PDF Text 批注及 `IRT` / `RT=R` 关系保存在原文件中，不会再创建文字高亮。已有 Acrobat 回复会自动组成线程。
 
-隐藏 Comments 面板会保留草稿；**Discard / close editor** 放弃本条修改。存在未保存草稿时，切换、关闭、重新加载文档或退出会提示先保存或放弃，避免丢失输入。保存采用 PDF 标准 Highlight/Contents 字段和高亮外观流，其他 PDF 阅读器也可显示；编辑现有 comment 时保留其他批注及页面内容。保存会先完成临时文件写入，再替换当前 PDF；若磁盘文件已被其他程序修改，会报告错误并保留 comment 草稿，避免覆盖外部更改。加密 PDF 暂不支持保存批注；锁定、超长批注及 FreeText 的内容可读取，不能修改。批注扫描最多检查 100,000 个条目并展示 10,000 条，超出时显示提示。
+批注状态：编辑器提供 **Status** 选择器，支持 **None**（无状态）、**Accepted**（已接受）、**Rejected**（已拒绝）、**Cancelled**（已取消）、**Completed / resolved**（已完成／已解决），以及独立的 **Marked (Acrobat checkmark)** 勾选标记。点击 **Save comment** 后写入 PDF；只改状态也会作为未保存草稿保护。状态使用 Acrobat 的标准 `StateModel=Review` / `Marked` 与 `State` 文本字段，保存为独立的状态回复，侧栏不会把它们显示成空白 comment。**Status history** 可查看各作者的状态记录；Pagewing 添加自己的状态，保留其他审阅者的历史。界面优先显示 Pagewing 的状态，否则显示读取到的外部状态。这里“已解决”对应本地 PDF 的 **Completed**，不连接 Acrobat 云端审阅的 Resolve 操作。
+
+删除批注：在右侧列表中选中已保存的条目，点击 **Delete comment & highlight**。程序会直接更新当前 PDF，删除整条批注及其高亮、关联弹窗、多层回复和状态历史，列表自动刷新，也会清理其他页面上引用该批注的回复。选中回复时显示 **Delete reply & replies**，只删除这条回复及其子回复，保留父批注和其他分支。FreeText 和超长批注也可整条删除，锁定批注不能删除。若只想删除 comment 文字并保留高亮，清空编辑框后点击 **Save comment**。尚未保存的新批注使用 **Discard / close editor** 放弃。
+
+隐藏 Comments 面板会保留草稿；**Discard / close editor** 放弃本条修改。存在未保存草稿时，切换、关闭、重新加载文档或退出会提示先保存或放弃，避免丢失输入。保存采用 PDF 标准 Highlight/Contents 字段和高亮外观流，其他 PDF 阅读器也可显示；编辑现有 comment 时保留其他批注及页面内容。保存会先完成临时文件写入，再替换当前 PDF；若磁盘文件已被其他程序修改，会报告错误并保留 comment 草稿，避免覆盖外部更改。加密 PDF 暂不支持保存批注；锁定批注不能修改，超长批注及 FreeText 的文字只读，但可添加回复及状态而不改动原文。批注扫描最多检查 100,000 个条目并展示 10,000 条，超出时显示提示。
 
 ## 配置文件
 
