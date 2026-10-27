@@ -91,6 +91,19 @@ impl KeyText {
     }
 }
 
+pub(super) fn reader_zoom_action(key: Key, shift: bool, text: KeyText) -> Option<ZoomAction> {
+    match text {
+        KeyText::Character('+' | '=') => Some(ZoomAction::In),
+        KeyText::Character('-' | '−') => Some(ZoomAction::Out),
+        KeyText::None => match key {
+            Key::Plus | Key::Equals => Some(ZoomAction::In),
+            Key::Minus if !shift => Some(ZoomAction::Out),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub(super) fn count_digit(key: Key, shift: bool, text: KeyText) -> Option<char> {
     match text {
         KeyText::Character(character) => character.is_ascii_digit().then_some(character),
@@ -555,6 +568,39 @@ mod tests {
             })
             .collect();
         assert_eq!(digits, [Some('0'), None, None, Some('3')]);
+    }
+
+    #[test]
+    fn reader_zoom_uses_literal_signs_and_does_not_treat_underscore_as_minus() {
+        for key in [Key::Plus, Key::Equals, Key::Minus, Key::Num2, Key::J] {
+            for shift in [false, true] {
+                for sign in ['+', '='] {
+                    assert_eq!(
+                        reader_zoom_action(key, shift, KeyText::Character(sign)),
+                        Some(ZoomAction::In)
+                    );
+                }
+                for sign in ['-', '−'] {
+                    assert_eq!(
+                        reader_zoom_action(key, shift, KeyText::Character(sign)),
+                        Some(ZoomAction::Out)
+                    );
+                }
+                for character in "_@#^&*()3j＋".chars() {
+                    assert_eq!(
+                        reader_zoom_action(key, shift, KeyText::Character(character)),
+                        None
+                    );
+                }
+                assert_eq!(reader_zoom_action(key, shift, KeyText::Other), None);
+                let fallback = match key {
+                    Key::Plus | Key::Equals => Some(ZoomAction::In),
+                    Key::Minus if !shift => Some(ZoomAction::Out),
+                    _ => None,
+                };
+                assert_eq!(reader_zoom_action(key, shift, KeyText::None), fallback);
+            }
+        }
     }
 
     #[test]

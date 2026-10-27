@@ -1388,6 +1388,11 @@ impl Folio {
                 self.nav.digit(digit);
                 continue;
             }
+            if let Some(action) = shortcuts::reader_zoom_action(key, modifiers.shift, key_text) {
+                let count = self.nav.take_count();
+                self.zoom_steps(count, matches!(action, shortcuts::ZoomAction::Out));
+                continue;
+            }
             if key != Key::G {
                 self.nav.pending_g = false;
             }
@@ -1462,10 +1467,6 @@ impl Folio {
                 Key::Enter if !self.nav.prefix.is_empty() => {
                     let page = self.nav.take_count() - 1;
                     self.jump(page);
-                }
-                Key::Plus | Key::Equals | Key::Minus => {
-                    let count = self.nav.take_count();
-                    self.zoom_steps(count, key == Key::Minus);
                 }
                 Key::A => self.actual_size(),
                 Key::W => {

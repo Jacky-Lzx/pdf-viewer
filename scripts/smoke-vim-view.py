@@ -56,7 +56,10 @@ def run(binary):
                     application.send_signal(signal.SIGSTOP)
                 try:
                     for character in value:
-                        keyboard.key(character.lower(), shift=character.isupper() or character in "+$", delay=0 if burst else 0.025)
+                        # Use the actual minus key for _, avoiding alternative
+                        # keycodes X11 may assign to a literal symbol.
+                        symbol = "-" if character == "_" else character.lower()
+                        keyboard.key(symbol, shift=character.isupper() or character in "+$_", delay=0 if burst else 0.025)
                 finally:
                     if burst:
                         application.send_signal(signal.SIGCONT)
@@ -215,6 +218,12 @@ def run(binary):
                 position(0, 0, "reset after counted zoom", fit="Page")
                 sequence("a")
                 position(0, 0.5, "100% zoom preserves the fitted page center", fit={"Custom": 1.0}, horizontal=0)
+                sequence("3_J", burst=True)
+                position(1, 0, "literal underscore preserves custom zoom and clears the count", fit={"Custom": 1.0})
+                sequence("K")
+                position(0, 0, "return after underscore without hidden navigation count", fit={"Custom": 1.0})
+                sequence("zz")
+                position(0, 0.5, "restore viewport center before zoom commands", fit={"Custom": 1.0}, horizontal=0)
                 sequence("+a", burst=True)
                 position(0, 0.5, "same-frame relative and 100% zoom preserve the center", fit={"Custom": 1.0}, horizontal=0)
                 keyboard.key("+", ctrl=True, shift=True)

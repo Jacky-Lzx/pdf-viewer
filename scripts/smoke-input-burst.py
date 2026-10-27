@@ -15,8 +15,8 @@ SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 ENTER, ESCAPE, BACKSPACE = 0xFF0D, 0xFF1B, 0xFF08
-PUNCTUATION = "@#^&*()"
-PUNCTUATION_KEYS = "2367890"
+PUNCTUATION = "@#^&*()_"
+PUNCTUATION_KEYS = "2367890-"
 
 
 def text(value):
@@ -90,7 +90,7 @@ def run(binary):
                 # choose a dedicated multimedia key with no egui key event.
                 for punctuation, key in zip(PUNCTUATION, PUNCTUATION_KEYS):
                     burst(text("3") + [(key, {"shift": True})] + text("J"))
-                    expect(paths[0], 1, f"literal {punctuation} cancels the count instead of appending a fallback digit")
+                    expect(paths[0], 1, f"literal {punctuation} clears the count and preserves fitted zoom")
                     burst(text("gg"))
                     expect(paths[0], 0, "reset after literal punctuation")
                 # Seed a nonempty clipboard so a lost query cannot pass as stale
