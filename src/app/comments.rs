@@ -1,22 +1,10 @@
 use super::{Pagewing, shortcuts};
 use crate::annotations::{Comment, Comments, ReviewStatus};
+use crate::comment_cards::{CardTextCache, card_lines};
 use crate::comment_view::{CommentFilter, CommentView};
 use eframe::egui::{self, Color32, Vec2};
 
 mod editor;
-
-fn preview_text(text: &str, limit: usize) -> String {
-    let mut chars = text.chars();
-    let mut result: String = chars
-        .by_ref()
-        .take(limit)
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .collect();
-    if chars.next().is_some() {
-        result.push('…');
-    }
-    result
-}
 
 fn comment_card(
     ui: &mut egui::Ui,
@@ -94,6 +82,7 @@ pub(super) struct CommentUi {
     pub loaded: bool,
     pub comments: Comments,
     pub view: CommentView,
+    cards: CardTextCache,
     pub editor: Option<Comment>,
     original: String,
     original_review: ReviewStatus,
@@ -111,6 +100,7 @@ pub(super) struct CommentUi {
 impl CommentUi {
     pub fn set_comments(&mut self, comments: Comments) {
         self.view.set_comments(&comments);
+        self.cards.clear();
         self.comments = comments;
         self.loaded = true;
     }
@@ -528,6 +518,7 @@ impl Pagewing {
                 .vertical_scroll_offset(row as f32 * (row_height + ui.spacing().item_spacing.y));
         }
         let keyboard_focus = self.comment_filter_focused(ui.ctx());
+        let busy = self.comments.busy();
         list.show_rows(
             ui,
             row_height,
@@ -540,41 +531,6 @@ impl Pagewing {
                         matched,
                     } = self.comments.view.rows()[row];
                     let comment = &self.comments.comments.items[index];
-                    // Bound layout work even for very long annotations. The
-                    // complete text stays available in the tooltip and editor.
-                    let preview = preview_text(&comment.contents, 160);
-                    let author = preview_text(&comment.author, 60);
-                    let lines = [
-                        format!(
-                            "Page {}{}",
-                            self.page_name(comment.page),
-                            if author.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" · {author}")
-                            }
-                        ),
-                        if preview.is_empty() {
-                            "(no comment)".into()
-                        } else {
-                            preview
-                        },
-                        format!(
-                            "{}{}{}{}",
-                            if comment.parent.is_some() {
-                                "Reply"
-                            } else {
-                                &comment.kind
-                            },
-                            if comment.review == ReviewStatus::None {
-                                String::new()
-                            } else {
-                                format!(" · {}", comment.review.label())
-                            },
-                            if comment.marked { " · ✓ Marked" } else { "" },
-                            if matched { "" } else { " · Thread context" },
-                        ),
-                    ];
                     let active = if keyboard_focus {
                         self.comments.view.selected() == Some(index)
                     } else {
@@ -582,11 +538,14 @@ impl Pagewing {
                             current.page == comment.page && current.slot == comment.slot
                         })
                     };
+                    let lines = self.comments.cards.get_or_insert_with(index, matched, || {
+                        card_lines(comment, self.labels.display_name(comment.page), matched)
+                    });
                     ui.horizontal(|ui| {
                         ui.add_space(depth.min(6) as f32 * 14.0);
                         if ui
-                            .add_enabled_ui(!self.loading && !self.comments.busy(), |ui| {
-                                comment_card(ui, &lines, active, matched, row_height)
+                            .add_enabled_ui(!self.loading && !busy, |ui| {
+                                comment_card(ui, lines, active, matched, row_height)
                             })
                             .inner
                             .on_hover_ui(|ui| {
@@ -1408,6 +1367,70 @@ mod tests {
     }
 
     #[test]
+    fn reloaded_comment_cards_replace_text_author_status_and_page_labels() {
+        use lopdf::dictionary;
+        let (_root, context, mut app) = saved_comment_editor();
+        let path = app.reading.path.clone();
+        app.comments.editor = None;
+        let mut before = egui::FullOutput::default();
+        for _ in 0..3 {
+            before = frame(&mut app, &context, Vec::new());
+        }
+        let header = format!("Page {} · Pagewing", app.page_name(0));
+        assert!(before.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == header)));
+        let mut changed = app.comments.comments.items[0].clone();
+        changed.contents = "Replaced on disk".into();
+        changed.review = ReviewStatus::Completed;
+        changed.marked = true;
+        crate::annotations::save(&crate::document::load(&path, "").unwrap(), &changed, &path)
+            .unwrap();
+        let mut pdf = lopdf::Document::load(&path).unwrap();
+        for object in pdf.objects.values_mut() {
+            if let Ok(dict) = object.as_dict_mut()
+                && dict.get(b"Subtype").and_then(lopdf::Object::as_name).ok() == Some(b"Highlight")
+            {
+                dict.set("T", lopdf::Object::string_literal("Another reviewer"));
+            }
+        }
+        pdf.catalog_mut().unwrap().set(
+            "PageLabels",
+            lopdf::dictionary! {
+                "Nums" => vec![lopdf::Object::Integer(0), lopdf::dictionary! { "S" => "r" }.into()],
+            },
+        );
+        pdf.save(&path).unwrap();
+        app.comments.editor = None;
+        app.reload(&context);
+        wait(&mut app, &context, |app| {
+            !app.loading && app.comments.loaded
+        });
+        let after = frame(&mut app, &context, Vec::new());
+        for expected in [
+            "Page i · 1 · Another reviewer",
+            "Replaced on disk",
+            "Highlight · Completed / resolved · ✓ Marked",
+        ] {
+            assert!(
+                after.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected)),
+                "missing refreshed card line: {expected}"
+            );
+        }
+        // The Comments event can replace metadata without a new document
+        // identity. Reusing index zero must still rebuild its painted text.
+        let mut replacement = app.comments.comments.items[0].clone();
+        replacement.contents = "Another metadata snapshot".into();
+        app.comments.set_comments(Comments {
+            items: vec![replacement],
+            limited: false,
+        });
+        let refreshed = frame(&mut app, &context, Vec::new());
+        assert!(refreshed.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Another metadata snapshot")));
+    }
+
+    #[test]
     fn right_sidebar_previews_comments_and_keeps_full_text_in_the_editor() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("comments.pdf");
@@ -1473,7 +1496,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             first.galley.text(),
-            preview_text(&long, 160),
+            crate::comment_cards::preview_text(&long, 160),
             "the summary must be a separately painted line, not truncated with its header"
         );
         assert!(

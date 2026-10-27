@@ -17,9 +17,58 @@ mod document_bytes;
 #[path = "../src/pdf_string.rs"]
 mod pdf_string;
 
+#[allow(dead_code, unused_imports)]
+#[path = "../src/comment_cards.rs"]
+mod comment_cards;
+
 use annotations::{Comment, CommentId, Comments};
+use comment_cards::{CardTextCache, card_lines};
 use comment_view::CommentView;
-use std::{hint::black_box, time::Instant};
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    hint::black_box,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
+    time::Instant,
+};
+
+struct AllocationCounter;
+static COUNTING: AtomicBool = AtomicBool::new(false);
+static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+static REALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+#[global_allocator]
+static ALLOCATOR: AllocationCounter = AllocationCounter;
+unsafe impl GlobalAlloc for AllocationCounter {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if COUNTING.load(Relaxed) {
+            ALLOCATIONS.fetch_add(1, Relaxed);
+        }
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        if COUNTING.load(Relaxed) {
+            ALLOCATIONS.fetch_add(1, Relaxed);
+        }
+        unsafe { System.alloc_zeroed(layout) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        if COUNTING.load(Relaxed) {
+            REALLOCATIONS.fetch_add(1, Relaxed);
+        }
+        unsafe { System.realloc(ptr, layout, size) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+fn allocations(mut run: impl FnMut()) -> (usize, usize) {
+    ALLOCATIONS.store(0, Relaxed);
+    REALLOCATIONS.store(0, Relaxed);
+    COUNTING.store(true, Relaxed);
+    run();
+    COUNTING.store(false, Relaxed);
+    (ALLOCATIONS.load(Relaxed), REALLOCATIONS.load(Relaxed))
+}
 
 fn measure(passes: usize, mut run: impl FnMut() -> usize) -> f64 {
     let mut samples: Vec<_> = (0..passes)
@@ -115,4 +164,126 @@ fn benchmark() {
         let after = measure(passes, || black_box(&view).overlays(black_box(page)).len());
         println!("  page overlays: scan {before:.3}, indexed {after:.3}");
     }
+    println!(
+        "Card text: 12 visible cards/frame, 3000 frames/sample, alternating rebuild/cache order. Includes preview, author, page label and status formatting/allocation; excludes widgets, text layout, PDF parsing and GPU."
+    );
+    for long in [false, true] {
+        let comments: Vec<_> = (0..12)
+            .map(|index| Comment {
+                page: index,
+                slot: Some(0),
+                parent: None,
+                review: annotations::ReviewStatus::Completed,
+                marked: true,
+                states: Vec::new(),
+                kind: "Highlight".into(),
+                contents: if long {
+                    "中文📝 Review\n".repeat(5000)
+                } else {
+                    format!("Review {index}: Straße 中文")
+                },
+                author: if long {
+                    "审阅者📝 ".repeat(1000)
+                } else {
+                    "Pagewing".into()
+                },
+                rects: Vec::new(),
+                has_appearance: true,
+                truncated: false,
+                locked: false,
+            })
+            .collect();
+        benchmark_cards(
+            passes,
+            if long {
+                "long Unicode"
+            } else {
+                "short mixed text"
+            },
+            &comments,
+        );
+    }
+}
+
+fn rebuilt_frame(comments: &[Comment], context: bool) -> usize {
+    comments
+        .iter()
+        .map(|comment| {
+            let lines = card_lines(
+                black_box(comment),
+                format!("iv · {}", comment.page + 1),
+                !context,
+            );
+            black_box(&lines).iter().map(String::len).sum::<usize>()
+        })
+        .sum()
+}
+
+fn cached_frame(
+    comments: &[Comment],
+    cache: &mut CardTextCache,
+    context: bool,
+    first: usize,
+) -> usize {
+    comments
+        .iter()
+        .enumerate()
+        .map(|(index, comment)| {
+            let lines = cache.get_or_insert_with(first + index, !context, || {
+                card_lines(comment, format!("iv · {}", comment.page + 1), !context)
+            });
+            black_box(lines).iter().map(String::len).sum::<usize>()
+        })
+        .sum()
+}
+
+fn benchmark_cards(passes: usize, name: &str, comments: &[Comment]) {
+    let mut cache = CardTextCache::default();
+    // Model a sidebar that has already been scrolled: warm-hit timings must
+    // include the cache's full-capacity lookup path, not only a fresh table.
+    for index in 0..128 {
+        let comment = &comments[index % comments.len()];
+        cache.get_or_insert_with(1000 + index, true, || {
+            card_lines(comment, "iv · 1".into(), true)
+        });
+    }
+    for context in [false, true] {
+        let expected = rebuilt_frame(comments, context);
+        assert_eq!(cached_frame(comments, &mut cache, context, 0), expected);
+    }
+    let before = allocations(|| {
+        black_box(rebuilt_frame(comments, false));
+    });
+    let after = allocations(|| {
+        black_box(cached_frame(comments, &mut cache, false, 0));
+    });
+    assert_eq!(after, (0, 0), "warm card text must not allocate");
+    let mut samples = [Vec::new(), Vec::new()];
+    for pass in 0..passes {
+        for mode in if pass % 2 == 0 { [0, 1] } else { [1, 0] } {
+            let start = Instant::now();
+            for frame in 0..3000 {
+                let checksum = if mode == 0 {
+                    rebuilt_frame(comments, frame % 2 == 0)
+                } else {
+                    cached_frame(comments, &mut cache, frame % 2 == 0, 0)
+                };
+                black_box(checksum);
+            }
+            samples[mode].push(start.elapsed().as_secs_f64() * 1e6 / 3000.0);
+        }
+    }
+    for times in &mut samples {
+        times.sort_by(f64::total_cmp);
+    }
+    let rebuilt = samples[0][passes / 2];
+    let cached = samples[1][passes / 2];
+    let mut first = 0;
+    let churn = measure(passes, || {
+        first += comments.len();
+        cached_frame(comments, &mut cache, false, first)
+    });
+    println!(
+        "  {name}: rebuild {rebuilt:.3} µs/frame, cached {cached:.3}, scrolling misses {churn:.3}; allocation/reallocation calls per warm frame {before:?} -> {after:?}"
+    );
 }
