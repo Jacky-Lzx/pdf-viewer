@@ -106,7 +106,9 @@ impl CommentUi {
         })
     }
     pub fn busy(&self) -> bool {
-        self.saving
+        // Keyboard save is queued before the editor consumes this frame's
+        // text. It already owns the document, even before the worker starts.
+        self.saving || self.save_requested
     }
 }
 
@@ -266,7 +268,7 @@ impl Pagewing {
 
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
         self.input_buttons.close_comments = None;
-        let save_requested = std::mem::take(&mut self.comments.save_requested);
+        let save_requested = self.comments.save_requested;
         if (!self.comments.open && !save_requested) || self.nav.count == 0 {
             return;
         }
@@ -362,6 +364,7 @@ impl Pagewing {
                         actions = self.comment_editor(ui);
                     });
             });
+        let save_requested = std::mem::take(&mut self.comments.save_requested);
         if actions.discard {
             self.comments.editor = None;
         }
@@ -529,6 +532,7 @@ impl Pagewing {
                 .show(ui, |ui| {
                     ui.separator();
                     let busy = self.comments.busy();
+                    let saving = self.comments.saving;
                     if let Some(comment) = &mut self.comments.editor {
                         ui.label(format!(
                             "{} · page {}",
@@ -543,7 +547,9 @@ impl Pagewing {
                         if read_only {
                             ui.label(if comment.locked { "This annotation is read-only." } else { "Comment text is read-only." });
                         }
-                        ui.add_enabled_ui(!busy && !read_only, |ui| {
+                        // A queued save must still receive this batch's text;
+                        // other editor actions already stay disabled via busy.
+                        ui.add_enabled_ui(!saving && !read_only, |ui| {
                             shortcuts::text_input(
                                 ui,
                                 egui::Id::new("pagewing-comment-input"),
@@ -764,6 +770,105 @@ mod tests {
                     },
                 ],
             );
+        }
+    }
+
+    #[test]
+    fn queued_save_protects_the_editor_and_final_input_until_the_worker_starts() {
+        for action in [
+            Some((Key::W, Modifiers::COMMAND)),
+            Some((Key::R, Modifiers::COMMAND)),
+            Some((Key::T, Modifiers::COMMAND | Modifiers::SHIFT)),
+            None,
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("comments.pdf");
+            std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+            let pdf = crate::document::load(&path, "").unwrap();
+            crate::annotations::save(
+                &pdf,
+                &Comment {
+                    page: 0,
+                    slot: None,
+                    parent: None,
+                    review: ReviewStatus::None,
+                    marked: false,
+                    states: Vec::new(),
+                    kind: "Highlight".into(),
+                    contents: "Original comment".into(),
+                    author: "Pagewing".into(),
+                    rects: vec![hayro::kurbo::Rect::new(50.0, 80.0, 150.0, 100.0)],
+                    has_appearance: false,
+                    truncated: false,
+                    locked: false,
+                },
+                &path,
+            )
+            .unwrap();
+            let context = Context::default();
+            let mut app = Pagewing::with_context(
+                &context,
+                Some(path.clone()),
+                None,
+                root.path().join("library.json"),
+            );
+            wait(&mut app, &context, |app| app.comments.loaded);
+            app.edit_comment(0);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = frame(&mut app, &context, Vec::new());
+            }
+            assert!(!app.comments.unsaved());
+            let target = root.path().join("closed.pdf");
+            app.last_closed = Some(target.clone());
+            let expected = if action.is_some() {
+                "Final comment 📝"
+            } else {
+                "Original comment"
+            };
+            let mut events = Vec::new();
+            if action.is_some() {
+                events.extend(key(Key::A, Modifiers::COMMAND));
+                events.push(Event::Text(expected.into()));
+            }
+            events.extend(key(Key::Enter, Modifiers::COMMAND));
+            if let Some((key, modifiers)) = action {
+                events.extend(self::key(key, modifiers));
+            } else {
+                let pos = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.text() == "Discard / close editor" =>
+                        {
+                            Some(text.pos + text.galley.size() * 0.5)
+                        }
+                        _ => None,
+                    })
+                    .expect("visible discard action");
+                events.push(Event::PointerMoved(pos));
+                events.extend([true, false].map(|pressed| Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: Modifiers::NONE,
+                }));
+            }
+            frame(&mut app, &context, events);
+            assert_eq!(app.reading.path, path, "{action:?}");
+            assert!(!app.loading, "{action:?}");
+            assert!(app.comments.saving, "{action:?}");
+            assert_eq!(
+                app.comments.editor.as_ref().unwrap().contents,
+                expected,
+                "{action:?}"
+            );
+            assert_eq!(app.last_closed.as_ref(), Some(&target));
+            wait(&mut app, &context, |app| {
+                !app.comments.saving && !app.loading && app.comments.loaded
+            });
+            assert_eq!(app.comments.comments.items[0].contents, expected);
         }
     }
 
