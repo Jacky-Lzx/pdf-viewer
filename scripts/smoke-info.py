@@ -76,7 +76,13 @@ def run(binary):
         invoke(["--info", invalid], "Cannot open PDF")
         encrypted = root / "encrypted.pdf"
         encrypted.write_bytes(encrypted_pdf())
-        invoke(["--info", encrypted], "Decryption")
+        invoke(["--info", encrypted], "needs a password")
+        for original, replacement, message in [
+            (b"/V 1", b"/V 9", "encryption method is not supported"),
+            (b"/R 2", b"/Q 2", "encryption information is damaged or incomplete"),
+        ]:
+            encrypted.write_bytes(encrypted_pdf().replace(original, replacement))
+            invoke(["--info", encrypted], message)
         reader, writer = os.pipe()
         os.close(reader)
         try:

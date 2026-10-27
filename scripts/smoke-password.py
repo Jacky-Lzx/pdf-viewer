@@ -59,6 +59,9 @@ def run(binary):
                 keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.8)
+                keyboard.key(0xFF1B)
+                keyboard.key("r", ctrl=True)
+                time.sleep(0.8)
                 password("wrong")
                 assert not config_path.exists(), "Wrong password unexpectedly opened the document"
                 password("jkgdi", submit=False)
@@ -111,7 +114,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert "jkgdi" not in config_path.read_text()
-                print("PASS: minimum-size keyboard-only unlock, show/hide password value, wrong-password focus, decrypted text, reload/search/Cancel recovery, explicit start page after retries and no password in saved state")
+                print("PASS: minimum-size keyboard-only unlock, cancel/reopen before first unlock, show/hide password value, wrong-password focus, decrypted text, reload/search/Cancel recovery, explicit start page after retries and no password in saved state")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

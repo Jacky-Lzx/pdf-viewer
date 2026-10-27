@@ -6,6 +6,43 @@ use std::path::Path;
 
 pub const MAX_PIXELS: f64 = 16_000_000.0;
 
+/// Keep password challenges separate from failures that another password cannot fix.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadError {
+    PasswordRequired { rejected: bool },
+    Other(String),
+}
+
+impl LoadError {
+    pub fn needs_password(&self) -> bool {
+        matches!(self, Self::PasswordRequired { .. })
+    }
+}
+
+impl From<String> for LoadError {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+
+impl From<&str> for LoadError {
+    fn from(message: &str) -> Self {
+        Self::Other(message.into())
+    }
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PasswordRequired { rejected: false } => f.write_str("This PDF needs a password."),
+            Self::PasswordRequired { rejected: true } => {
+                f.write_str("Password not accepted. Try again.")
+            }
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
 pub fn check_output_path(source: &Path, output: &Path) -> Result<(), String> {
     #[cfg(unix)]
     let same = {
@@ -61,14 +98,14 @@ impl RasterSize {
 pub fn load(path: &Path, password: &str) -> Result<Pdf, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-    parse(data, password)
+    parse(data, password).map_err(|error| error.to_string())
 }
 
 pub fn load_cancellable(
     path: &Path,
     password: &str,
     cancelled: impl Fn() -> bool,
-) -> Result<Option<Pdf>, String> {
+) -> Result<Option<Pdf>, LoadError> {
     if cancelled() {
         return Ok(None);
     }
@@ -86,9 +123,22 @@ pub fn load_cancellable(
     Ok((!cancelled()).then_some(pdf))
 }
 
-fn parse(data: Vec<u8>, password: &str) -> Result<Pdf, String> {
-    let pdf = Pdf::new_with_password(data, password)
-        .map_err(|error| format!("Cannot open PDF: {error:?}"))?;
+fn parse(data: Vec<u8>, password: &str) -> Result<Pdf, LoadError> {
+    use hayro::hayro_syntax::{DecryptionError, LoadPdfError};
+    let pdf = Pdf::new_with_password(data, password).map_err(|error| match error {
+        LoadPdfError::Decryption(DecryptionError::PasswordProtected) => {
+            LoadError::PasswordRequired {
+                rejected: !password.is_empty(),
+            }
+        }
+        LoadPdfError::Decryption(DecryptionError::UnsupportedAlgorithm) => {
+            "Cannot open PDF: this encryption method is not supported.".into()
+        }
+        LoadPdfError::Decryption(
+            DecryptionError::MissingIDEntry | DecryptionError::InvalidEncryption,
+        ) => "Cannot open PDF: its encryption information is damaged or incomplete.".into(),
+        LoadPdfError::Invalid => "Cannot open PDF: the file is invalid or damaged.".into(),
+    })?;
     if pdf.pages().is_empty() {
         return Err("This PDF has no pages.".into());
     }
@@ -315,7 +365,9 @@ mod tests {
         let missing = path.with_extension("missing");
         assert!(load_cancellable(&missing, "", || true).unwrap().is_none());
         assert_eq!(
-            load_cancellable(&missing, "", || false).err(),
+            load_cancellable(&missing, "", || false)
+                .err()
+                .map(|error| error.to_string()),
             load(&missing, "").err()
         );
     }
@@ -532,7 +584,10 @@ mod tests {
         let path = directory.path().join("encrypted.pdf");
         std::fs::write(&path, include_bytes!("../tests/fixtures/encrypted.pdf")).unwrap();
         for password in ["", "wrong"] {
-            assert!(load(&path, password).err().unwrap().contains("Decryption"));
+            assert!(matches!(
+                load_cancellable(&path, password, || false).err().unwrap(),
+                LoadError::PasswordRequired { rejected } if rejected == !password.is_empty()
+            ));
         }
         let pdf = load(&path, "jkgdi").unwrap();
         assert_eq!(pdf.pages().len(), 3);
@@ -546,6 +601,42 @@ mod tests {
                 text.text
             );
             assert_eq!(text.search(page, "Rust").len(), 1);
+        }
+    }
+
+    #[test]
+    fn damaged_or_unsupported_encryption_is_not_a_password_challenge() {
+        use hayro::hayro_syntax::{DecryptionError, LoadPdfError};
+        for (from, to, expected, message) in [
+            (
+                "/V 1",
+                "/V 9",
+                DecryptionError::UnsupportedAlgorithm,
+                "not supported",
+            ),
+            (
+                "/R 2",
+                "/Q 2",
+                DecryptionError::InvalidEncryption,
+                "damaged or incomplete",
+            ),
+        ] {
+            // Equal-length edits preserve the real encrypted fixture's xref offsets.
+            let mut data = include_bytes!("../tests/fixtures/encrypted.pdf").to_vec();
+            let offset = data
+                .windows(from.len())
+                .position(|bytes| bytes == from.as_bytes())
+                .unwrap();
+            data[offset..offset + from.len()].copy_from_slice(to.as_bytes());
+            for password in ["", "wrong", "jkgdi"] {
+                assert_eq!(
+                    Pdf::new_with_password(data.clone(), password).err(),
+                    Some(LoadPdfError::Decryption(expected))
+                );
+                let error = parse(data.clone(), password).err().unwrap();
+                assert!(!error.needs_password());
+                assert!(error.to_string().contains(message), "{error}");
+            }
         }
     }
 

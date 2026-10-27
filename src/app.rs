@@ -20,6 +20,7 @@ mod zoom;
 
 use crate::{
     cache::TextureCache,
+    document::LoadError,
     link_hints::LinkHints,
     links::LinkTarget,
     navigation::{Fit, Navigation},
@@ -437,7 +438,7 @@ impl Pagewing {
         if self.comment_change_blocked() {
             return;
         }
-        if self.nav.count == 0 || self.loading {
+        if self.reading.path.as_os_str().is_empty() || self.loading {
             return;
         }
         self.auto_reload_pending = false;
@@ -445,13 +446,18 @@ impl Pagewing {
         self.remember();
         self.nav.clear_prefix();
         self.loading = true;
-        self.reloading = true;
+        self.reloading = self.nav.count > 0;
         self.error = None;
         self.hints.cancel();
         self.selection.cancel();
         self.pending_search_jump = None;
-        self.worker
-            .reload(self.id, self.reading.path.clone(), String::new());
+        if self.reloading {
+            self.worker
+                .reload(self.id, self.reading.path.clone(), String::new());
+        } else {
+            self.worker
+                .open(self.id, self.reading.path.clone(), String::new());
+        }
     }
 
     fn restart_search(&mut self) {
@@ -1100,11 +1106,7 @@ impl Pagewing {
                         self.notify(format!("Copied text from page {}", page + 1));
                     }
                 }
-                Event::Error {
-                    id,
-                    message,
-                    opening,
-                } if id == self.id => {
+                Event::Error { id, error, opening } if id == self.id => {
                     if self.loading && !opening {
                         continue;
                     }
@@ -1117,18 +1119,25 @@ impl Pagewing {
                     if opening {
                         self.loading = false;
                         self.automatic_reload = false;
-                        if !message.contains("Decryption") {
+                        if !error.needs_password() {
                             self.synctex.cancel_pending();
                         }
                     }
-                    if opening && message.contains("Decryption") && !automatic {
-                        self.open_password(context);
+                    if opening && error.needs_password() && !automatic {
+                        self.open_password(
+                            context,
+                            matches!(error, LoadError::PasswordRequired { rejected: true }),
+                        );
                     }
-                    self.error = Some(if automatic && message.contains("Decryption") {
-                        "PDF changed but needs a password. Press Ctrl/Cmd+R to unlock the new version.".into()
+                    self.error = if opening && error.needs_password() && !automatic {
+                        None
                     } else {
-                        message
-                    });
+                        Some(if automatic && error.needs_password() {
+                            "PDF changed but needs a password. Press Ctrl/Cmd+R to unlock the new version.".into()
+                        } else {
+                            error.to_string()
+                        })
+                    };
                 }
                 _ => {}
             }
@@ -2970,16 +2979,18 @@ impl Pagewing {
                     if ui.button("Dismiss").clicked() {
                         self.error = None;
                     }
-                    if self.nav.count > 0
+                    if !self.reading.path.as_os_str().is_empty()
                         && ui
-                            .button(if self.reloading {
+                            .button(if self.nav.count == 0 {
+                                "Retry open"
+                            } else if self.reloading {
                                 "Retry reload"
                             } else {
                                 "Retry page"
                             })
                             .clicked()
                     {
-                        if self.reloading {
+                        if self.nav.count == 0 || self.reloading {
                             self.reload();
                         } else {
                             self.requested = None;

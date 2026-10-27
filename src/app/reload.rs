@@ -251,6 +251,108 @@ mod tests {
     }
 
     #[test]
+    fn failed_initial_open_can_retry_after_the_file_is_repaired() {
+        let root = tempfile::tempdir().unwrap();
+        let context = Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, root.path().join("library.json"));
+        app.reload();
+        assert!(!app.loading, "An empty reader has no file to retry");
+        // A path containing an engine error name must remain an ordinary I/O failure.
+        let path = root.path().join("Decryption.pdf");
+        app.open(path.clone(), &context);
+        wait(&mut app, &context, |a| !a.loading && a.error.is_some());
+        assert_eq!(app.nav.count, 0);
+        assert!(app.password_input.is_none());
+        let output = frame(&mut app, &context);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Retry open")));
+        fs::write(&path, pdf("Repaired PDF")).unwrap();
+        app.reload();
+        wait(&mut app, &context, |a| !a.loading && a.nav.count > 0);
+        assert!(!app.reloading);
+        assert!(app.error.is_none());
+        assert_eq!(title(&app), "Repaired PDF");
+    }
+
+    #[test]
+    fn terminal_encryption_errors_keep_the_snapshot_without_asking_for_a_password() {
+        for (from, to) in [("/V 1", "/V 9"), ("/R 2", "/Q 2")] {
+            for automatic in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let path = root.path().join("document.pdf");
+                let (mut app, context) = open(&path, &root.path().join("library.json"));
+                let mut data = include_bytes!("../../tests/fixtures/encrypted.pdf").to_vec();
+                let offset = data
+                    .windows(from.len())
+                    .position(|bytes| bytes == from.as_bytes())
+                    .unwrap();
+                data[offset..offset + from.len()].copy_from_slice(to.as_bytes());
+                fs::write(&path, data).unwrap();
+                app.reload();
+                app.automatic_reload = automatic;
+                wait(&mut app, &context, |a| !a.loading && a.error.is_some());
+                assert!(app.password_input.is_none());
+                assert!(!app.error.as_ref().unwrap().contains("password"));
+                assert_eq!(title(&app), "Edition one");
+            }
+        }
+    }
+
+    #[test]
+    fn password_retries_show_feedback_in_the_dialog_and_cancel_explains_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let context = Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, root.path().join("library.json"));
+        app.open(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/encrypted.pdf"),
+            &context,
+        );
+        wait(&mut app, &context, |a| a.password_input.is_some());
+        assert!(app.error.is_none());
+        // Allow the new field to acquire focus before sending the password.
+        for _ in 0..4 {
+            frame(&mut app, &context);
+        }
+        frame_events(&mut app, &context, vec![egui::Event::Text("wrong".into())]);
+        frame_events(
+            &mut app,
+            &context,
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into(),
+        );
+        wait(&mut app, &context, |a| {
+            !a.loading && a.password_input.is_some()
+        });
+        assert!(app.error.is_none());
+        let output = frame(&mut app, &context);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Password not accepted. Try again.")));
+        frame_events(
+            &mut app,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(app.password_input.is_none());
+        assert!(app.error.as_ref().unwrap().contains("Ctrl/Cmd+R"));
+        app.reload();
+        wait(&mut app, &context, |a| a.password_input.is_some());
+        assert!(app.error.is_none());
+    }
+
+    #[test]
     fn encrypted_update_does_not_steal_focus_with_a_password_dialog() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("document.pdf");

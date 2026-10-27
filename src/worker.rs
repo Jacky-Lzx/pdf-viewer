@@ -1,5 +1,5 @@
 use crate::{
-    document::{self, RenderKey},
+    document::{self, LoadError, RenderKey},
     file_watch::FileWatch,
     text::{self, PageText, SearchHit, SearchOptions, SearchQuery},
 };
@@ -73,7 +73,7 @@ pub enum Event {
     },
     Error {
         id: u64,
-        message: String,
+        error: LoadError,
         opening: bool,
     },
 }
@@ -211,7 +211,11 @@ impl Worker {
 
     fn with_loader(
         context: egui::Context,
-        mut load: impl FnMut(&std::path::Path, &str, &dyn Fn() -> bool) -> Result<Option<Pdf>, String>
+        mut load: impl FnMut(
+            &std::path::Path,
+            &str,
+            &dyn Fn() -> bool,
+        ) -> Result<Option<Pdf>, LoadError>
         + Send
         + 'static,
     ) -> Self {
@@ -284,7 +288,7 @@ impl Worker {
                             return Ok(None);
                         }
                         let info = crate::document_info::DocumentInfo::read(&pdf);
-                        Ok::<_, String>(Some((pdf, dimensions, outline, labels, info, watch)))
+                        Ok::<_, LoadError>(Some((pdf, dimensions, outline, labels, info, watch)))
                     }))
                     .unwrap_or_else(|_| {
                         Err("The PDF engine could not process this document.".into())
@@ -316,12 +320,12 @@ impl Worker {
                             );
                         }
                         Ok(None) => continue,
-                        Err(message) => emit(
+                        Err(error) => emit(
                             &tx,
                             &context,
                             Event::Error {
                                 id,
-                                message,
+                                error,
                                 opening: true,
                             },
                         ),
@@ -337,7 +341,7 @@ impl Worker {
                             &context,
                             Event::Error {
                                 id: *active_id,
-                                message: "The PDF engine could not process this document.".into(),
+                                error: "The PDF engine could not process this document.".into(),
                                 opening: false,
                             },
                         );
@@ -689,7 +693,7 @@ fn session(
                             context,
                             Event::Error {
                                 id,
-                                message,
+                                error: message.into(),
                                 opening: false,
                             },
                         );
@@ -1214,14 +1218,14 @@ mod tests {
 
     #[test]
     fn superseded_loads_do_not_publish_old_documents_or_errors() {
-        for fail_first in [false, true] {
+        for first_document in 0..3 {
             for close_first in [false, true] {
                 let (entered_tx, entered_rx) = mpsc::channel();
                 let (release_tx, release_rx) = mpsc::channel();
                 let mut first = true;
                 let worker =
                     Worker::with_loader(egui::Context::default(), move |path, password, _| {
-                        let result = document::load(path, password).map(Some);
+                        let result = document::load_cancellable(path, password, || false);
                         if std::mem::take(&mut first) {
                             entered_tx.send(()).unwrap();
                             release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -1230,10 +1234,11 @@ mod tests {
                     });
                 worker.open(
                     1,
-                    if fail_first {
-                        sample().with_extension("missing")
-                    } else {
-                        sample()
+                    match first_document {
+                        0 => sample(),
+                        1 => sample().with_extension("missing"),
+                        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                            .join("tests/fixtures/encrypted.pdf"),
                     },
                     String::new(),
                 );
@@ -1268,15 +1273,15 @@ mod tests {
         let mut calls = 0;
         let worker = Worker::with_loader(egui::Context::default(), move |path, password, _| {
             calls += 1;
-            let result = document::load(
+            let result = document::load_cancellable(
                 match calls {
                     1 => original.path(),
                     2 => replacement.path(),
                     _ => path,
                 },
                 password,
-            )
-            .map(Some);
+                || false,
+            );
             if calls == 2 {
                 entered_tx.send(()).unwrap();
                 release_rx.recv_timeout(Duration::from_secs(5)).unwrap();

@@ -32,6 +32,7 @@ pub(super) struct PasswordInput {
     pub focus: bool,
     pub confirm: bool,
     reveal: bool,
+    rejected: bool,
 }
 
 impl Default for PasswordInput {
@@ -41,6 +42,7 @@ impl Default for PasswordInput {
             focus: true,
             confirm: false,
             reveal: false,
+            rejected: false,
         }
     }
 }
@@ -71,7 +73,7 @@ impl Pagewing {
         context.memory_mut(|memory| memory.surrender_focus(page_id()));
     }
 
-    pub(super) fn open_password(&mut self, context: &egui::Context) {
+    pub(super) fn open_password(&mut self, context: &egui::Context, rejected: bool) {
         self.outline.cancel_input();
         self.nav.clear_prefix();
         self.hints.cancel();
@@ -81,7 +83,10 @@ impl Pagewing {
         self.help = false;
         self.properties_open = false;
         self.recent_picker = None;
-        self.password_input = Some(PasswordInput::default());
+        self.password_input = Some(PasswordInput {
+            rejected,
+            ..Default::default()
+        });
         context.memory_mut(|memory| {
             if let Some(id) = memory.focused() {
                 memory.surrender_focus(id);
@@ -91,7 +96,9 @@ impl Pagewing {
     }
 
     pub(super) fn close_password_input(&mut self, context: &egui::Context) {
-        self.password_input = None;
+        if self.password_input.take().is_some() {
+            self.error = Some("This PDF needs a password. Press Ctrl/Cmd+R to unlock it.".into());
+        }
         context.memory_mut(|memory| memory.surrender_focus(password_id()));
     }
 
@@ -177,7 +184,14 @@ impl Pagewing {
         dialog::window(context, "Password required", "Unlock PDF", 320.0)
             .open(&mut open)
             .show(context, |ui| {
-                ui.label("This document is encrypted.");
+                if input.rejected {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        "Password not accepted. Try again.",
+                    );
+                } else {
+                    ui.label("This document is encrypted.");
+                }
                 shortcuts::text_input(
                     ui,
                     password_id(),
@@ -199,6 +213,7 @@ impl Pagewing {
                 });
             });
         if !open || cancel {
+            self.password_input = Some(input);
             self.close_password_input(context);
         } else if unlock {
             self.close_password_input(context);
@@ -272,7 +287,7 @@ mod tests {
         for password in [false, true] {
             let (mut app, context) = reader(directory.path());
             if password {
-                app.open_password(&context);
+                app.open_password(&context, false);
             } else {
                 app.open_goto();
             }
@@ -283,6 +298,7 @@ mod tests {
                     }
                     if let Some(input) = &mut app.password_input {
                         input.reveal = extra;
+                        input.rejected = extra;
                     }
                     let mut output = egui::FullOutput::default();
                     for _ in 0..4 {
@@ -297,7 +313,14 @@ mod tests {
                         } else {
                             "Go to page"
                         },
-                        if password {
+                        if password && extra {
+                            &[
+                                "Unlock",
+                                "Cancel",
+                                "Show password",
+                                "Password not accepted. Try again.",
+                            ]
+                        } else if password {
                             &["Unlock", "Cancel", "Show password"]
                         } else if extra {
                             &["Go", "Cancel", "Enter a page, +offset or PDF label."]
@@ -317,7 +340,7 @@ mod tests {
             let (mut app, context) = reader(directory.path());
             app.comments.open = true;
             if password {
-                app.open_password(&context);
+                app.open_password(&context, false);
             } else {
                 app.open_goto();
             }
@@ -393,7 +416,7 @@ mod tests {
         for password in [false, true] {
             let (mut app, context) = reader(directory.path());
             if password {
-                app.open_password(&context);
+                app.open_password(&context, false);
             } else {
                 app.open_goto();
             }
@@ -423,7 +446,7 @@ mod tests {
     fn show_password_toggles_the_rendered_text_without_submitting_it() {
         let directory = tempfile::tempdir().unwrap();
         let (mut app, context) = reader(directory.path());
-        app.open_password(&context);
+        app.open_password(&context, false);
         let size = egui::vec2(240.0, 240.0);
         for _ in 0..4 {
             frame(&mut app, &context, size, Vec::new());
