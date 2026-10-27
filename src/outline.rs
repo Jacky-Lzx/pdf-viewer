@@ -14,6 +14,22 @@ pub struct OutlineEntry {
     pub depth: usize,
 }
 
+fn decode_title(bytes: &[u8]) -> String {
+    const MAX_BYTES: usize = 16 * 1024;
+    const MAX_CHARS: usize = 2048;
+    let mut title = crate::pdf_string::decode(&bytes[..bytes.len().min(MAX_BYTES)]);
+    let end = title.char_indices().nth(MAX_CHARS).map(|(end, _)| end);
+    if let Some(end) = end {
+        title.truncate(end);
+    }
+    if end.is_some() || bytes.len() > MAX_BYTES {
+        title.push('…');
+        // Dropping the decoded suffix must also release its reserved storage.
+        title.shrink_to_fit();
+    }
+    title
+}
+
 pub struct DestinationIndex<'a> {
     pages: HashMap<ObjectIdentifier, usize>,
     named: HashMap<Vec<u8>, Object<'a>>,
@@ -150,7 +166,7 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
         }
         let title = item
             .get::<PdfString<'_>>(b"Title")
-            .map(|s| crate::pdf_string::decode(s.as_bytes()))
+            .map(|s| decode_title(s.as_bytes()))
             .unwrap_or_default();
         let dest = item.get::<Object<'_>>(b"Dest").or_else(|| {
             let action = item.get::<Dict<'_>>(b"A")?;
@@ -325,6 +341,85 @@ mod tests {
             vec![0, 1, 2, 3, 4, 5]
         );
         assert_eq!(outline[0].title, "A little room to read.");
+    }
+
+    #[test]
+    fn long_outline_titles_are_bounded_before_the_ui_prepares_them() {
+        let mut objects = vec![
+            b"<< /Type /Catalog /Pages 2 0 R /Outlines << /First 4 0 R >> >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+        ];
+        for index in 0..32 {
+            let next = if index < 31 {
+                format!("/Next {} 0 R", index + 5)
+            } else {
+                String::new()
+            };
+            objects.push(format!("<< /Title 36 0 R /Dest [3 0 R /Fit] {next} >>").into_bytes());
+        }
+        objects.push([b"(".as_slice(), &vec![b'x'; 128 * 1024], b")"].concat());
+        let mut data = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0];
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(data.len());
+            data.extend(format!("{} 0 obj\n", index + 1).bytes());
+            data.extend(object);
+            data.extend(b"\nendobj\n");
+        }
+        let xref = data.len();
+        data.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).bytes());
+        for offset in &offsets[1..] {
+            data.extend(format!("{offset:010} 00000 n \n").bytes());
+        }
+        data.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                offsets.len()
+            )
+            .bytes(),
+        );
+        let pdf = Pdf::new(data).unwrap();
+        let entries = read(&pdf);
+        assert_eq!(entries.len(), 32);
+        for entry in &entries {
+            assert!(
+                entry.title == format!("{}…", "x".repeat(2048)),
+                "retained title bytes: {}",
+                entry.title.len()
+            );
+            assert_eq!(entry.destination.unwrap().page, 0);
+        }
+        let bytes: usize = entries.iter().map(|entry| entry.title.capacity()).sum();
+        assert!(bytes < 128 * 1024, "bounded title capacities: {bytes}");
+    }
+
+    #[test]
+    fn title_limits_preserve_complete_unicode_prefixes_and_ordinary_text() {
+        for text in ["", " Chapter \t ", &"a".repeat(2048), "中😀𝄞"] {
+            let source = [b"\xef\xbb\xbf".as_slice(), text.as_bytes()].concat();
+            assert_eq!(decode_title(&source), text);
+        }
+        for text in ["a".repeat(2049), "中文😀𝄞".repeat(5000)] {
+            let expected = text.chars().take(2048).collect::<String>() + "…";
+            for source in [
+                [b"\xef\xbb\xbf".as_slice(), text.as_bytes()].concat(),
+                [
+                    b"\xfe\xff".as_slice(),
+                    &text
+                        .encode_utf16()
+                        .flat_map(u16::to_be_bytes)
+                        .collect::<Vec<_>>(),
+                ]
+                .concat(),
+            ] {
+                let title = decode_title(&source);
+                assert_eq!(title, expected);
+                assert!(title.capacity() <= 2048 * 4 + 3);
+            }
+        }
+        assert_eq!(decode_title(b"author\x84name"), "author—name");
+        assert_eq!(decode_title(b"\xfe\xff\xd8\x00"), "�");
     }
 
     #[test]

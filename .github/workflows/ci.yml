@@ -35,6 +35,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
           xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
           xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-long-title.py target/release/folio
           xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
           xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
           xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio

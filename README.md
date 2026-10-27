@@ -114,6 +114,8 @@ bash scripts/install-linux.sh --prefix /path/to/folio --uninstall
 
 目录筛选支持以空白分隔的多个关键词，顺序不限，所有关键词需出现在同一章节标题中；例如 `080 chapter` 可找到 `Chapter 080`。支持 Unicode 大小写折叠，如 `strasse` 匹配 `Straße`；保留匹配标题的祖先作为上下文，首次回车优先定位实际匹配标题，清空后恢复原来的折叠状态。
 
+单条目录标题最多保留 2048 个 Unicode 字符，超过时加省略号，跳转目标不受影响。筛选和悬停使用保留的标题前缀，避免超长标题反复占用解码、大小写折叠和排版资源。
+
 支持 PDF 的文档页码标签，如前言 `i`、`ii` 和附录 `A-1`，同时显示对应的物理页码。按 `:` 后可以输入标签跳转；普通数字和 `42G` 始终表示物理页码，要跳到文档标签“1”可输入 `=1`。标签匹配支持 Unicode 大小写折叠，例如 `SS2` 可匹配 `ß2`；存在多个候选时精确标签优先，否则选择最早的匹配页。标签按区间保存，查找无需遍历整本文档。
 
 百分比跳页按物理页数向上取整，例如 6 页文档的 `50%` 到第 3 页，`51%` 到第 4 页；超过 100% 到末页。跳转保留缩放和旋转，并可用历史返回；已经处于目标页时保留页内滚动。单独按 `%` 会提示先输入数字，搜索等输入框内的 `%` 仍作为文字输入。
@@ -203,6 +205,7 @@ xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
+xvfb-run -a python3 scripts/smoke-long-title.py target/release/folio
 xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
 xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
 xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio
