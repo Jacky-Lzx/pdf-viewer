@@ -57,6 +57,8 @@ def run(binary):
             try:
                 application = launch()
                 expect(0, "initial reading state")
+                preferences_path = config_path.with_name("config.toml")
+                preferences = preferences_path.read_text()
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"]), "preview preference")
                 wait_for(preview_ready, "actual PDF pixels in first preview")
@@ -96,9 +98,16 @@ def run(binary):
                 keyboard.click((90, 350))
                 expect(79, "last preview remains clickable in minimum window")
                 application.terminate(); application.wait(timeout=5)
+                assert preferences_path.read_text() == preferences, "temporary appearance changes must not rewrite TOML"
                 application = launch()
                 expect(79, "restore reading page")
-                wait_for(lambda: saved(lambda state, _: state["thumbnails"] and state["sidebar"]), "restore preview mode and sidebar")
+                wait_for(lambda: saved(lambda state, _: not state["thumbnails"] and not state["sidebar"]), "restart reapplies configured appearance defaults")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                preferences_path.write_text("[appearance]\nsidebar = true\nthumbnails = true\n")
+                application = launch()
+                expect(79, "configuration edits preserve the reading page")
+                wait_for(lambda: saved(lambda state, _: state["thumbnails"] and state["sidebar"]), "restart applies configured preview mode and sidebar")
                 keyboard.key("g"); keyboard.key("g")
                 wait_for(preview_ready, "restored preview mode renders PDF images")
                 keyboard.key("t")
@@ -123,7 +132,7 @@ def run(binary):
                 wait_for(lambda: saved(lambda state, _: not state["sidebar"]), "close sidebar")
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"] and state["sidebar"]), "preview key reopens hidden sidebar")
-                print("PASS: 80-page previews and compact list, rendered pixels, stable clicks, Vim tracking, same-page reveal, scrolling, inversion, rotation, compact window and persistence")
+                print("PASS: 80-page previews and compact list, rendered pixels, stable clicks, Vim tracking, same-page reveal, scrolling, inversion, rotation, compact window, reading progress and TOML appearance defaults")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
