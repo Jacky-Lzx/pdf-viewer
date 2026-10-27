@@ -130,19 +130,24 @@ class Keyboard:
         self.x11.XFlush(self.display)
         time.sleep(0.1)
 
-    def wheel(self, position, ctrl=False, down=False, steps=1):
+    def wheel(self, position, ctrl=False, down=False, steps=1, alt=False):
         self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         ctrl_code = self.x11.XKeysymToKeycode(self.display, 0xFFE3)
+        alt_code = self.x11.XKeysymToKeycode(self.display, 0xFFE9)
         self.xtst.XTestFakeMotionEvent(self.display, -1, *position, 0)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 1, 0)
+        if alt:
+            self.xtst.XTestFakeKeyEvent(self.display, alt_code, 1, 0)
         button = 5 if down else 4
         for _ in range(steps):
             self.xtst.XTestFakeButtonEvent(self.display, button, 1, 0)
             self.xtst.XTestFakeButtonEvent(self.display, button, 0, 0)
         if ctrl:
             self.xtst.XTestFakeKeyEvent(self.display, ctrl_code, 0, 0)
+        if alt:
+            self.xtst.XTestFakeKeyEvent(self.display, alt_code, 0, 0)
         self.x11.XFlush(self.display)
         time.sleep(0.2)
 
@@ -229,6 +234,8 @@ def run(binary):
         try:
             application = launch()
             expect(lambda _, book: book["page"] == 0, "initial page")
+            # These pointer coordinates exercise the full-width reading canvas.
+            keyboard.key("m", ctrl=True, shift=True)
             keyboard.key("v"); time.sleep(0.3)
             keyboard.drag((374, 290), (570, 290)); keyboard.key("y")
             selected = keyboard.clipboard()
@@ -241,8 +248,8 @@ def run(binary):
             keyboard.key("+", shift=True)
             expect(lambda _, book: 0.49 < book["offset"][1] < 0.51, "keyboard zoom preserves the reading center")
             keyboard.key("p")
-            keyboard.wheel((590, 650), ctrl=True)
-            expect(lambda _, book: 0.80 < book["offset"][1] < 0.86, "Ctrl+wheel zoom preserves the pointer position")
+            keyboard.wheel((590, 650), alt=True)
+            expect(lambda _, book: 0.80 < book["offset"][1] < 0.86, "Alt+wheel zoom preserves the pointer position")
             keyboard.key("p")
             keyboard.key("w")
             for _ in range(8): keyboard.key("+", shift=True, delay=0.015)

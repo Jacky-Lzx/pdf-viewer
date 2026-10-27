@@ -85,6 +85,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "reader window")
                 wait_for(lambda: book().get("page") == 0, "initial document saved")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 empty_reopen_preserves_query()
                 keyboard.key("3"); keyboard.key("g", shift=True)
                 keyboard.key("w"); keyboard.key("z"); keyboard.key("b")

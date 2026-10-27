@@ -49,6 +49,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "destination reader window")
                 expect(lambda book: book["page"] == 0, "initial page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 burst("famb")
                 expect(lambda book: book["page"] == 1 and custom(book) == 2
                        and book["marks"].get("b", {}).get("page") == 1

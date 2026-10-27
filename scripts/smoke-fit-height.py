@@ -55,6 +55,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "height-fit reader window")
                 expect(lambda item: item["page"] == 0, "initial wide page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("e"); right_edge()
                 expect(lambda item: item["fit"] == "Height" and item["offset"] == [1.0, 0.0], "wide page fills height and scrolls horizontally")
                 keyboard.key("m"); keyboard.key("a")

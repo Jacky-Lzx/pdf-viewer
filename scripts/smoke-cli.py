@@ -118,6 +118,7 @@ def run(binary):
             try:
                 wait_for(lambda: keyboard.focus(document.name), "native window for a dash-prefixed Unicode filename")
                 wait_for(saved_page(0), "relative filename opens after the option terminator")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("j", shift=True)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
@@ -125,6 +126,7 @@ def run(binary):
                 application = launch(["--page", "4", "--", document.name])
                 wait_for(lambda: keyboard.focus(document.name), "native page override window")
                 wait_for(saved_page(3), "explicit page overrides the previously saved page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("y")
                 assert keyboard.clipboard() == invoke(["--text", document, "4"]).removesuffix("\n")
                 keyboard.key("b"); keyboard.key("r"); keyboard.key("w")
@@ -139,6 +141,7 @@ def run(binary):
                 application = launch(["--page", "2", document.name])
                 wait_for(lambda: keyboard.focus(document.name), "second page override window")
                 wait_for(saved_page(1), "page override resets the old page offset")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 saved = json.loads(config_path.read_text())["recent"][0]
                 assert saved["offset"] == [0.0, 0.0] and saved["rotation"] == 1 and saved["fit"] == "Width"
                 assert saved["bookmarks"] == [3] and saved["marks"]["a"]["page"] == 3
@@ -158,6 +161,7 @@ def run(binary):
                 application = launch(["--page", "999", document.name])
                 wait_for(lambda: keyboard.focus(document.name), "clamped start page window")
                 wait_for(saved_page(5), "out-of-range GUI start page clamps to the last page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("y")
                 assert keyboard.clipboard() == invoke(["--text", document, "6"]).removesuffix("\n")
                 keyboard.key("q", ctrl=True)

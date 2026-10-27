@@ -57,6 +57,7 @@ def run(binary):
             try:
                 application = launch()
                 expect(0, "initial reading state")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"]), "preview preference")
                 wait_for(preview_ready, "actual PDF pixels in first preview")

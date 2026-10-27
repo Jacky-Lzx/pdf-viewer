@@ -419,6 +419,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.pdf");
         std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        // The reader canonicalizes paths on open (e.g. /var -> /private/var on macOS).
+        let path = path.canonicalize().unwrap();
         let context = Context::default();
         let mut app = Pagewing::with_context(
             &context,

@@ -42,6 +42,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "dense link reader window")
                 expect(0, "initial reading state")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 time.sleep(0.3)
                 keyboard.key("f")
                 keyboard.key("b"); keyboard.key("m")

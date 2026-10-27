@@ -59,6 +59,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "large-page reader window")
                 expect(lambda book: book["page"] == 0 and book["fit"] == "Page", "large page loads")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("+", shift=True)
                 expect(lambda book: 0.0005 < custom(book) < 0.002 and 0.49 < book["offset"][1] < 0.51, "gradual zoom from fit-page below five percent")
                 keyboard.key("-")

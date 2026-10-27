@@ -59,6 +59,7 @@ def run(binary):
                 application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
                 wait_for(keyboard.focus, "link-copy reader window")
                 expect(0)
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 time.sleep(0.4)
                 return application
 

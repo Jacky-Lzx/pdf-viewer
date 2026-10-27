@@ -64,6 +64,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "continuous reader")
                 expect(lambda book: book["page"] == 0, "initial page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 sequence("C6j")
                 expect(lambda book: book["continuous"] and book["offset"][1] > 0.4,
                        "continuous mode and partial first page")

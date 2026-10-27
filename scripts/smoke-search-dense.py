@@ -64,6 +64,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "dense search reader window")
                 expect(0, "initial first page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 find()
                 counted(1000)
                 counted(500)

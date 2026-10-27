@@ -67,6 +67,7 @@ def run(binary):
             try:
                 window = wait_for(lambda: keyboard.focus("alpha.pdf"), "recent picker reader window")
                 expect(paths[0], 0, "initial document")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 picker("manuals plan")
                 burst_motion(["k", "j"])
                 expect(paths[2], 2, "same-frame up at the top then down reaches the second result")

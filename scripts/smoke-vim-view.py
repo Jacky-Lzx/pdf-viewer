@@ -67,6 +67,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "Vim alignment reader window")
                 position(0, 0, "initial fit page", fit="Page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 sequence("999zLJ")
                 position(1, 0, "horizontal half-screen stops on a fitted page and consumes its count", fit="Page", horizontal=0)
                 sequence("K999z$J", burst=True)

@@ -61,6 +61,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "long-outline reader window")
                 expect(0, "initial document")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 burst([("c", {}), ("k", {"ctrl": True}), ("j", {"ctrl": True})])
                 keyboard.key(ENTER)
                 expect(1, "same-frame up at the first chapter then down keeps event order")

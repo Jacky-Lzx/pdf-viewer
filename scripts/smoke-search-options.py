@@ -58,6 +58,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "search options reader window")
                 expect(0, "initial page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 find()
                 def counted(count, reverse=False, symbol="n"):
                     for digit in str(count):

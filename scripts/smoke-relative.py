@@ -57,6 +57,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "relative page reader window")
                 expect(0, fit="Page")
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 for query, page in [("+2", 2), ("-1", 1), ("A-2", 5), ("-3", 2),
                                     ("2", 1), ("+9999999", 5), ("-9999999", 0)]:
                     goto(query)

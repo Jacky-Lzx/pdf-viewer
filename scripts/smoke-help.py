@@ -76,6 +76,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "shortcut help reader window")
                 expect(0)
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 burst("?zoom")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "zoom", "same-frame help opening must focus its filter"

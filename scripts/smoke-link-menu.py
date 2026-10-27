@@ -57,6 +57,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "link menu reader window")
                 expect(0)
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("y")
                 assert "native PDF reader" in keyboard.clipboard()
                 menu(point())

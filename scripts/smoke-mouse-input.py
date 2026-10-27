@@ -64,6 +64,7 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "mouse input reader window")
                 expect(0)
+                keyboard.key("m", ctrl=True, shift=True)  # Use the full reading canvas.
                 keyboard.key("y")
                 assert "native PDF reader" in keyboard.clipboard()
                 click_burst((90, 171), "jkgdimouse")
