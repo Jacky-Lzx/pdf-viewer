@@ -21,7 +21,10 @@ impl Pagewing {
         };
         self.input_buttons.zoom = Some(
             ui.add_enabled(!self.loading, egui::Button::new(label).frame(false))
-                .on_hover_text("Set zoom percentage")
+                .on_hover_text(format!(
+                    "Set zoom percentage · {}",
+                    self.library.shortcuts.label("zoom")
+                ))
                 .id,
         );
         if ui

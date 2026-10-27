@@ -79,6 +79,7 @@ night = []
 | `next_bookmark` | Next bookmark |
 | `previous_bookmark` | Previous bookmark |
 | `zoom_in` | Zoom in |
+| `zoom` | Set an exact zoom percentage (`Cmd+Alt+Z`) |
 | `zoom_out` | Zoom out |
 | `actual_size` | Actual size (100%) |
 | `fit_page` | Fit page |

@@ -296,6 +296,13 @@ pub fn commands() -> &'static [Command] {
             ),
             ("zoom_out", "Zoom out", true, "Minus", "Minus|Cmd+Minus"),
             (
+                "zoom",
+                "Set an exact zoom percentage",
+                true,
+                "Cmd+Alt+Z",
+                "Cmd+Alt+Z",
+            ),
+            (
                 "actual_size",
                 "Actual size (100%)",
                 true,

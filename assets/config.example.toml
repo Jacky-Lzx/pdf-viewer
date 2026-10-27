@@ -21,4 +21,5 @@ remember_documents = true
 # Modifiers: Cmd (Ctrl on Linux, Command on macOS), Ctrl, Alt, Shift.
 # Use key names such as X, ArrowDown, PageDown, Comma, Plus, Questionmark.
 # next_page = ["X", "Shift+J"]
+# zoom = ["Cmd+Alt+Z"] # Open the exact zoom percentage input.
 # night = []

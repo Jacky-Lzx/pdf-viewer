@@ -313,6 +313,14 @@
             "minLength": 1
           }
         },
+        "zoom": {
+          "description": "Set an exact zoom percentage. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "actual_size": {
           "description": "Actual size (100%). Replaces all default bindings; [] disables this action.",
           "type": "array",

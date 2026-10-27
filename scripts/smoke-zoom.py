@@ -47,8 +47,11 @@ def run(binary):
                 for character in value:
                     keyboard.key(character.lower(), shift=character.isupper() or character == "%", delay=delay)
 
-            def open_zoom():
-                keyboard.click((1117, 802))
+            def open_zoom(click=False):
+                if click:
+                    keyboard.click((1117, 802))
+                else:
+                    keyboard.key("z", ctrl=True, alt=True)
 
             def replace(value):
                 keyboard.key("a", ctrl=True)
@@ -59,11 +62,13 @@ def run(binary):
                 keyboard.key("c", ctrl=True)
                 return keyboard.clipboard()
 
-            def burst(value, click=False, escape=False):
+            def burst(value, click=False, shortcut=False, escape=False):
                 application.send_signal(signal.SIGSTOP)
                 try:
                     if click:
-                        open_zoom()
+                        open_zoom(click=True)
+                    if shortcut:
+                        keyboard.key("z", ctrl=True, alt=True, delay=0)
                     if escape:
                         keyboard.key(ESCAPE, delay=0)
                     text(value, delay=0)
@@ -76,7 +81,7 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "zoom reader")
                 wait_for(lambda: book().get("fit") == "Page", "initial fit-page view")
-                open_zoom()
+                open_zoom(click=True)
                 keyboard.key("c", ctrl=True)
                 assert float(keyboard.clipboard()) > 0, "opening selects the current percentage"
                 text("125%")
@@ -107,10 +112,14 @@ def run(binary):
 
                 burst("175%", click=True)
                 expect(1.75)
+                burst("225%", shortcut=True)
+                expect(2.25)
                 open_zoom()
                 text("250")
+                open_zoom()
+                assert copied() == "250", "repeating the shortcut preserves the zoom draft"
                 burst("J", escape=True)
-                expect(1.75, page=1)
+                expect(2.25, page=1)
                 keyboard.key("k", shift=True)
                 keyboard.key("c", shift=True)
                 open_zoom()
@@ -128,14 +137,17 @@ def run(binary):
                 keyboard.key("f", ctrl=True)
                 text("zoom")
                 assert copied() == "zoom", "Find replaces the zoom input cleanly"
+                open_zoom()
+                text("175"); keyboard.key(ENTER)
+                expect(1.75, rotation=1)
                 keyboard.key(ESCAPE)
-                expect(1.25, rotation=1)
+                expect(1.75, rotation=1)
                 open_zoom()
                 text("0")
                 keyboard.key(ENTER)
                 assert copied() == "0", "zero is rejected without losing the input"
                 keyboard.key(ESCAPE)
-                expect(1.25, rotation=1)
+                expect(1.75, rotation=1)
                 open_zoom()
                 keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
                 keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
@@ -146,7 +158,7 @@ def run(binary):
                 replace("150"); keyboard.key(ENTER)
                 expect(1.5, rotation=1)
                 assert application.poll() is None
-                print("PASS: selected percentage, typed zoom and center, invalid input isolation, presets, Tab/Enter cancellation, same-frame click/text/apply and Escape/navigation, continuous/rotated zoom, Find handoff and minimum-size validation/application")
+                print("PASS: selected percentage, typed zoom and center, invalid input isolation, presets, Tab/Enter cancellation, same-frame click/shortcut/text/apply and Escape/navigation, repeated shortcut draft, continuous/rotated zoom, bidirectional Find handoff and minimum-size validation/application")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

@@ -1366,6 +1366,7 @@ impl Pagewing {
             if popup_open
                 && modifiers.command
                 && (matches!(key, Key::O | Key::F | Key::P | Key::R | Key::W | Key::Q)
+                    || (key == Key::Z && modifiers.alt && !modifiers.shift)
                     || (key == Key::T && modifiers.shift))
             {
                 egui::Popup::close_all(context);
@@ -1491,6 +1492,14 @@ impl Pagewing {
                     shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                 });
                 self.find();
+                continue;
+            }
+            if modifiers.command && modifiers.alt && !modifiers.shift && key == Key::Z {
+                shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
+                // Repeating the shortcut keeps any in-progress value intact.
+                if self.zoom_input.is_none() {
+                    self.open_zoom(context);
+                }
                 continue;
             }
             if modifiers.command && key == Key::P {

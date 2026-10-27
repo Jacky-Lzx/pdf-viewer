@@ -171,6 +171,10 @@ mod tests {
     }
 
     fn key(key: Key) -> Vec<Event> {
+        modified_key(key, Modifiers::NONE)
+    }
+
+    fn modified_key(key: Key, modifiers: Modifiers) -> Vec<Event> {
         [true, false]
             .into_iter()
             .map(|pressed| Event::Key {
@@ -178,7 +182,7 @@ mod tests {
                 physical_key: None,
                 pressed,
                 repeat: false,
-                modifiers: Modifiers::NONE,
+                modifiers,
             })
             .collect()
     }
@@ -276,6 +280,110 @@ mod tests {
         assert!(app.zoom_input.is_some());
         assert_eq!(app.reading.fit, before);
         assert!(context.memory(|memory| memory.has_focus(input_id())));
+    }
+
+    fn zoom_shortcut() -> Vec<Event> {
+        modified_key(Key::Z, Modifiers::COMMAND | Modifiers::ALT)
+    }
+
+    #[test]
+    fn shortcut_routes_batched_text_and_enter_and_cancels_reader_prefixes() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        app.nav.prefix = "42".into();
+        app.nav.pending_z = true;
+        app.mark_action = Some(super::super::MarkAction::Set);
+        let mut events = zoom_shortcut();
+        // Option shortcuts can emit text on macOS; it belongs to the shortcut.
+        events.insert(1, Event::Text("Ω".into()));
+        for (key_code, text) in [(Key::Num1, "1"), (Key::Num2, "2"), (Key::Num5, "5")] {
+            events.extend(key(key_code));
+            events.push(Event::Text(text.into()));
+        }
+        events.extend(key(Key::Enter));
+        frame(&mut app, &context, events);
+        settle(&mut app, &context);
+        assert!(app.zoom_input.is_none());
+        assert_eq!(app.reading.fit, Fit::Custom(1.25));
+        assert_eq!(app.nav.page, 1);
+        assert!(app.nav.prefix.is_empty() && !app.nav.pending_z);
+        assert!(app.mark_action.is_none());
+    }
+
+    #[test]
+    fn shortcut_replaces_search_focus_but_keeps_an_open_zoom_draft() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        app.search_open = true;
+        app.search_focus = true;
+        context.memory_mut(|memory| {
+            memory.request_focus(egui::Id::new("pagewing-search-input"));
+        });
+        let mut events = zoom_shortcut();
+        events.push(Event::Paste("175".into()));
+        frame(&mut app, &context, events);
+        settle(&mut app, &context);
+        assert_eq!(app.zoom_input.as_ref().unwrap().value, "175");
+        assert!(!app.search_focus);
+        assert!(context.memory(|memory| memory.has_focus(input_id())));
+        frame(&mut app, &context, zoom_shortcut());
+        settle(&mut app, &context);
+        assert_eq!(app.zoom_input.as_ref().unwrap().value, "175");
+        frame(&mut app, &context, key(Key::Enter));
+        settle(&mut app, &context);
+        assert_eq!(app.reading.fit, Fit::Custom(1.75));
+    }
+
+    #[test]
+    fn configured_zoom_replaces_defaults_and_plain_binding_stays_out_of_text_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("config.toml"),
+            "[shortcuts]\nzoom = ['X', 'Cmd+Shift+Z']\n",
+        )
+        .unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        frame(&mut app, &context, zoom_shortcut());
+        assert!(app.zoom_input.is_none(), "replaced default is inactive");
+        frame(&mut app, &context, key(Key::X));
+        settle(&mut app, &context);
+        assert!(app.zoom_input.is_some());
+        frame(&mut app, &context, key(Key::Escape));
+        app.goto_open = true;
+        app.goto_focus = true;
+        frame(&mut app, &context, key(Key::X));
+        assert!(
+            app.zoom_input.is_none(),
+            "plain binding cannot escape an input"
+        );
+        let mut events = modified_key(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+        events.push(Event::Paste("150".into()));
+        events.extend(key(Key::Enter));
+        frame(&mut app, &context, events);
+        settle(&mut app, &context);
+        assert!(!app.goto_open);
+        assert_eq!(app.reading.fit, Fit::Custom(1.5));
+    }
+
+    #[test]
+    fn zoom_shortcut_can_be_disabled_and_requires_a_ready_document() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("config.toml"),
+            "[shortcuts]\nzoom = []\n",
+        )
+        .unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        frame(&mut app, &context, zoom_shortcut());
+        assert!(app.zoom_input.is_none());
+        app.library.shortcuts.overrides.clear();
+        app.loading = true;
+        frame(&mut app, &context, zoom_shortcut());
+        assert!(app.zoom_input.is_none());
+        app.loading = false;
+        app.clear_document(&context);
+        frame(&mut app, &context, zoom_shortcut());
+        assert!(app.zoom_input.is_none());
     }
 
     #[test]
