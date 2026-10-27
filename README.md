@@ -32,6 +32,21 @@ sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev libg
 
 NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Folio.app`。
 
+Linux 可安装为当前用户的桌面应用，随后从应用菜单或 PDF 的“打开方式”选择 Folio：
+
+```sh
+cargo build --release --locked
+bash scripts/install-linux.sh
+# 自定义程序安装目录
+bash scripts/install-linux.sh --prefix /path/to/folio
+# 卸载默认安装，保留阅读进度
+bash scripts/install-linux.sh --uninstall
+# 自定义安装使用相同的 prefix 和 XDG_DATA_HOME 卸载
+bash scripts/install-linux.sh --prefix /path/to/folio --uninstall
+```
+
+默认二进制安装到 `~/.local/bin/folio`；桌面文件和图标使用 `$XDG_DATA_HOME`，未设置时使用 `PREFIX/share`（默认 `~/.local/share`）。桌面入口使用完整路径，支持安装目录中的空格、中文及特殊字符。再次运行脚本会原子替换二进制，已有窗口可以继续阅读；终端中使用 `folio` 时需将安装目录的 `bin` 加入 `PATH`。安装脚本不改变默认 PDF 应用。
+
 中文文件名、目录和搜索框会自动使用系统中文字体。Linux 可安装 `fonts-noto-cjk`；macOS 使用系统字体。也可以设置 `FOLIO_FONT=/path/to/font.otf` 指定回退字体，字体在后台加载。
 
 命令行一次打开一份文档。文本导出和图像导出的页码从 1 开始，图像宽度为 1–16384 像素，基准轮数为 1–1000；缺少参数、数值越界或参数过多时，会在读取 PDF 前报告错误。Linux 和 macOS 的非 UTF-8 文件路径按原始路径保留。
@@ -175,7 +190,8 @@ cargo bench --locked --bench search_snippet -- 9
 cargo bench --locked --bench search_matching -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径
 cargo bench --locked --bench pdf_strings -- 9
-# Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）
+# Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
+xvfb-run -a python3 scripts/smoke-install-linux.py target/release/folio
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
 xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
 xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
