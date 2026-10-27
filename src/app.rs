@@ -1254,9 +1254,7 @@ impl Folio {
                 });
                 continue;
             }
-            context.input_mut(|input| {
-                shortcuts::consume_text_shortcut(input, key, modifiers);
-            });
+            shortcuts::consume_reader_shortcut(context, key, modifiers);
             if let Some(action) = shortcuts::zoom_action(key, modifiers) {
                 self.nav.clear_prefix();
                 self.mark_action = None;

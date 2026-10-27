@@ -279,6 +279,19 @@ pub(super) fn focus_clicked_input(context: &eframe::egui::Context, id: Id) -> bo
     clicked
 }
 
+pub(super) fn consume_reader_shortcut(
+    context: &eframe::egui::Context,
+    key: Key,
+    modifiers: Modifiers,
+) {
+    context.input_mut(|input| consume_text_shortcut(input, key, modifiers));
+    if key == Key::Tab {
+        // egui schedules Tab/Shift+Tab focus traversal before reader dispatch.
+        // Consuming the event alone does not undo that queued movement.
+        context.memory_mut(|memory| memory.move_focus(eframe::egui::FocusDirection::None));
+    }
+}
+
 pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers: Modifiers) {
     // Option shortcuts can also generate a text event on macOS. Preserve text
     // typed before/after this occurrence, including the same key typed again
@@ -305,6 +318,68 @@ pub(super) fn consume_text_shortcut(input: &mut InputState, key: Key, modifiers:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_tab_keeps_focus_when_opening_closing_and_on_the_following_frame() {
+        use eframe::egui::{CentralPanel, Context, RawInput, SidePanel};
+
+        for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
+            for focused in [None, Some(1)] {
+                let context = Context::default();
+                let mut buttons = Vec::new();
+                let mut sidebar = false;
+                let mut activated = false;
+                let _ = context.run(RawInput::default(), |context| {
+                    CentralPanel::default().show(context, |ui| {
+                        for label in ["Open", "Sidebar", "Find"] {
+                            buttons.push(ui.button(label).id);
+                        }
+                    });
+                });
+                let expected = focused.map(|index| buttons[index]);
+                if let Some(id) = expected {
+                    context.memory_mut(|memory| memory.request_focus(id));
+                }
+                // Shift+Tab can defer a focus change until the following frame.
+                for events in [
+                    vec![key(Key::Tab, modifiers, true)],
+                    Vec::new(),
+                    vec![key(Key::Tab, modifiers, true)],
+                    Vec::new(),
+                ] {
+                    let _ = context.run(
+                        RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |context| {
+                            if context.input(|input| input.key_pressed(Key::Tab)) {
+                                consume_reader_shortcut(context, Key::Tab, modifiers);
+                                sidebar = !sidebar;
+                            }
+                            if sidebar {
+                                SidePanel::left("sidebar").show(context, |ui| {
+                                    let _ = ui.button("Page 1");
+                                });
+                            }
+                            CentralPanel::default().show(context, |ui| {
+                                for label in ["Open", "Sidebar", "Find"] {
+                                    activated |= ui.button(label).clicked();
+                                }
+                            });
+                        },
+                    );
+                    assert_eq!(
+                        context.memory(|memory| memory.focused()),
+                        expected,
+                        "sidebar={sidebar}, modifiers={modifiers:?}"
+                    );
+                }
+                assert!(!sidebar);
+                assert!(!activated);
+            }
+        }
+    }
 
     #[test]
     fn button_opening_routes_text_and_consumes_keyboard_activation_without_leaking_focus_rules() {
