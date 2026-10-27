@@ -8,6 +8,11 @@ pub enum Command {
         path: Option<PathBuf>,
         page: Option<usize>,
     },
+    SyncGui {
+        path: PathBuf,
+        source: Option<crate::synctex::Source>,
+        options: crate::synctex::Options,
+    },
     Info {
         path: PathBuf,
     },
@@ -31,7 +36,8 @@ impl Command {
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             Self::Gui { path, .. } => path.as_deref(),
-            Self::Info { path }
+            Self::SyncGui { path, .. }
+            | Self::Info { path }
             | Self::Text { path, .. }
             | Self::Render { path, .. }
             | Self::Benchmark { path, .. } => Some(path),
@@ -41,6 +47,14 @@ impl Command {
 }
 
 pub fn parse(args: &[OsString]) -> Result<Command, String> {
+    if args.iter().take_while(|a| *a != "--").any(|a| {
+        matches!(
+            a.to_str(),
+            Some("--forward-search" | "--inverse-search" | "--synctex-directory")
+        )
+    }) {
+        return parse_synctex(args);
+    }
     let Some(first) = args.first() else {
         return Ok(Command::Gui {
             path: None,
@@ -152,12 +166,139 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
     }
 }
 
+fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
+    let mut options = crate::synctex::Options::default();
+    let mut source = None;
+    let mut path = None;
+    let mut index = 0;
+    while index < args.len() {
+        let value = |offset: usize| {
+            args.get(index + offset)
+                .ok_or("Missing SyncTeX option argument. Run folio --help.")
+        };
+        match args[index].to_str() {
+            Some("--forward-search") => {
+                if source.is_some() {
+                    return Err("Duplicate --forward-search".into());
+                }
+                let number = |offset| {
+                    value(offset)?
+                        .to_str()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .ok_or("Expected a SyncTeX line/column number")
+                };
+                let line = number(1)?;
+                let column = number(2)?;
+                if line == 0 {
+                    return Err("SyncTeX line numbers start at 1".into());
+                }
+                source = Some(crate::synctex::Source {
+                    path: value(3)?.into(),
+                    line,
+                    column,
+                });
+                index += 4;
+            }
+            Some("--inverse-search") => {
+                if options.editor.is_some() {
+                    return Err("Duplicate --inverse-search".into());
+                }
+                options.editor = Some(crate::synctex::editor_command(
+                    value(1)?
+                        .to_str()
+                        .ok_or("Inverse-search command must be UTF-8")?,
+                )?);
+                index += 2;
+            }
+            Some("--synctex-directory") => {
+                if options.directory.is_some() {
+                    return Err("Duplicate --synctex-directory".into());
+                }
+                options.directory = Some(value(1)?.into());
+                index += 2;
+            }
+            Some("--") => {
+                if args.len() != index + 2 || path.is_some() {
+                    return Err("Expected one PDF path after --".into());
+                }
+                path = Some(args[index + 1].clone().into());
+                break;
+            }
+            _ if args[index].to_string_lossy().starts_with('-') => {
+                return Err("Unknown SyncTeX option. Run folio --help.".into());
+            }
+            _ => {
+                if path.is_some() {
+                    return Err("Open one PDF at a time. Run folio --help.".into());
+                }
+                path = Some(args[index].clone().into());
+                index += 1;
+            }
+        }
+    }
+    Ok(Command::SyncGui {
+        path: path.ok_or("Missing PDF path. Run folio --help.")?,
+        source,
+        options,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn command(args: &[&str]) -> Result<Command, String> {
         parse(&args.iter().map(OsString::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn synctex_options_validate_and_preserve_paths() {
+        let Command::SyncGui {
+            path,
+            source,
+            options,
+        } = command(&[
+            "--inverse-search",
+            "code --goto '%f:%l:%c'",
+            "--forward-search",
+            "42",
+            "0",
+            "中文 source.tex",
+            "--synctex-directory",
+            "build aux",
+            "--",
+            "-output.pdf",
+        ])
+        .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(path, PathBuf::from("-output.pdf"));
+        assert_eq!(
+            source.unwrap(),
+            crate::synctex::Source {
+                path: "中文 source.tex".into(),
+                line: 42,
+                column: 0
+            }
+        );
+        assert_eq!(options.directory, Some("build aux".into()));
+        assert_eq!(options.editor.unwrap(), ["code", "--goto", "%f:%l:%c"]);
+        assert!(matches!(
+            command(&["--", "--inverse-search"]).unwrap(),
+            Command::Gui { .. }
+        ));
+        for args in [
+            vec!["--forward-search", "0", "1", "a.tex", "a.pdf"],
+            vec!["--forward-search", "1", "-1", "a.tex", "a.pdf"],
+            vec!["--forward-search", "1", "0", "a.tex"],
+            vec!["--forward-search", "1"],
+            vec!["--inverse-search", "code", "a.pdf"],
+            vec!["--inverse-search", "code '%f", "a.pdf"],
+            vec!["--inverse-search", "code %f", "a.pdf", "b.pdf"],
+        ] {
+            assert!(command(&args).is_err(), "{args:?}");
+        }
     }
 
     #[test]

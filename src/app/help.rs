@@ -111,6 +111,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("F11", "Toggle fullscreen"),
     ("? / F1 / Escape", "Find keyboard shortcuts / close dialog"),
     ("Right-click web link", "Copy link address"),
+    (
+        "Ctrl/Cmd+click PDF",
+        "SyncTeX reverse search in the configured editor",
+    ),
 ];
 
 #[derive(Default)]

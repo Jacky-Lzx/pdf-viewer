@@ -65,6 +65,27 @@ PNG 导出在读取和渲染前检查输出是否指向源 PDF；同路径、相
 
 文档被编辑器或编译工具更新后，页面顶部会显示变化提示。点击 Reload 或按 `Ctrl/Cmd+r` 重新加载，保留当前页码、缩放、旋转和阅读位置；Dismiss 隐藏本次提示，后续更新仍会提示。文件尚未写完或暂时被移走时，加载失败仍可继续阅读旧内容。变化提示不会自动重载或打断输入。
 
+## SyncTeX 双向搜索
+
+需要安装 TeX Live / MacTeX，并用 `-synctex=1` 编译，生成 PDF 及对应的 `.synctex.gz`（也支持未压缩的 `.synctex`）。Folio 调用 `synctex` 查询；可用 `FOLIO_SYNCTEX=/path/to/synctex` 指定程序。
+
+```sh
+# 正向搜索：源码第 42 行、第 1 列 → PDF，列不确定时传 0
+folio --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
+# 配置反向搜索：在页面上 Ctrl+单击（macOS：Cmd+单击）跳回编辑器
+folio --inverse-search 'code --goto "%f:%l:%c"' /path/to/build/main.pdf
+# 可与正向搜索一起传入
+folio --inverse-search 'nvim --server /tmp/nvim.sock --remote-silent +%l %f' \
+  --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
+# SyncTeX 文件与 PDF 不在同一目录时
+folio --synctex-directory /path/to/aux \
+  --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
+```
+
+正向搜索会复用同一 PDF 已打开的 Folio 窗口，重新加载编译结果、定位并短暂高亮目标；没有窗口时打开新窗口。反向搜索支持单页、连续滚动、缩放和旋转，选择模式中先按 `Escape` 退出。未保存的 comment 会阻止正向搜索重载，请先保存或放弃草稿。
+
+编辑器命令中的 `%f`、`%l`、`%c` 分别是完整源码路径、从 1 开始的行列，`%%` 表示百分号；SyncTeX 未提供列时使用 1。命令按引号拆分后直接启动程序，路径中的空格和特殊字符会作为参数保留，不执行 shell 管道或重定向。编辑器程序需在 `PATH` 中或使用完整路径。`--inverse-search` 的配置在当前窗口中保留；也可设置环境变量 `FOLIO_EDITOR='code --goto "%f:%l:%c"'` 为默认命令。编辑器复用同一窗口时，省略 `--inverse-search` 会保留该窗口已有配置。文件名以 `-` 开头时，在 PDF 路径前加 `--`。
+
 ## 高亮与 comment
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。

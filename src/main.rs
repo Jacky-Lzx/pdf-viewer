@@ -29,6 +29,8 @@ mod selection;
 mod selection_index;
 mod state;
 mod state_writer;
+mod synctex;
+mod synctex_ipc;
 mod text;
 mod text_cache;
 mod texture_pixels;
@@ -39,10 +41,10 @@ use std::{fmt::Write as _, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let (path, page) = match cli::parse(&args)? {
+    let (path, page, sync_request) = match cli::parse(&args)? {
         cli::Command::Help => {
             output::line(format_args!(
-                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
+                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio [--inverse-search COMMAND] [--synctex-directory DIR]\n        --forward-search LINE COLUMN SOURCE [--] document.pdf\n  folio --inverse-search COMMAND [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nSyncTeX: compile with -synctex=1. Lines start at 1; use column 0 if unknown.\nInverse command placeholders: %f file, %l line, %c column, %% literal percent.\nCtrl/Cmd+click the PDF to jump to source (outside selection mode).\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
             ))?;
             return Ok(());
         }
@@ -50,7 +52,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output::line(format_args!("Folio {}", env!("CARGO_PKG_VERSION")))?;
             return Ok(());
         }
-        cli::Command::Gui { path, page } => (path, page),
+        cli::Command::Gui { path, page } => (path, page, None),
+        cli::Command::SyncGui {
+            path,
+            source,
+            mut options,
+        } => {
+            options.resolve_paths()?;
+            let path = std::fs::canonicalize(&path)
+                .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+            let target = source
+                .as_ref()
+                .map(|source| synctex::forward(&path, source, &options))
+                .transpose()?;
+            let request = synctex_ipc::Request { target, options };
+            if synctex_ipc::send_existing(&path, &request)? {
+                return Ok(());
+            }
+            (Some(path), None, Some(request))
+        }
         command => return headless(command).map_err(Into::into),
     };
     let options = eframe::NativeOptions {
@@ -66,7 +86,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "Folio",
         options,
-        Box::new(move |cc| Ok(Box::new(app::Folio::new(cc, path, page)))),
+        Box::new(move |cc| {
+            let mut app = app::Folio::new(cc, path, page);
+            if let Some(request) = sync_request {
+                app.configure_synctex(request, &cc.egui_ctx);
+            }
+            Ok(Box::new(app))
+        }),
     )?;
     Ok(())
 }

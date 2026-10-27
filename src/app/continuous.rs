@@ -108,7 +108,10 @@ impl Folio {
             } else {
                 self.scroll(-scroll, false);
             }
-            if response.double_clicked() && !self.selection.active {
+            if response.double_clicked()
+                && !self.selection.active
+                && !ui.input(|i| i.modifiers.command)
+            {
                 self.reading.fit = Fit::Page;
                 self.pan = Vec2::ZERO;
                 self.dirty = true;
@@ -162,6 +165,7 @@ impl Folio {
             let page_rect = self.continuous_rect(page, rect);
             let dimensions = self.dimensions[page];
             self.scale = self.continuous_layout.pages[page].scale;
+            self.synctex_click(ui, page, page_rect);
             painter.rect_filled(
                 page_rect.translate(Vec2::new(2.0, 4.0)).expand(2.0),
                 1.0,
@@ -195,8 +199,11 @@ impl Folio {
                             .then(|| egui::Shape::rect_filled(rect, 1.0, SELECTION_COLOR))
                     }));
                 }
-                self.link_overlays(ui, page, page_rect, dimensions);
-                self.comment_overlays(ui, page, page_rect, dimensions);
+                self.paint_synctex(&painter, page, page_rect, dimensions);
+                if !ui.input(|i| i.modifiers.command) {
+                    self.link_overlays(ui, page, page_rect, dimensions);
+                    self.comment_overlays(ui, page, page_rect, dimensions);
+                }
                 if self.nav.page != active_page || self.pending_destination.is_some() {
                     // A clicked internal link changes the layout and pending destination.
                     break;

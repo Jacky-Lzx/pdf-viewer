@@ -31,6 +31,7 @@ pub enum Event {
     Opened {
         id: u64,
         dimensions: Vec<[f32; 2]>,
+        sync_geometry: Vec<crate::synctex::PageGeometry>,
         info: crate::document_info::DocumentInfo,
         outline: Vec<crate::outline::OutlineEntry>,
         labels: crate::page_labels::PageLabels,
@@ -295,6 +296,11 @@ impl Worker {
                     }
                     match result {
                         Ok(Some((pdf, dimensions, outline, labels, info, watch))) => {
+                            let sync_geometry = pdf
+                                .pages()
+                                .iter()
+                                .map(crate::synctex::PageGeometry::new)
+                                .collect();
                             active = Some((pdf, id, watch));
                             emit(
                                 &tx,
@@ -302,6 +308,7 @@ impl Worker {
                                 Event::Opened {
                                     id,
                                     dimensions,
+                                    sync_geometry,
                                     info,
                                     outline,
                                     labels,

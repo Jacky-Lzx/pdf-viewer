@@ -21,6 +21,8 @@ bytemuck = "1.25.2"
 memchr = "2.8.3"
 lopdf = { version = "0.45.0", default-features = false }
 tempfile = "3"
+shlex = "2.0.1"
+libc = "0.2"
 
 [profile.release]
 lto = "thin"

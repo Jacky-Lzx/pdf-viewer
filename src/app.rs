@@ -6,6 +6,7 @@ mod recent;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
+mod sync;
 mod tiles;
 mod toolbar;
 
@@ -51,6 +52,7 @@ pub struct Folio {
     info: crate::document_info::DocumentInfo,
     properties_open: bool,
     comments: comments::CommentUi,
+    synctex: sync::SyncUi,
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
@@ -141,6 +143,7 @@ impl Folio {
             info: crate::document_info::DocumentInfo::default(),
             properties_open: false,
             comments: comments::CommentUi::default(),
+            synctex: sync::SyncUi::default(),
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
@@ -227,6 +230,8 @@ impl Folio {
                 ..Default::default()
             });
         self.reading.rotation %= 4;
+        self.synctex.server =
+            crate::synctex_ipc::Server::bind(&self.reading.path, context.clone()).ok();
         self.pending_offset = Some(self.reading.offset);
         self.loading = true;
         self.worker
@@ -238,6 +243,7 @@ impl Folio {
     }
 
     fn clear_document(&mut self, context: &egui::Context) {
+        self.synctex.clear_document();
         egui::Popup::close_all(context);
         self.id += 1;
         self.nav = Navigation::default();
@@ -835,6 +841,7 @@ impl Folio {
                 Event::Opened {
                     id,
                     dimensions,
+                    sync_geometry,
                     info,
                     outline,
                     labels,
@@ -870,6 +877,7 @@ impl Folio {
                         name.is_ascii_lowercase() && mark.page < dimensions.len()
                     });
                     self.dimensions = dimensions;
+                    self.synctex.geometry = sync_geometry;
                     self.continuous_layout = crate::continuous::Layout::default();
                     self.continuous_link_request = None;
                     self.info = info;
@@ -975,6 +983,9 @@ impl Folio {
                     }
                     if opening {
                         self.loading = false;
+                        if !message.contains("Decryption") {
+                            self.synctex.cancel_pending();
+                        }
                     }
                     if opening && message.contains("Decryption") {
                         self.password_open = true;
@@ -1989,7 +2000,10 @@ impl Folio {
                     } else {
                         self.scroll(-scroll, false);
                     }
-                    if response.double_clicked() && !self.selection.active {
+                    if response.double_clicked()
+                        && !self.selection.active
+                        && !ui.input(|i| i.modifiers.command)
+                    {
                         self.reading.fit = Fit::Page;
                         self.pan = Vec2::ZERO;
                         self.dirty = true;
@@ -2004,6 +2018,7 @@ impl Folio {
                 }
                 let origin = rect.min + (rect.size() - size).max(Vec2::ZERO) * 0.5 - self.pan;
                 let mut page_rect = egui::Rect::from_min_size(origin, size);
+                self.synctex_click(ui, self.nav.page, page_rect);
                 if self.selection.active {
                     if response.hovered() || response.dragged() {
                         context.set_cursor_icon(if self.selection.ready() {
@@ -2138,8 +2153,11 @@ impl Folio {
                         (rect.is_positive() && clip.intersects(rect))
                             .then(|| egui::Shape::rect_filled(rect, 1.0, SELECTION_COLOR))
                     }));
-                    self.link_overlays(ui, self.nav.page, page_rect, dimensions);
-                    self.comment_overlays(ui, self.nav.page, page_rect, dimensions);
+                    self.paint_synctex(&painter, self.nav.page, page_rect, dimensions);
+                    if !ui.input(|i| i.modifiers.command) {
+                        self.link_overlays(ui, self.nav.page, page_rect, dimensions);
+                        self.comment_overlays(ui, self.nav.page, page_rect, dimensions);
+                    }
                 } else {
                     painter.text(
                         page_rect.center(),
@@ -2662,6 +2680,7 @@ impl eframe::App for Folio {
         }
         let _side_button_focus = shortcuts::preserve_side_button_focus(context);
         self.events(context);
+        self.synctex_events(context);
         if context.input(|input| input.viewport().close_requested())
             && self.comment_change_blocked()
         {
