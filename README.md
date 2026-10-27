@@ -111,7 +111,7 @@ require('tex-tools').setup({
 
 批注筛选：面板顶部可按正文与作者搜索，支持 Unicode 大小写折叠和空格分隔的多个关键词；各词可分别匹配作者或正文。可叠加 **All statuses** 状态选择、**Marked only** 勾选标记及 **Current page** 当前页筛选。
 
-命中回复时保留它的父批注作为上下文，并区分实际命中数与展示条数。在筛选框中用 `↑` / `↓` 或 `Ctrl+j/k` 选择条目，按 `Enter` 打开；更改筛选后默认选中首个实际命中，列表自动滚动到选中条目。键盘也可选择保留的父批注；空结果不会跳转，未保存草稿继续受到保护。
+命中回复时保留它的父批注作为上下文，并区分实际命中数与展示条数。在筛选框中用 `↑` / `↓` 或 `Ctrl+j/k` 选择条目，按 `Enter` 打开；更改筛选后默认选中首个实际命中，列表自动滚动到选中条目。键盘移动只滚动必要距离；调整窗口或面板大小、打开编辑器后会重新显示当前条目，正常手动滚动仍会保留。键盘也可选择保留的父批注；空结果不会跳转，未保存草稿继续受到保护。
 
 **Clear filters** 清除全部条件。筛选不会改变 PDF 上的批注显示或丢弃编辑草稿；保存批注及重载当前文档后保留条件，切换文档时重置。小窗口中整个面板也可滚动。通过快捷键、工具栏或面板的关闭按钮隐藏批注时会立即释放输入焦点，随后输入的阅读快捷键可直接使用；筛选和草稿继续保留。
 
@@ -402,6 +402,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py targ
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-file-watch.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-history.py target/release/pagewing

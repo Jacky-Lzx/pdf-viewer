@@ -508,22 +508,51 @@ impl Pagewing {
         let mut selected = None;
         let row_height = ui.text_style_height(&egui::TextStyle::Button) * 3.0
             + ui.spacing().button_padding.y * 2.0;
-        let mut list = egui::ScrollArea::vertical()
+        let layout_id = ui.make_persistent_id("pagewing-comment-list-layout");
+        let layout = (ui.available_width(), list_height, row_height);
+        let resized = ui.data_mut(|data| {
+            let previous = data.get_temp::<(f32, f32, f32)>(layout_id);
+            data.insert_temp(layout_id, layout);
+            previous != Some(layout)
+        });
+        let reveal = std::mem::take(&mut self.comments.view.reveal);
+        let keyboard_focus = self.comment_filter_focused(ui.ctx());
+        let target = if reveal || (resized && keyboard_focus) {
+            self.comments.view.selected_row()
+        } else if resized {
+            self.comments.editor.as_ref().and_then(|editor| {
+                self.comments.view.rows().iter().position(|row| {
+                    let comment = &self.comments.comments.items[row.index];
+                    editor.page == comment.page && editor.slot == comment.slot
+                })
+            })
+        } else {
+            None
+        };
+        let list = egui::ScrollArea::vertical()
             .id_salt("pagewing-comment-list")
             .auto_shrink([false, false])
+            .animated(false)
             .max_height(list_height);
-        if std::mem::take(&mut self.comments.view.reveal) {
-            let row = self.comments.view.selected_row().unwrap_or(0);
-            list = list
-                .vertical_scroll_offset(row as f32 * (row_height + ui.spacing().item_spacing.y));
-        }
-        let keyboard_focus = self.comment_filter_focused(ui.ctx());
         let busy = self.comments.busy();
         list.show_rows(
             ui,
             row_height,
             self.comments.view.rows().len(),
             |ui, range| {
+                if let Some(row) = target {
+                    // show_rows only builds visible cards. Compute the target
+                    // from its virtual row so distant selections can be shown
+                    // without laying out the intervening comments.
+                    let top = ui.max_rect().top()
+                        + (row as f32 - range.start as f32)
+                            * (row_height + ui.spacing().item_spacing.y);
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(ui.max_rect().left(), top),
+                        egui::vec2(ui.available_width(), row_height),
+                    );
+                    ui.scroll_to_rect(rect, None);
+                }
                 for row in range {
                     let crate::comment_view::CommentRow {
                         index,
@@ -1243,6 +1272,162 @@ mod tests {
         assert_eq!(app.nav.page, 1, "deletion must preserve the current page");
         let saved = crate::document::load(&path, "").unwrap();
         assert!(crate::annotations::read(&saved, || false).items.is_empty());
+    }
+
+    fn many_comments() -> (tempfile::TempDir, Context, Pagewing) {
+        let (root, context, mut app) = saved_comment_editor();
+        let template = app.comments.comments.items[0].clone();
+        app.comments.editor = None;
+        app.comments.focus = false;
+        app.comments.set_comments(Comments {
+            items: (0..80)
+                .map(|index| Comment {
+                    slot: Some(index),
+                    contents: format!("Row {index}"),
+                    ..template.clone()
+                })
+                .collect(),
+            limited: false,
+        });
+        (root, context, app)
+    }
+
+    fn visible_selected_card(
+        context: &Context,
+        output: &egui::FullOutput,
+        body: &str,
+    ) -> Option<egui::Rect> {
+        let text_rect = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == body => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            _ => None,
+        })?;
+        let fill = context.style().visuals.selection.bg_fill;
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == fill
+                    && rect.rect.height() > text_rect.height() * 2.0
+                    && rect.rect.contains_rect(text_rect)
+                    && shape.clip_rect.contains_rect(rect.rect) =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn resizing_keeps_the_selected_comment_visible_without_undoing_manual_scroll() {
+        let (_root, context, mut app) = many_comments();
+        context.memory_mut(|memory| {
+            memory.request_focus(egui::Id::new("pagewing-comment-filter"));
+        });
+        frame(&mut app, &context, vec![Event::Paste("Row".into())]);
+        app.comments.view.step(79);
+        let mut output = egui::FullOutput::default();
+        let size = Vec2::new(500.0, 400.0);
+        for size in [Vec2::new(1180.0, 820.0), size] {
+            for _ in 0..4 {
+                output = frame_size(&mut app, &context, Vec::new(), size);
+            }
+            assert_eq!(app.comments.view.selected(), Some(79));
+            assert_eq!(app.comments.view.filter.query, "Row");
+            assert!(app.comment_filter_focused(&context));
+            assert!(
+                visible_selected_card(&context, &output, "Row 79").is_some(),
+                "selected comment must remain visible at {size:?}"
+            );
+        }
+        let pos = visible_selected_card(&context, &output, "Row 79")
+            .unwrap()
+            .center();
+        frame_size(
+            &mut app,
+            &context,
+            vec![
+                Event::PointerMoved(pos),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: Vec2::new(0.0, 4000.0),
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            size,
+        );
+        for _ in 0..30 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        assert!(
+            visible_selected_card(&context, &output, "Row 79").is_none(),
+            "manual scrolling must not be undone by the retained selection"
+        );
+        frame_size(&mut app, &context, key(Key::K, Modifiers::CTRL), size);
+        for _ in 0..4 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        assert_eq!(app.comments.view.selected(), Some(78));
+        let previous = visible_selected_card(&context, &output, "Row 78").unwrap();
+        frame_size(&mut app, &context, key(Key::ArrowUp, Modifiers::NONE), size);
+        for _ in 0..4 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        assert_eq!(app.comments.view.selected(), Some(77));
+        let current = visible_selected_card(&context, &output, "Row 77").unwrap();
+        assert!(
+            current.top() < previous.top(),
+            "a row already in view must not be moved to the top on each keypress"
+        );
+        assert_eq!(app.comments.view.filter.query, "Row");
+        assert!(app.comment_filter_focused(&context));
+    }
+
+    #[test]
+    fn opening_and_resizing_the_editor_reveals_its_comment_card() {
+        let (_root, context, mut app) = many_comments();
+        for _ in 0..3 {
+            frame(&mut app, &context, Vec::new());
+        }
+        // Opening a page overlay may choose a card outside the virtual rows.
+        app.edit_comment(79, &context);
+        for size in [Vec2::new(1180.0, 820.0), Vec2::new(640.0, 480.0)] {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame_size(&mut app, &context, Vec::new(), size);
+            }
+            assert!(
+                visible_selected_card(&context, &output, "Row 79").is_some(),
+                "the editor's active card must be fully visible at {size:?}"
+            );
+            assert_eq!(app.comments.editor.as_ref().unwrap().contents, "Row 79");
+            assert!(
+                context
+                    .memory(|memory| { memory.has_focus(egui::Id::new("pagewing-comment-input")) })
+            );
+        }
+        context.memory_mut(|memory| {
+            memory.request_focus(egui::Id::new("pagewing-comment-filter"));
+        });
+        frame_size(
+            &mut app,
+            &context,
+            vec![Event::Paste("Row".into())],
+            Vec2::new(640.0, 480.0),
+        );
+        assert_eq!(app.comments.view.selected(), Some(0));
+        context.memory_mut(|memory| {
+            memory.request_focus(egui::Id::new("pagewing-comment-input"));
+        });
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(&mut app, &context, Vec::new());
+        }
+        assert!(
+            visible_selected_card(&context, &output, "Row 79").is_some(),
+            "with editor focus, resize reveals the active draft rather than the filter's first match"
+        );
+        assert_eq!(app.comments.view.selected(), Some(0));
+        assert_eq!(app.comments.editor.as_ref().unwrap().contents, "Row 79");
     }
 
     #[test]

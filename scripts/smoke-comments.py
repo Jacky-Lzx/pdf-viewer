@@ -14,12 +14,13 @@ desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
-def comments_pdf():
+def comments_pdf(rows=0):
     author = (b"\xfe\xff" + "Straße".encode("utf-16-be")).hex()
+    extra = " ".join(f"{10 + index} 0 R" for index in range(rows))
     objects = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Annots [5 0 R 6 0 R 8 0 R 9 0 R] >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Annots [5 0 R 6 0 R 8 0 R 9 0 R {extra}] >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Annots [7 0 R] >>",
         "<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Alice) /Contents (Root question) >>",
         f"<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /IRT 5 0 R /RT /R /T <{author}> /Contents (Nested needle jkg) >>",
@@ -27,6 +28,10 @@ def comments_pdf():
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Review) /State (Completed) /F 2 >>",
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Marked) /State (Marked) /F 2 >>",
     ]
+    objects.extend(
+        f"<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Reviewer) /Contents (Row {index}) >>"
+        for index in range(rows)
+    )
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
     for number, obj in enumerate(objects, 1):

@@ -147,6 +147,7 @@ impl CommentView {
     pub fn select(&mut self, index: usize) {
         if let Some(row) = self.visible.iter().position(|row| row.index == index) {
             self.selected = Some(row);
+            self.reveal = true;
         }
     }
 
