@@ -8,6 +8,9 @@ pub enum Command {
         path: Option<PathBuf>,
         page: Option<usize>,
     },
+    Info {
+        path: PathBuf,
+    },
     Text {
         path: PathBuf,
         page: usize,
@@ -28,9 +31,10 @@ impl Command {
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             Self::Gui { path, .. } => path.as_deref(),
-            Self::Text { path, .. } | Self::Render { path, .. } | Self::Benchmark { path, .. } => {
-                Some(path)
-            }
+            Self::Info { path }
+            | Self::Text { path, .. }
+            | Self::Render { path, .. }
+            | Self::Benchmark { path, .. } => Some(path),
             Self::Help | Self::Version => None,
         }
     }
@@ -59,6 +63,11 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
     match first.to_str() {
         Some("--help" | "-h") if args.len() == 1 => Ok(Command::Help),
         Some("--version" | "-V") if args.len() == 1 => Ok(Command::Version),
+        Some("--info") => match &args[1..] {
+            [] => Err("Missing PDF path. Run folio --help.".into()),
+            [path] => Ok(Command::Info { path: path.into() }),
+            _ => Err("Too many arguments for --info. Run folio --help.".into()),
+        },
         Some("--page") => {
             if args.len() < 2 {
                 return Err(
@@ -161,6 +170,8 @@ mod tests {
             vec!["--render", "missing.pdf", "out.png", "1", "16385"],
             vec!["--render", "missing.pdf", "out.png", "1", "1200", "extra"],
             vec!["--text"],
+            vec!["--info"],
+            vec!["--info", "missing.pdf", "extra"],
             vec!["--text", "missing.pdf", "0"],
             vec!["--text", "missing.pdf", "-1"],
             vec!["--text", "missing.pdf", "1.5"],
@@ -171,6 +182,12 @@ mod tests {
             let error = command(&args).unwrap_err();
             assert!(!error.contains("Cannot read"), "{args:?}: {error}");
         }
+        assert_eq!(
+            command(&["--info", "in.pdf"]).unwrap(),
+            Command::Info {
+                path: "in.pdf".into(),
+            }
+        );
         assert_eq!(
             command(&["--render", "in.pdf", "out.png"]).unwrap(),
             Command::Render {
@@ -270,6 +287,14 @@ mod tests {
         );
         assert_eq!(
             parse(&["--text".into(), path.clone()])
+                .unwrap()
+                .path()
+                .unwrap()
+                .as_os_str(),
+            path
+        );
+        assert_eq!(
+            parse(&["--info".into(), path.clone()])
                 .unwrap()
                 .path()
                 .unwrap()

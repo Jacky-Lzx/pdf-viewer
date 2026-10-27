@@ -33,14 +33,14 @@ mod texture_pixels;
 mod thumbnails;
 mod worker;
 
-use std::time::Instant;
+use std::{fmt::Write as _, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let (path, page) = match cli::parse(&args)? {
         cli::Command::Help => {
             output::line(format_args!(
-                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
+                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
             ))?;
             return Ok(());
         }
@@ -78,6 +78,20 @@ fn headless(command: cli::Command) -> Result<(), String> {
     let pdf = document::load(path, "")?;
     let load_ms = start.elapsed().as_secs_f64() * 1000.0;
     match command {
+        cli::Command::Info { path } => {
+            let info = document_info::DocumentInfo::read(&pdf);
+            let mut report = format!(
+                "File: {}\nFormat: PDF {}\nSize: {} bytes\nPages: {}",
+                path.display(),
+                info.version,
+                info.bytes,
+                pdf.pages().len()
+            );
+            for (label, value) in info.fields {
+                let _ = write!(report, "\n{label}: {value}");
+            }
+            output::line(format_args!("{report}"))?;
+        }
         cli::Command::Text { page, .. } => {
             if page >= pdf.pages().len() {
                 return Err("Page out of range".into());

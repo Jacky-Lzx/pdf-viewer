@@ -22,6 +22,8 @@ folio --page 12 /path/to/book.pdf
 # 文件名以 - 开头时，用 -- 结束选项解析
 folio -- '-notes.pdf'
 folio --version
+# 在终端查看页数、格式、大小及文档元数据
+folio --info /path/to/book.pdf
 ```
 
 Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcommon。Ubuntu / Debian 可安装：
@@ -54,6 +56,8 @@ bash scripts/install-linux.sh --prefix /path/to/folio --uninstall
 PNG 导出在读取和渲染前检查输出是否指向源 PDF；同路径、相对路径别名、符号链接和硬链接会被拒绝，保留原 PDF。请为图像选择单独的输出文件。
 
 命令行文本、帮助和测量结果可接入管道；下游提前关闭时正常退出，不打印 Broken pipe 崩溃。其他标准输出写入错误仍会报告并返回失败。
+
+`folio --info document.pdf` 输出文件路径、PDF 版本、字节数、页数及可用的标题、作者等元数据，无需图形会话或页面渲染，不写入阅读状态。空元数据字段省略；超长字段按文档信息窗口相同的规则截断。需要密码的 PDF 会报告加载错误。
 
 非 UTF-8 路径同样支持最近文档、阅读进度、书签和命名位置的保存与恢复；界面显示的替代字符不会改变实际文件路径。
 
@@ -205,6 +209,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo run --release -- --render assets/folio-guide.pdf /tmp/page.png 1 1200
 cargo run --release -- --text assets/folio-guide.pdf 1
+cargo run --release -- --info assets/folio-guide.pdf
 cargo run --release -- --benchmark assets/folio-guide.pdf 5
 # 像素旋转专项基准，交替比较原实现与当前实现
 cargo bench --locked --bench rotation -- 9

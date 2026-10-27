@@ -27,6 +27,8 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo build --locked --release
+      - name: Headless document information
+        run: python3 scripts/smoke-info.py target/release/folio
       - name: Native desktop smoke test
         if: runner.os == 'Linux'
         run: |
