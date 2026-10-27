@@ -47,7 +47,7 @@ fn main() {
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
     println!(
-        "{passes} passes, median µs/operation; 1000 admission checks or 10000 protection updates/sample; 512 real TextureHandles with shared 4×4 pixels. Filling, allocation, rasterization, UI and GPU excluded."
+        "{passes} passes, median µs/operation; 1000 admission checks or 10000 protection updates/sample; 512 real TextureHandles with shared 4×4 pixels. Includes temporary admission allocations; excludes filling, texture allocation, rasterization, UI and GPU."
     );
     for (name, count, tiles) in [
         ("single page", 1, false),

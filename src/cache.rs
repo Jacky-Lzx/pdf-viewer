@@ -101,7 +101,13 @@ impl TextureCache {
     }
 
     pub fn can_insert(&self, key: RenderKey, bytes: usize) -> bool {
-        bytes <= self.available_for_insert(&self.pinned_for_insert(key))
+        if bytes > self.budget {
+            return false;
+        }
+        // Admission only needs the protected byte total. Build the eviction
+        // key list later, when an actual insertion can use it.
+        let pinned_bytes = self.pinned_entries(key).map(|(_, entry)| entry.bytes).sum();
+        bytes <= self.budget.saturating_sub(pinned_bytes)
     }
 
     fn available_for_insert(&self, pinned: &Pinned) -> usize {
@@ -126,27 +132,32 @@ impl TextureCache {
         self.protected.extend_from_slice(keys);
     }
 
+    fn pinned_entries(&self, key: RenderKey) -> impl Iterator<Item = (RenderKey, &Entry)> {
+        self.protected.iter().filter_map(move |&target| {
+            // A target may replace its own displayed zoom fallback.
+            if target == key {
+                return None;
+            }
+            let resident = self.entries.get(&target);
+            let pinned = if resident.is_some() {
+                target
+            } else {
+                self.fallback_key(target)?
+            };
+            if pinned == key {
+                return None;
+            }
+            Some((pinned, resident.or_else(|| self.entries.get(&pinned))?))
+        })
+    }
+
     fn pinned_for_insert(&self, key: RenderKey) -> Pinned {
         let mut bytes = 0;
         let keys = self
-            .protected
-            .iter()
-            .filter_map(|&target| {
-                // A target may replace its own displayed zoom fallback.
-                if target == key {
-                    return None;
-                }
-                let resident = self.entries.get(&target);
-                let pinned = if resident.is_some() {
-                    target
-                } else {
-                    self.fallback_key(target)?
-                };
-                if pinned == key {
-                    return None;
-                }
-                bytes += resident.or_else(|| self.entries.get(&pinned))?.bytes;
-                Some(pinned)
+            .pinned_entries(key)
+            .map(|(key, entry)| {
+                bytes += entry.bytes;
+                key
             })
             .collect();
         Pinned { keys, bytes }
@@ -406,6 +417,71 @@ mod tests {
         assert_fallback_index(&cache);
         assert!(cache.full_pages.as_ref().unwrap().is_empty());
         assert!(cache.fallback_key(target).is_none());
+    }
+
+    #[test]
+    fn admission_matches_insertion_with_exact_fallback_and_tile_protection() {
+        let context = Context::default();
+        let tile = RenderKey {
+            tile: Some(crate::document::Tile {
+                scale_bits: 2.0_f32.to_bits(),
+                x: 0,
+                y: 0,
+                size: [4, 4],
+            }),
+            ..key(2)
+        };
+        let target = RenderKey {
+            width: 64,
+            ..key(0)
+        };
+        for exact in [false, true] {
+            for budget in [192, 256] {
+                for incoming in [
+                    target,
+                    key(0),
+                    key(1),
+                    tile,
+                    RenderKey {
+                        tile: Some(crate::document::Tile {
+                            x: 4,
+                            ..tile.tile.unwrap()
+                        }),
+                        ..tile
+                    },
+                    key(3),
+                    RenderKey {
+                        rotation: 1,
+                        ..key(0)
+                    },
+                ] {
+                    for size in [[1, 1], [4, 4], [8, 4], [16, 16]] {
+                        let mut cache = if exact {
+                            TextureCache::exact_with_budget(budget)
+                        } else {
+                            TextureCache::with_budget(budget)
+                        };
+                        for resident in [key(0), key(1), tile] {
+                            assert!(cache.insert(resident, texture(&context)));
+                        }
+                        cache.protect_many(&[target, key(1), tile, key(4)]);
+                        assert!(cache.can_insert(incoming, 0));
+                        let admitted = cache.can_insert(incoming, size[0] * size[1] * 4);
+                        let image = context.load_texture(
+                            "admission",
+                            ColorImage::filled(size, Color32::WHITE),
+                            TextureOptions::LINEAR,
+                        );
+                        assert_eq!(
+                            cache.insert(incoming, image),
+                            admitted,
+                            "exact={exact}, budget={budget}, incoming={incoming:?}, size={size:?}"
+                        );
+                        assert!(cache.bytes <= budget);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
