@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (path, page, sync_request) = match cli::parse(&args)? {
         cli::Command::Help => {
             output::line(format_args!(
-                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio [--inverse-search COMMAND] [--synctex-directory DIR]\n        --forward-search LINE COLUMN SOURCE [--] document.pdf\n  folio --inverse-search COMMAND [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nSyncTeX: compile with -synctex=1. Lines start at 1; use column 0 if unknown.\nInverse command placeholders: %f file, %l line, %c column, %% literal percent.\nCtrl/Cmd+click the PDF to jump to source (outside selection mode).\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
+                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio [--inverse-search COMMAND] [--synctex-directory DIR]\n        --forward-search LINE COLUMN SOURCE [--] document.pdf\n  folio --inverse-search COMMAND [--] document.pdf\n  folio [--no-focus] [--inverse-search-position COMMAND]\n        --synctex-location JSON [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nSyncTeX: compile with -synctex=1. Lines start at 1; use column 0 if unknown.\nInverse command placeholders: %f file, %l line, %c column, %% literal percent.\nPosition callback placeholders: %f PDF, %p page, %x/%y coordinates.\n--synctex-location accepts an LSP location {{page,x,y,h?,v?,width?,height?}}; no SyncTeX query.\n--no-focus opens/reuses the window without requesting focus.\nCtrl/Cmd+click the PDF to jump to source (outside selection mode).\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
             ))?;
             return Ok(());
         }
@@ -56,15 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli::Command::SyncGui {
             path,
             source,
+            target,
             mut options,
         } => {
             options.resolve_paths()?;
             let path = std::fs::canonicalize(&path)
                 .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
-            let target = source
+            let target = target.or(source
                 .as_ref()
                 .map(|source| synctex::forward(&path, source, &options))
-                .transpose()?;
+                .transpose()?);
             let request = synctex_ipc::Request { target, options };
             if synctex_ipc::send_existing(&path, &request)? {
                 return Ok(());
@@ -75,6 +76,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
+            .with_active(
+                sync_request
+                    .as_ref()
+                    .is_none_or(|r| r.options.focus != Some(false)),
+            )
             .with_inner_size([1180.0, 820.0])
             .with_min_inner_size([240.0, 240.0])
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(

@@ -1,6 +1,6 @@
 use super::Folio;
 use crate::{
-    synctex::{self, Options, PageGeometry, Source, Target},
+    synctex::{self, Options, PageGeometry, Target},
     synctex_ipc::{Request, Server},
 };
 use eframe::egui::{self, Color32};
@@ -17,7 +17,7 @@ pub(super) struct SyncUi {
     options: Options,
     pending: Option<Target>,
     highlight: Option<(usize, Rect, Instant)>,
-    reverse: Option<(u64, Receiver<Result<Source, String>>)>,
+    reverse: Option<(u64, Receiver<Result<String, String>>)>,
 }
 
 impl SyncUi {
@@ -32,6 +32,7 @@ impl SyncUi {
         self.highlight = None;
         self.reverse = None;
         self.options.directory = None;
+        self.options.position_command = None;
     }
 }
 
@@ -39,6 +40,11 @@ impl Folio {
     pub fn configure_synctex(&mut self, request: Request, context: &egui::Context) {
         if let Some(editor) = request.options.editor {
             self.synctex.options.editor = Some(editor);
+            self.synctex.options.position_command = None;
+        }
+        if let Some(command) = request.options.position_command {
+            self.synctex.options.position_command = Some(command);
+            self.synctex.options.editor = None;
         }
         if let Some(directory) = request.options.directory {
             self.synctex.options.directory = Some(directory);
@@ -58,8 +64,10 @@ impl Folio {
                 self.reload();
             }
         }
-        context.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        context.send_viewport_cmd(egui::ViewportCommand::Focus);
+        if request.options.focus != Some(false) {
+            context.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            context.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
     }
 
     pub(super) fn synctex_events(&mut self, context: &egui::Context) {
@@ -97,12 +105,7 @@ impl Folio {
             self.synctex.reverse = None;
             if id == self.id {
                 match result {
-                    Ok(source) => self.notify(format!(
-                        "SyncTeX · {}:{}:{}",
-                        source.path.display(),
-                        source.line,
-                        source.column
-                    )),
+                    Ok(message) => self.notify(message),
                     Err(error) => self.error = Some(error),
                 }
             }
@@ -131,12 +134,12 @@ impl Folio {
                 .ok()
                 .and_then(|s| synctex::editor_command(&s).ok())
         });
-        let Some(editor) = editor else {
+        if editor.is_none() && options.position_command.is_none() {
             self.notify(
                 "Set --inverse-search 'code --goto %f:%l:%c' or FOLIO_EDITOR to jump to source",
             );
             return;
-        };
+        }
         let local = position - page_rect.min;
         let point = crate::geometry::unrotate_point(
             Point::new(
@@ -152,10 +155,20 @@ impl Folio {
         self.synctex.reverse = Some((self.id, receiver));
         let context = ui.ctx().clone();
         std::thread::spawn(move || {
-            let result = synctex::reverse(&pdf, page, point, &options).and_then(|source| {
-                synctex::launch_editor(&editor, &source)?;
-                Ok(source)
-            });
+            let result = if let Some(command) = &options.position_command {
+                synctex::launch_position(command, &pdf, page, point)
+                    .map(|()| format!("SyncTeX · page {} sent to editor", page + 1))
+            } else {
+                synctex::reverse(&pdf, page, point, &options).and_then(|source| {
+                    synctex::launch_editor(editor.as_ref().unwrap(), &source)?;
+                    Ok(format!(
+                        "SyncTeX · {}:{}:{}",
+                        source.path.display(),
+                        source.line,
+                        source.column
+                    ))
+                })
+            };
             let _ = tx.send(result);
             context.request_repaint();
         });
@@ -190,6 +203,7 @@ impl Folio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::synctex::Source;
     use egui::{Event, Modifiers, Pos2, RawInput, Vec2};
     use std::{fs, path::Path, process::Command};
 
@@ -260,6 +274,44 @@ mod tests {
         app.close_document(&context);
         assert!(app.synctex.server.is_none());
         assert!(app.synctex.highlight.is_none());
+    }
+
+    #[test]
+    fn background_requests_do_not_emit_focus_or_unminimize_commands() {
+        let context = egui::Context::default();
+        let directory = tempfile::tempdir().unwrap();
+        let mut app =
+            Folio::with_context(&context, None, None, directory.path().join("library.json"));
+        let output = context.run(RawInput::default(), |context| {
+            app.configure_synctex(
+                Request {
+                    options: Options {
+                        focus: Some(false),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                context,
+            );
+        });
+        assert!(
+            !output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|c| matches!(
+                    c,
+                    egui::ViewportCommand::Focus | egui::ViewportCommand::Minimized(false)
+                ))
+        );
+        let output = context.run(RawInput::default(), |context| {
+            app.configure_synctex(Request::default(), context)
+        });
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::ViewportCommand::Focus))
+        );
     }
 
     #[test]
@@ -451,5 +503,87 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.line, 5);
+
+        // The LSP integration must work even without any local SyncTeX mapping.
+        fs::remove_file(aux.join("main.synctex")).unwrap();
+        let callback = vec!["python3".into(), "-c".into(), "import sys,json,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))".into(), capture.to_str().unwrap().into(), "%f".into(), "%p".into(), "%x".into(), "%y".into()];
+        for continuous in [false, true] {
+            for rotation in 0..4 {
+                fs::remove_file(&capture).unwrap();
+                app.reading.continuous = continuous;
+                app.reading.rotation = rotation;
+                app.reading.fit = crate::navigation::Fit::Custom(1.75);
+                app.synctex.highlight = None;
+                app.configure_synctex(
+                    Request {
+                        target: Some(target.clone()),
+                        options: Options {
+                            position_command: Some(callback.clone()),
+                            focus: Some(false),
+                            ..Default::default()
+                        },
+                    },
+                    &context,
+                );
+                wait(&mut app, &context, |a| {
+                    !a.loading && a.synctex.highlight.is_some()
+                });
+                frame(&mut app, &context, Vec::new());
+                let dimensions = app.dimensions[1];
+                let rect = app.synctex.geometry[1].render_rect(target.rect);
+                let rotated = crate::geometry::rotate_rect(rect, dimensions, rotation);
+                let size = if rotation % 2 == 1 {
+                    Vec2::new(dimensions[1], dimensions[0])
+                } else {
+                    Vec2::from(dimensions)
+                } * app.scale;
+                let origin = Pos2::new(24.0, 24.0)
+                    + Vec2::new(
+                        (app.viewport.x - size.x).max(0.0) * 0.5,
+                        if continuous {
+                            0.0
+                        } else {
+                            (app.viewport.y - size.y).max(0.0) * 0.5
+                        },
+                    )
+                    - app.pan;
+                let position = origin
+                    + Vec2::new(rotated.center().x as f32, rotated.center().y as f32) * app.scale;
+                frame(&mut app, &context, vec![Event::PointerMoved(position)]);
+                for pressed in [true, false] {
+                    frame(
+                        &mut app,
+                        &context,
+                        vec![Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Modifiers::COMMAND,
+                        }],
+                    );
+                }
+                wait(&mut app, &context, |a| {
+                    a.synctex.reverse.is_none() && capture.exists()
+                });
+                let args: Vec<String> =
+                    serde_json::from_slice(&fs::read(&capture).unwrap()).unwrap();
+                assert_eq!(
+                    fs::canonicalize(&args[0]).unwrap(),
+                    fs::canonicalize(root.join("build/main.pdf")).unwrap()
+                );
+                assert_eq!(args[1], "2");
+                assert!(
+                    (args[2].parse::<f64>().unwrap() - (target.rect[0] + target.rect[2]) * 0.5)
+                        .abs()
+                        < 0.01
+                );
+                assert!(
+                    (args[3].parse::<f64>().unwrap() - (target.rect[1] + target.rect[3]) * 0.5)
+                        .abs()
+                        < 0.01
+                );
+                assert!(app.error.is_none(), "{:?}", app.error);
+            }
+        }
     }
 }

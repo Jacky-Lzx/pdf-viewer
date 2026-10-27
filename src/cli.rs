@@ -1,6 +1,6 @@
 use std::{ffi::OsString, path::PathBuf};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
     Version,
@@ -11,6 +11,7 @@ pub enum Command {
     SyncGui {
         path: PathBuf,
         source: Option<crate::synctex::Source>,
+        target: Option<crate::synctex::Target>,
         options: crate::synctex::Options,
     },
     Info {
@@ -50,7 +51,14 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
     if args.iter().take_while(|a| *a != "--").any(|a| {
         matches!(
             a.to_str(),
-            Some("--forward-search" | "--inverse-search" | "--synctex-directory")
+            Some(
+                "--forward-search"
+                    | "--inverse-search"
+                    | "--synctex-directory"
+                    | "--synctex-location"
+                    | "--inverse-search-position"
+                    | "--no-focus"
+            )
         )
     }) {
         return parse_synctex(args);
@@ -169,6 +177,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
 fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
     let mut options = crate::synctex::Options::default();
     let mut source = None;
+    let mut target = None;
     let mut path = None;
     let mut index = 0;
     while index < args.len() {
@@ -178,8 +187,8 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
         };
         match args[index].to_str() {
             Some("--forward-search") => {
-                if source.is_some() {
-                    return Err("Duplicate --forward-search".into());
+                if source.is_some() || target.is_some() {
+                    return Err("Choose one forward-search source or SyncTeX location".into());
                 }
                 let number = |offset| {
                     value(offset)?
@@ -200,8 +209,8 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
                 index += 4;
             }
             Some("--inverse-search") => {
-                if options.editor.is_some() {
-                    return Err("Duplicate --inverse-search".into());
+                if options.editor.is_some() || options.position_command.is_some() {
+                    return Err("Choose one inverse-search command or position callback".into());
                 }
                 options.editor = Some(crate::synctex::editor_command(
                     value(1)?
@@ -209,6 +218,30 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
                         .ok_or("Inverse-search command must be UTF-8")?,
                 )?);
                 index += 2;
+            }
+            Some("--synctex-location") => {
+                if source.is_some() || target.is_some() {
+                    return Err("Choose one forward-search source or SyncTeX location".into());
+                }
+                target = Some(crate::synctex::Target::from_location(
+                    value(1)?.to_str().ok_or("Location JSON must be UTF-8")?,
+                )?);
+                index += 2;
+            }
+            Some("--inverse-search-position") => {
+                if options.editor.is_some() || options.position_command.is_some() {
+                    return Err("Choose one inverse-search command or position callback".into());
+                }
+                options.position_command = Some(crate::synctex::position_command(
+                    value(1)?
+                        .to_str()
+                        .ok_or("Position callback must be UTF-8")?,
+                )?);
+                index += 2;
+            }
+            Some("--no-focus") => {
+                options.focus = Some(false);
+                index += 1;
             }
             Some("--synctex-directory") => {
                 if options.directory.is_some() {
@@ -239,6 +272,7 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
     Ok(Command::SyncGui {
         path: path.ok_or("Missing PDF path. Run folio --help.")?,
         source,
+        target,
         options,
     })
 }
@@ -257,6 +291,7 @@ mod tests {
             path,
             source,
             options,
+            ..
         } = command(&[
             "--inverse-search",
             "code --goto '%f:%l:%c'",
@@ -299,6 +334,74 @@ mod tests {
         ] {
             assert!(command(&args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn accepts_lsp_locations_and_coordinate_callbacks_without_source_queries() {
+        let location = r#"{"page":2,"x":100,"y":220,"h":90,"v":224,"width":300,"height":12}"#;
+        let Command::SyncGui {
+            source,
+            target,
+            options,
+            ..
+        } = command(&[
+            "--synctex-location",
+            location,
+            "--inverse-search-position",
+            "editor '%f' %p %x %y",
+            "--no-focus",
+            "--",
+            "-文档.pdf",
+        ])
+        .unwrap()
+        else {
+            panic!()
+        };
+        assert!(source.is_none());
+        assert_eq!(
+            target.unwrap(),
+            crate::synctex::Target {
+                page: 1,
+                rect: [90.0, 212.0, 390.0, 224.0]
+            }
+        );
+        assert_eq!(options.focus, Some(false));
+        assert_eq!(
+            options.position_command.unwrap(),
+            ["editor", "%f", "%p", "%x", "%y"]
+        );
+        for args in [
+            vec!["--synctex-location", "{}", "a.pdf"],
+            vec!["--synctex-location", r#"{"page":0,"x":0,"y":0}"#, "a.pdf"],
+            vec![
+                "--synctex-location",
+                r#"{"page":1,"x":"NaN","y":0}"#,
+                "a.pdf",
+            ],
+            vec![
+                "--synctex-location",
+                location,
+                "--forward-search",
+                "1",
+                "0",
+                "a.tex",
+                "a.pdf",
+            ],
+            vec!["--inverse-search-position", "editor %f %p", "a.pdf"],
+            vec![
+                "--inverse-search",
+                "editor %f",
+                "--inverse-search-position",
+                "editor %f %p %x %y",
+                "a.pdf",
+            ],
+        ] {
+            assert!(command(&args).is_err(), "{args:?}");
+        }
+        assert!(matches!(
+            command(&["--no-focus", "a.pdf"]).unwrap(),
+            Command::SyncGui { .. }
+        ));
     }
 
     #[test]

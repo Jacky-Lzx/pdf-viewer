@@ -86,6 +86,23 @@ folio --synctex-directory /path/to/aux \
 
 编辑器命令中的 `%f`、`%l`、`%c` 分别是完整源码路径、从 1 开始的行列，`%%` 表示百分号；SyncTeX 未提供列时使用 1。命令按引号拆分后直接启动程序，路径中的空格和特殊字符会作为参数保留，不执行 shell 管道或重定向。编辑器程序需在 `PATH` 中或使用完整路径。`--inverse-search` 的配置在当前窗口中保留；也可设置环境变量 `FOLIO_EDITOR='code --goto "%f:%l:%c"'` 为默认命令。编辑器复用同一窗口时，省略 `--inverse-search` 会保留该窗口已有配置。文件名以 `-` 开头时，在 PDF 路径前加 `--`。
 
+### TeXquill / Neovim 接入
+
+使用支持 Folio 的 tex-tools.nvim，选择 `lsp = 'texquill'` 和 `viewer.method = 'folio'`，并将 `viewer.executable` 指向 Folio 二进制。`TexToolsForwardSearch` 会调用当前 TeXquill 会话，将结果直接交给 Folio；Cmd/Ctrl+单击由同一 Neovim 会话调用 `latex.inverseSearch` 后跳转。`TexToolsView` 同样自动配置回调，`viewer.focus = false` 保持编辑器焦点。需先保存并成功编译；LSP 继续负责根文件、产物目录和过期检查。
+
+```lua
+require('tex-tools').setup({
+  lsp = 'texquill',
+  viewer = {
+    method = 'folio',
+    executable = '/path/to/folio',
+    focus = false,
+  },
+})
+```
+
+阅读器集成接口：`--synctex-location JSON` 接收 `{page,x,y,h?,v?,width?,height?}`（与 TeXquill 相同：页码从 1 开始，未旋转页面左上角为原点，单位为 1/72 英寸；高亮框四个字段需一起提供）。`--inverse-search-position COMMAND` 将 PDF 路径 `%f`、页码 `%p`、坐标 `%x`/`%y` 交给客户端处理，不运行本地 SyncTeX；它与源码回调 `--inverse-search` 互斥。两种回调均先拆分引号再替换占位符，`%%` 表示百分号。`--no-focus` 让打开或复用窗口时不请求焦点；实际表现受窗口系统控制。重启 Neovim 或其 LSP 后，再从编辑器执行一次 View/ForwardSearch，重新关联 PDF 会话。回调仅导航到请求对应的 PDF/项目，旧请求结果会被忽略。
+
 ## 高亮与 comment
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。

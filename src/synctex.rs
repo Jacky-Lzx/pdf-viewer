@@ -8,11 +8,14 @@ use std::{
     process::Command,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Options {
     /// Already tokenized: source paths are substituted only after tokenization.
     pub editor: Option<Vec<String>>,
     pub directory: Option<PathBuf>,
+    pub position_command: Option<Vec<String>>,
+    pub focus: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,13 +25,52 @@ pub struct Source {
     pub column: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Target {
     pub page: usize,
     pub rect: [f64; 4],
 }
 
 impl Target {
+    pub fn from_location(value: &str) -> Result<Self, String> {
+        #[derive(Deserialize)]
+        struct Location {
+            page: usize,
+            x: f64,
+            y: f64,
+            h: Option<f64>,
+            v: Option<f64>,
+            width: Option<f64>,
+            height: Option<f64>,
+        }
+        let location: Location = serde_json::from_str(value)
+            .map_err(|e| format!("Invalid SyncTeX location JSON: {e}"))?;
+        let page = location
+            .page
+            .checked_sub(1)
+            .ok_or("SyncTeX pages start at 1")?;
+        let rect = match (location.h, location.v, location.width, location.height) {
+            (Some(h), Some(v), Some(w), Some(height)) if w >= 0.0 && height >= 0.0 => {
+                [h, v - height, h + w.max(1.0), v]
+            }
+            (None, None, None, None) => [
+                location.x,
+                location.y - 6.0,
+                location.x + 8.0,
+                location.y + 6.0,
+            ],
+            _ => return Err(
+                "SyncTeX box requires finite h, v, width and height with nonnegative dimensions"
+                    .into(),
+            ),
+        };
+        let target = Self { page, rect };
+        if !location.x.is_finite() || !location.y.is_finite() || !target.valid() {
+            return Err("Invalid SyncTeX page or coordinates".into());
+        }
+        Ok(target)
+    }
+
     pub fn valid(&self) -> bool {
         self.page < 1_000_000
             && self.rect.iter().all(|v| v.is_finite() && v.abs() < 1e9)
@@ -65,6 +107,18 @@ pub fn editor_command(value: &str) -> Result<Vec<String>, String> {
     let parts = shlex::split(value).ok_or("Unclosed quote in inverse-search command")?;
     if parts.first().is_none_or(|part| part.is_empty()) || !parts.iter().any(|p| p.contains("%f")) {
         return Err("Inverse-search command needs a program and %f (source file); use %l and %c for line and column".into());
+    }
+    Ok(parts)
+}
+
+pub fn position_command(value: &str) -> Result<Vec<String>, String> {
+    let parts = shlex::split(value).ok_or("Unclosed quote in position callback command")?;
+    if parts.first().is_none_or(|p| p.is_empty())
+        || ["%f", "%p", "%x", "%y"]
+            .iter()
+            .any(|key| !parts.iter().any(|p| p.contains(key)))
+    {
+        return Err("Position callback needs a program and %f (PDF), %p (one-based page), %x and %y (PDF points)".into());
     }
     Ok(parts)
 }
@@ -243,6 +297,52 @@ pub fn launch_editor(parts: &[String], source: &Source) -> Result<(), String> {
     std::thread::spawn(move || {
         let _ = child.wait();
     });
+    Ok(())
+}
+
+/// Run an editor-owned coordinate callback without invoking SyncTeX or a shell.
+pub fn launch_position(
+    parts: &[String],
+    pdf: &Path,
+    page: usize,
+    point: Point,
+) -> Result<(), String> {
+    let expand = |part: &str| {
+        let mut output = OsString::new();
+        let mut chars = part.chars();
+        while let Some(c) = chars.next() {
+            if c != '%' {
+                output.push(c.to_string());
+                continue;
+            }
+            match chars.next() {
+                Some('f') => output.push(pdf),
+                Some('p') => output.push((page + 1).to_string()),
+                Some('x') => output.push(point.x.to_string()),
+                Some('y') => output.push(point.y.to_string()),
+                Some('%') => output.push("%"),
+                Some(c) => {
+                    output.push("%");
+                    output.push(c.to_string());
+                }
+                None => output.push("%"),
+            }
+        }
+        output
+    };
+    let (program, args) = parts
+        .split_first()
+        .ok_or("No position callback configured")?;
+    let result = Command::new(expand(program))
+        .args(args.iter().map(|a| expand(a)))
+        .output()
+        .map_err(|e| format!("Cannot start position callback: {e}"))?;
+    if !result.status.success() {
+        return Err(format!(
+            "Position callback failed: {}",
+            String::from_utf8_lossy(&result.stderr).trim()
+        ));
+    }
     Ok(())
 }
 
