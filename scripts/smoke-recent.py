@@ -60,7 +60,7 @@ def run(binary):
             def selected_row_visible():
                 for y in range(150, 480, 2):
                     colors = [keyboard.pixel((x, y)) for x in (200, 400, 600)]
-                    if all(green > red * 1.4 and green > blue * 1.1 for red, green, blue in colors):
+                    if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         return True
                 return False
 

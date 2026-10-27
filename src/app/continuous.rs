@@ -165,10 +165,14 @@ impl Pagewing {
                 self.scale = self.continuous_layout.pages[page].scale;
             }
             self.synctex_click(ui, page, page_rect);
-            painter.rect_filled(
-                page_rect.translate(Vec2::new(2.0, 4.0)).expand(2.0),
-                1.0,
-                Color32::from_black_alpha(25),
+            painter.add(
+                egui::epaint::Shadow {
+                    offset: [0, 3],
+                    blur: 16,
+                    spread: 0,
+                    color: Color32::from_black_alpha(28),
+                }
+                .as_shape(page_rect, 0),
             );
             painter.rect_filled(
                 page_rect,

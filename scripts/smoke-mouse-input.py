@@ -66,7 +66,7 @@ def run(binary):
                 expect(0)
                 keyboard.key("y")
                 assert "native PDF reader" in keyboard.clipboard()
-                click_burst((90, 171), "jkgdimouse")
+                click_burst((90, 211), "jkgdimouse")
                 copied_query("jkgdimouse")
                 expect(0)
                 keyboard.key(0xFF1B)
@@ -88,7 +88,7 @@ def run(binary):
                 expect(1)
                 # Opening a toolbar input and typing can arrive in one busy frame.
                 keyboard.wheel((1100, 28), down=True, steps=20)
-                click_burst((1050, 28), "jkgditoolbar")
+                click_burst((1066, 28), "jkgditoolbar")
                 copied_query("jkgditoolbar")
                 expect(1)
                 keyboard.key(0xFF1B)

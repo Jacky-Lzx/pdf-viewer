@@ -52,9 +52,9 @@ def run(binary):
                 # Only inspect the chapter list, excluding headings, text input
                 # and page list. Filled row backgrounds span all three points.
                 filled = 0
-                for y in range(188, 446, 2):
+                for y in range(228, 486, 2):
                     colors = [keyboard.pixel((x, y)) for x in (50, 80, 110)]
-                    if all(green > red * 1.4 and green > blue * 1.1 for red, green, blue in colors):
+                    if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         filled += 1
                 return filled >= 6
 

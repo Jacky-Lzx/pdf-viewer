@@ -55,9 +55,9 @@ def run(binary):
 
             def selected_bookmark_y():
                 positions = []
-                for y in range(160, 302, 2):
+                for y in range(200, 342, 2):
                     colors = [keyboard.pixel((x, y)) for x in (20, 80, 150)]
-                    if all(green > red * 1.4 and green > blue * 1.1 for red, green, blue in colors):
+                    if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         positions.append(y)
                 if len(positions) >= 6:
                     return (min(positions) + max(positions)) // 2
@@ -94,14 +94,14 @@ def run(binary):
                 expect(0, "return to the first retained bookmark", count=30)
                 keyboard.key("b")
                 expect(0, "remove first retained bookmark", removed=0, count=29)
-                keyboard.click((100, 171))
+                keyboard.click((100, 211))
                 expect(1, "first virtual row no longer points at a removed bookmark", removed=0, count=29)
                 keyboard.key("p", ctrl=True)
                 for letter in "pagewing-second":
                     keyboard.key(letter, delay=0.01)
                 keyboard.key(0xFF0D)
                 expect(5, "switching documents replaces the bookmark snapshot", count=2)
-                keyboard.click((100, 206))
+                keyboard.click((100, 246))
                 expect(10, "the new document's second bookmark has the correct destination", count=2)
                 keyboard.key("j", alt=True)
                 expect(5, "Alt+J wraps to the first bookmark", count=2)

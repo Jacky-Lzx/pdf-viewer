@@ -1,3 +1,4 @@
+mod appearance;
 mod comments;
 #[cfg(test)]
 mod config;
@@ -1919,14 +1920,15 @@ impl Pagewing {
     fn toolbar(&mut self, context: &egui::Context) {
         self.input_buttons = shortcuts::InputButtons::default();
         egui::TopBottomPanel::top("toolbar")
+            .frame(appearance::panel(context, 4))
             .exact_height(56.0)
             .show(context, |ui| {
-                let compact = ui.available_width() < 1100.0;
+                let compact = ui.available_width() < 1000.0;
                 toolbar::horizontal_bar(ui, "reader-controls", |ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("P").size(28.0).strong().color(ACCENT));
+                    appearance::logo(ui, 30.0);
                     if !compact {
-                        ui.label(RichText::new("Pagewing").size(21.0).strong());
+                        ui.label(RichText::new("Pagewing").size(19.0).strong());
                     }
                     ui.add_space(16.0);
                     if ui
@@ -1937,94 +1939,110 @@ impl Pagewing {
                         self.choose_file();
                     }
                     if !self.reading.path.as_os_str().is_empty()
-                        && ui
-                            .button("Close")
+                        && appearance::tool(ui, appearance::Icon::Close, "Close document", false)
                             .on_hover_text(self.library.shortcuts.label("close"))
                             .clicked()
                     {
                         self.close_document(context);
                     }
                     if self.nav.count > 0 {
-                        if ui
-                            .button("Sidebar")
-                            .on_hover_text(self.library.shortcuts.label("sidebar"))
-                            .clicked()
+                        if appearance::tool(
+                            ui,
+                            appearance::Icon::Sidebar,
+                            "Sidebar",
+                            self.library.sidebar,
+                        )
+                        .on_hover_text(self.library.shortcuts.label("sidebar"))
+                        .clicked()
                         {
                             self.library.sidebar = !self.library.sidebar;
                             self.dirty = true;
                         }
-                        if ui
-                            .selectable_label(self.comments.open, "Comments")
-                            .clicked()
+                        if appearance::tool(
+                            ui,
+                            appearance::Icon::Comments,
+                            "Comments",
+                            self.comments.open,
+                        )
+                        .clicked()
                         {
                             self.comments.open = !self.comments.open;
                         }
-                        if ui
-                            .add_enabled(
-                                !self.selection.rects.is_empty(),
-                                egui::Button::new("Add comment"),
-                            )
-                            .clicked()
-                        {
+                        if !self.selection.rects.is_empty() && ui.button("Add comment").clicked() {
                             self.add_comment();
                         }
                         ui.separator();
-                        if ui
-                            .button("‹")
+                        if appearance::tool(ui, appearance::Icon::Previous, "Previous page", false)
                             .on_hover_text(self.library.shortcuts.label("previous_page"))
                             .clicked()
                         {
                             self.step(-1);
                         }
-                        if ui
-                            .button("›")
+                        if appearance::tool(ui, appearance::Icon::Next, "Next page", false)
                             .on_hover_text(self.library.shortcuts.label("next_page"))
                             .clicked()
                         {
                             self.step(1);
                         }
                         ui.separator();
-                        if ui
-                            .button("Rotate")
+                        if appearance::tool(ui, appearance::Icon::Rotate, "Rotate page", false)
                             .on_hover_text(self.library.shortcuts.label("rotate"))
                             .clicked()
                         {
                             self.rotate_page(false, 1);
                         }
                     }
-                    toolbar::right_group(
-                        ui,
-                        if self.nav.count > 0 { 280.0 } else { 110.0 },
-                        |ui| {
-                            ui.add_space(12.0);
-                            self.input_buttons.help = Some(ui.button("?").id);
-                            if ui
-                                .button(if self.library.dark { "Light" } else { "Dark" })
-                                .clicked()
+                    toolbar::right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
+                        ui.add_space(12.0);
+                        self.input_buttons.help = Some(
+                            appearance::tool(
+                                ui,
+                                appearance::Icon::Help,
+                                "Keyboard shortcuts",
+                                false,
+                            )
+                            .id,
+                        );
+                        if appearance::tool(
+                            ui,
+                            appearance::Icon::Theme,
+                            if self.library.dark {
+                                "Switch to light theme"
+                            } else {
+                                "Switch to dark theme"
+                            },
+                            false,
+                        )
+                        .clicked()
+                        {
+                            self.library.dark = !self.library.dark;
+                            set_theme(context, self.library.dark);
+                            self.dirty = true;
+                        }
+                        if self.nav.count > 0 {
+                            self.input_buttons.find = Some(
+                                appearance::tool(
+                                    ui,
+                                    appearance::Icon::Search,
+                                    "Find in document",
+                                    self.search_open,
+                                )
+                                .on_hover_text(self.library.shortcuts.label("find"))
+                                .id,
+                            );
+                            if appearance::tool(
+                                ui,
+                                appearance::Icon::Bookmark,
+                                "Bookmark",
+                                self.reading.bookmarks.contains(&self.nav.page),
+                            )
+                            .on_hover_text(self.library.shortcuts.label("bookmark"))
+                            .clicked()
                             {
-                                self.library.dark = !self.library.dark;
-                                set_theme(context, self.library.dark);
-                                self.dirty = true;
+                                self.bookmark();
                             }
-                            if self.nav.count > 0 {
-                                self.input_buttons.find = Some(
-                                    ui.button("Find")
-                                        .on_hover_text(self.library.shortcuts.label("find"))
-                                        .id,
-                                );
-                                if ui
-                                    .selectable_label(
-                                        self.reading.bookmarks.contains(&self.nav.page),
-                                        "Bookmark",
-                                    )
-                                    .on_hover_text(self.library.shortcuts.label("bookmark"))
-                                    .clicked()
-                                {
-                                    self.bookmark();
-                                }
-                            }
-                        },
-                    );
+                        }
+                    });
                 });
             });
     }
@@ -2034,6 +2052,7 @@ impl Pagewing {
             return;
         }
         egui::TopBottomPanel::top("search")
+            .frame(appearance::panel(context, 4))
             .exact_height(42.0)
             .show(context, |ui| {
                 toolbar::horizontal_bar(ui, "search-controls", |ui| {
@@ -2119,11 +2138,7 @@ impl Pagewing {
     }
 
     fn canvas(&mut self, context: &egui::Context) {
-        let background = if self.library.dark {
-            Color32::from_rgb(27, 29, 31)
-        } else {
-            Color32::from_rgb(234, 233, 229)
-        };
+        let background = appearance::canvas(self.library.dark);
         let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(context, |ui| {
@@ -2285,10 +2300,14 @@ impl Pagewing {
                 }
                 let texture = self.cache.get(&key).or_else(|| self.cache.fallback(key));
                 let painter = ui.painter_at(ui.max_rect());
-                painter.rect_filled(
-                    page_rect.translate(Vec2::new(2.0, 4.0)).expand(2.0),
-                    1.0,
-                    Color32::from_black_alpha(25),
+                painter.add(
+                    egui::epaint::Shadow {
+                        offset: [0, 3],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(28),
+                    }
+                    .as_shape(page_rect, 0),
                 );
                 painter.rect_filled(
                     page_rect,
@@ -2580,13 +2599,16 @@ impl Pagewing {
             .id_salt("welcome")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let width = (ui.available_width() - 40.0).clamp(160.0, 460.0);
                 ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() * 0.18).max(30.0));
-                    ui.label(RichText::new("P").size(72.0).strong().color(ACCENT));
+                    ui.add_space((ui.available_height() * 0.10).clamp(24.0, 80.0));
+                    appearance::logo(ui, 68.0);
+                    ui.add_space(18.0);
+                    appearance::section(ui, "P A G E W I N G");
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("A little room to read.").size(32.0).strong());
                     ui.add_space(8.0);
-                    ui.heading(RichText::new("A little room to read.").size(30.0));
-                    ui.add_space(12.0);
-                    ui.weak("Open a PDF. Keep your hands on the keyboard.");
+                    ui.weak("Your documents. A quieter place to focus.");
                     ui.add_space(24.0);
                     if self.loading {
                         ui.spinner();
@@ -2594,60 +2616,162 @@ impl Pagewing {
                     } else if ui
                         .add(
                             egui::Button::new(
-                                RichText::new("Open a document").color(Color32::WHITE),
+                                RichText::new("Open a document")
+                                    .color(Color32::WHITE)
+                                    .strong(),
                             )
                             .fill(ACCENT)
-                            .min_size(Vec2::new(190.0, 42.0)),
+                            .corner_radius(10)
+                            .min_size(Vec2::new(200.0, 44.0)),
                         )
                         .clicked()
                     {
                         self.choose_file();
                     }
-                    ui.add_space(12.0);
-                    ui.weak(format!(
-                        "or drop a PDF anywhere · {}",
-                        self.library.shortcuts.label("open")
-                    ));
-                    if !self.library.recent.is_empty() {
-                        ui.add_space(32.0);
-                        ui.label(
-                            RichText::new("PICK UP WHERE YOU LEFT OFF")
-                                .small()
-                                .color(ACCENT),
-                        );
-                        let mut open = None;
-                        for item in self.library.recent.iter().take(5) {
-                            let name = item.path.file_name().unwrap_or_default().to_string_lossy();
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "Drop a PDF here  ·  {}",
+                            self.library.shortcuts.label("open")
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    ui.add_space(36.0);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(width);
+                            if self.library.recent.is_empty() {
+                                ui.separator();
+                                ui.add_space(12.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.weak("Made for your keyboard");
+                                    ui.label(
+                                        RichText::new("j / k")
+                                            .monospace()
+                                            .color(appearance::accent(ui)),
+                                    );
+                                    ui.weak("scroll");
+                                    ui.label(
+                                        RichText::new("/")
+                                            .monospace()
+                                            .color(appearance::accent(ui)),
+                                    );
+                                    ui.weak("find");
+                                    ui.label(
+                                        RichText::new("?")
+                                            .monospace()
+                                            .color(appearance::accent(ui)),
+                                    );
+                                    ui.weak("shortcuts");
+                                });
+                                return;
+                            }
+                            appearance::section(ui, "CONTINUE READING");
+                            ui.add_space(6.0);
+                            let mut open = None;
+                            for (index, item) in self.library.recent.iter().take(4).enumerate() {
+                                let name =
+                                    item.path.file_name().unwrap_or_default().to_string_lossy();
+                                let row = egui::Frame::new()
+                                    .fill(ui.visuals().panel_fill)
+                                    .corner_radius(10)
+                                    .inner_margin(14)
+                                    .show(ui, |ui| {
+                                        ui.set_width((width - 28.0).max(0.0));
+                                        ui.horizontal(|ui| {
+                                            let (rect, _) = ui.allocate_exact_size(
+                                                Vec2::new(28.0, 32.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            let color = appearance::accent(ui);
+                                            ui.painter().rect_stroke(
+                                                rect.shrink2(Vec2::new(5.0, 2.0)),
+                                                3.0,
+                                                egui::Stroke::new(1.3_f32, color),
+                                                egui::StrokeKind::Inside,
+                                            );
+                                            for offset in [11.0, 16.0, 21.0] {
+                                                ui.painter().line_segment(
+                                                    [
+                                                        rect.min + Vec2::new(10.0, offset),
+                                                        rect.min + Vec2::new(18.0, offset),
+                                                    ],
+                                                    egui::Stroke::new(1.0_f32, color),
+                                                );
+                                            }
+                                            ui.vertical(|ui| {
+                                                ui.set_width((width - 80.0).max(0.0));
+                                                ui.add(
+                                                    egui::Label::new(RichText::new(name).strong())
+                                                        .truncate(),
+                                                );
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "Page {}  ·  Resume reading",
+                                                        item.page + 1
+                                                    ))
+                                                    .small()
+                                                    .weak(),
+                                                );
+                                            });
+                                        });
+                                    });
+                                let response = ui
+                                    .interact(
+                                        row.response.rect,
+                                        ui.id().with(("recent", index)),
+                                        egui::Sense::click(),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(item.path.display().to_string());
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        item.path.display().to_string(),
+                                    )
+                                });
+                                if response.hovered() || response.has_focus() {
+                                    ui.painter().rect_stroke(
+                                        row.response.rect,
+                                        10.0,
+                                        egui::Stroke::new(1.0_f32, appearance::accent(ui)),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                }
+                                if response.clicked() {
+                                    open = Some(item.path.clone());
+                                }
+                            }
+                            if let Some(path) = open {
+                                self.open(path, ui.ctx());
+                            }
+                            ui.add_space(6.0);
                             if ui
-                                .button(format!("{name}    ·    page {}", item.page + 1))
-                                .on_hover_ui(|ui| {
-                                    ui.set_max_width(ui.spacing().tooltip_width);
-                                    ui.label(item.path.display().to_string());
-                                })
+                                .add(
+                                    egui::Button::new(format!(
+                                        "All recent documents  ·  {}",
+                                        self.library.shortcuts.label("recent")
+                                    ))
+                                    .frame(false),
+                                )
                                 .clicked()
                             {
-                                open = Some(item.path.clone());
+                                self.toggle_recent(ui.ctx());
                             }
-                        }
-                        if let Some(path) = open {
-                            self.open(path, ui.ctx());
-                        }
-                        if ui
-                            .button(format!(
-                                "Find recent documents · {}",
-                                self.library.shortcuts.label("recent")
-                            ))
-                            .clicked()
-                        {
-                            self.toggle_recent(ui.ctx());
-                        }
-                    }
+                        },
+                    );
+                    ui.add_space(30.0);
                 });
             });
     }
 
     fn status(&mut self, context: &egui::Context) {
         egui::TopBottomPanel::bottom("status")
+            .frame(appearance::panel(context, 2))
             .exact_height(36.0)
             .show(context, |ui| {
                 toolbar::horizontal_bar(ui, "status-controls", |ui| {
@@ -2663,7 +2787,7 @@ impl Pagewing {
                         })
                         .small()
                         .strong()
-                        .color(ACCENT),
+                        .color(appearance::accent(ui)),
                     );
                     if self.hints.active {
                         ui.monospace(&self.hints.prefix);
@@ -2930,22 +3054,5 @@ impl eframe::App for Pagewing {
 }
 
 fn set_theme(context: &egui::Context, dark: bool) {
-    let mut visuals = if dark {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-    visuals.selection.bg_fill = ACCENT;
-    visuals.selection.stroke.color = Color32::WHITE;
-    visuals.widgets.active.bg_fill = ACCENT;
-    visuals.panel_fill = if dark {
-        Color32::from_rgb(35, 38, 40)
-    } else {
-        Color32::from_rgb(250, 249, 246)
-    };
-    context.set_visuals(visuals);
-    context.style_mut(|style| {
-        style.spacing.button_padding = Vec2::new(10.0, 6.0);
-        style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-    });
+    appearance::apply(context, dark);
 }

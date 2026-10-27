@@ -116,15 +116,15 @@ def run(binary):
                 first(); keyboard.key("f", ctrl=True)
                 def selected(position):
                     red, green, blue = keyboard.pixel(position)
-                    return green > red * 1.4 and green > blue * 1.1
-                assert selected((272, 67)) and selected((315, 67)), "Search option buttons are not drawn"
+                    return green > red + 8 and green > blue + 6
+                assert selected((280, 69)) and selected((326, 69)), "Search option buttons are not drawn"
                 keyboard.click((285, 77))
-                assert not selected((272, 67)), "Aa button did not toggle off"
+                assert not selected((280, 69)), "Aa button did not toggle off"
                 keyboard.key(0xFF0D); time.sleep(0.5); keyboard.key(0xFF1B)
                 expect(1, "Aa button enables insensitive whole-word matching")
                 first(); keyboard.key("f", ctrl=True)
                 keyboard.click((335, 77))
-                assert not selected((315, 67)), "Word button did not toggle off"
+                assert not selected((326, 69)), "Word button did not toggle off"
                 keyboard.key(0xFF0D); time.sleep(0.5); keyboard.key(0xFF1B)
                 keyboard.key("n", shift=True)
                 expect(5, "Word button restores substring matching")
@@ -150,7 +150,7 @@ def run(binary):
                 first(); find()
                 expect(3, "restarted reader actually uses saved case-sensitive whole-word matching")
                 first(); keyboard.key("f", ctrl=True)
-                assert selected((272, 67)) and selected((315, 67)), "saved option buttons must be selected"
+                assert selected((280, 69)) and selected((326, 69)), "saved option buttons must be selected"
                 keyboard.click((285, 77)); keyboard.click((335, 77))
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0

@@ -164,6 +164,7 @@ impl Pagewing {
         let mut discard = false;
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
         egui::SidePanel::right("pagewing-comments-sidebar")
+            .frame(super::appearance::panel(context, 14))
             .default_width(320.0_f32.min(maximum))
             .width_range(220.0_f32.min(maximum)..=maximum)
             .resizable(true)

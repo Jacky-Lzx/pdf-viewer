@@ -48,7 +48,7 @@ def run(binary):
             def preview_ready():
                 # The vector accent is thinner than two pixels at preview scale.
                 for x in range(25, 85, 3):
-                    for y in range(253, 270):
+                    for y in range(293, 310):
                         red, green, blue = keyboard.pixel((x, y))
                         if green > red * 1.4 and green > blue * 1.1:
                             return True
@@ -62,28 +62,28 @@ def run(binary):
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"]), "preview preference")
                 wait_for(preview_ready, "actual PDF pixels in first preview")
-                keyboard.click((90, 500))
+                keyboard.click((90, 540))
                 expect(1, "click second preview")
                 keyboard.key("g", shift=True)
                 expect(79, "Vim G reaches final page")
                 time.sleep(0.3)
-                keyboard.click((90, 270))
+                keyboard.click((90, 310))
                 expect(78, "preview list follows G to the final two pages")
                 keyboard.key("g"); keyboard.key("g")
                 expect(0, "Vim gg returns to first page")
                 wait_for(preview_ready, "preview list follows gg")
-                keyboard.wheel((90, 350), down=True, steps=9)
+                keyboard.wheel((90, 390), down=True, steps=9)
                 time.sleep(0.4)
-                keyboard.click((90, 300))
+                keyboard.click((90, 340))
                 wait_for(lambda: saved(lambda _, book: 1 < book["page"] < 20), "scroll and click a later preview")
                 keyboard.key("g"); keyboard.key("g")
                 wait_for(preview_ready, "return to cached first preview")
                 keyboard.key("i")
-                wait_for(lambda: sum(keyboard.pixel((90, 330))) < 100, "inverted preview pixels")
+                wait_for(lambda: sum(keyboard.pixel((90, 370))) < 100, "inverted preview pixels")
                 keyboard.key("r")
                 wait_for(lambda: saved(lambda _, book: book["rotation"] == 1), "rotated reading view")
                 # Rotated landscape preview leaves empty space above its image.
-                wait_for(lambda: sum(keyboard.pixel((90, 245))) > 400, "rotated preview aspect ratio")
+                wait_for(lambda: sum(keyboard.pixel((90, 285))) > 400, "rotated preview aspect ratio")
                 keyboard.key("r", shift=True); keyboard.key("i")
                 wait_for(preview_ready, "restore upright preview colors")
                 keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
@@ -93,9 +93,13 @@ def run(binary):
                 time.sleep(0.4)
                 keyboard.key("g", shift=True)
                 expect(79, "last page in minimum window")
-                keyboard.click((90, 250))
+                # The padded header leaves room for one full preview here.
+                # Scroll slightly to expose the preceding page before clicking it.
+                keyboard.wheel((90, 350), steps=2)
+                time.sleep(0.4)
+                keyboard.click((90, 300))
                 expect(78, "preceding preview remains clickable in minimum window")
-                keyboard.click((90, 350))
+                keyboard.click((90, 475))
                 expect(79, "last preview remains clickable in minimum window")
                 application.terminate(); application.wait(timeout=5)
                 assert preferences_path.read_text() == preferences, "temporary appearance changes must not rewrite TOML"
@@ -116,17 +120,17 @@ def run(binary):
                 keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
-                keyboard.wheel((90, 350), down=True, steps=9)
+                keyboard.wheel((90, 390), down=True, steps=9)
                 time.sleep(0.4)
                 keyboard.key("g"); keyboard.key("g")
                 time.sleep(0.2)
-                keyboard.click((90, 270))
+                keyboard.click((90, 310))
                 expect(1, "gg reveals current page after manually scrolling the compact list")
                 keyboard.key("g", shift=True)
                 expect(79, "last page in compact list mode")
-                keyboard.click((90, 250))
+                keyboard.click((90, 290))
                 expect(71, "compact list follows keyboard navigation to final pages")
-                keyboard.click((90, 280))
+                keyboard.click((90, 320))
                 expect(72, "clicking a list row preserves its neighboring rows")
                 keyboard.key(0xFF09)
                 wait_for(lambda: saved(lambda state, _: not state["sidebar"]), "close sidebar")

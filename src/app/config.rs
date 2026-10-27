@@ -56,7 +56,7 @@ fn toolbar_find_accepts_same_frame_text_at_the_desktop_smoke_position() {
         Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
     app.nav = crate::navigation::Navigation::new(4, 1);
     app.dimensions = vec![[600.0, 800.0]; 4];
-    let pos = egui::pos2(1050.0, 28.0);
+    let pos = egui::pos2(1066.0, 28.0);
     let mut events = vec![Event::PointerMoved(pos)];
     events.extend([true, false].map(|pressed| Event::PointerButton {
         pos,

@@ -41,9 +41,9 @@ def run(binary):
             def selected_result_visible():
                 # Require a filled selection across the search-results region,
                 # excluding the page list and small green heading text.
-                for y in range(220, 494, 2):
+                for y in range(260, 534, 2):
                     colors = [keyboard.pixel((x, y)) for x in (20, 80, 150)]
-                    if all(green > red * 1.4 and green > blue * 1.1 for red, green, blue in colors):
+                    if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         return True
                 return False
 

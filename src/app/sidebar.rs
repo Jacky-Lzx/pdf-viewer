@@ -1,4 +1,4 @@
-use super::{ACCENT, MarkAction, Pagewing};
+use super::{MarkAction, Pagewing, appearance};
 use crate::navigation::Fit;
 use eframe::egui::{self, Color32, RichText, Vec2};
 
@@ -29,7 +29,10 @@ impl Pagewing {
         let mut toggle = None;
         let mut keyboard_focus = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("CONTENTS").small().strong().color(ACCENT));
+            appearance::section(ui, "CONTENTS");
+            if ui.available_width() < 70.0 {
+                return;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_enabled_ui(!self.outline.filtering(), |ui| {
                     if ui
@@ -111,7 +114,10 @@ impl Pagewing {
                 let entry = self.outline.entry(index);
                 ui.push_id(index, |ui| {
                     ui.horizontal(|ui| {
-                        ui.add_space(entry.depth.min(8) as f32 * 12.0);
+                        ui.add_space(
+                            (entry.depth.min(8) as f32 * 12.0)
+                                .min((ui.available_width() - 60.0).max(0.0)),
+                        );
                         if self.outline.has_children(index) {
                             let collapsed = self.outline.is_collapsed(index);
                             let response = ui
@@ -274,11 +280,11 @@ impl Pagewing {
                     let texture = self.thumbnails.want(key);
                     let painter = ui.painter();
                     if page == self.nav.page {
-                        painter.rect_filled(rect, 4.0, ACCENT.gamma_multiply(0.15));
+                        painter.rect_filled(rect, 8.0, ui.visuals().selection.bg_fill);
                         painter.rect_stroke(
                             rect,
                             4.0,
-                            egui::Stroke::new(1.0_f32, ACCENT),
+                            egui::Stroke::new(1.0_f32, appearance::accent(ui)),
                             egui::StrokeKind::Inside,
                         );
                     } else if response.hovered() {
@@ -373,7 +379,8 @@ impl Pagewing {
         // in a narrow window.
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 380.0);
         egui::SidePanel::left("sidebar")
-            .default_width(230.0_f32.min(maximum))
+            .frame(appearance::panel(context, 14))
+            .default_width(256.0_f32.min(maximum))
             .width_range(180.0_f32.min(maximum)..=maximum)
             .show(context, |ui| {
                 let mut sidebar_scroll = egui::ScrollArea::vertical();
@@ -381,12 +388,16 @@ impl Pagewing {
                     sidebar_scroll = sidebar_scroll.vertical_scroll_offset(0.0);
                 }
                 sidebar_scroll.show(ui, |ui| {
-                    ui.add_space(16.0);
-                    ui.label(RichText::new(self.filename()).strong());
-                    ui.weak(format!("{} pages", self.nav.count));
-                    ui.add_space(16.0);
+                    ui.add_space(6.0);
+                    appearance::section(ui, "YOUR DOCUMENT");
+                    ui.add(egui::Label::new(RichText::new(self.filename()).strong()).truncate())
+                        .on_hover_text(self.reading.path.display().to_string());
+                    ui.weak(format!("PDF document  ·  {} pages", self.nav.count));
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(10.0);
                     self.contents(ui);
-                    ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
+                    appearance::section(ui, "BOOKMARKS");
                     if self.reading.bookmarks.is_empty() {
                         ui.weak(format!(
                             "Press {} to bookmark a page.",
@@ -398,7 +409,7 @@ impl Pagewing {
                     }
                     if !self.reading.marks.is_empty() {
                         ui.add_space(20.0);
-                        ui.label(RichText::new("MARKS").small().strong().color(ACCENT));
+                        appearance::section(ui, "MARKS");
                         let mut target = None;
                         let mut remove = None;
                         for (&name, mark) in &self.reading.marks {
@@ -434,7 +445,7 @@ impl Pagewing {
                             RichText::new("SEARCH RESULTS")
                                 .small()
                                 .strong()
-                                .color(ACCENT),
+                                .color(appearance::accent(ui)),
                         );
                         let mut selected = None;
                         let row_height = Self::sidebar_row_height(ui);
@@ -478,8 +489,8 @@ impl Pagewing {
                         }
                     }
                     ui.add_space(20.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("PAGES").small().strong().color(ACCENT));
+                    ui.horizontal_wrapped(|ui| {
+                        appearance::section(ui, "PAGES");
                         let changed = ui
                             .selectable_value(&mut self.library.thumbnails, false, "List")
                             .changed()
