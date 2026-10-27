@@ -183,6 +183,17 @@ pub struct Worker {
 
 impl Worker {
     pub fn new(context: egui::Context) -> Self {
+        Self::with_loader(context, |path, password, cancelled| {
+            document::load_cancellable(path, password, cancelled)
+        })
+    }
+
+    fn with_loader(
+        context: egui::Context,
+        mut load: impl FnMut(&std::path::Path, &str, &dyn Fn() -> bool) -> Result<Option<Pdf>, String>
+        + Send
+        + 'static,
+    ) -> Self {
         let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
         let (tx, events) = mpsc::sync_channel(4);
         let state = shared.clone();
@@ -214,33 +225,56 @@ impl Worker {
                     if !request.keep_on_error {
                         active = None;
                     }
+                    let cancelled = || {
+                        let pending = state.0.lock().unwrap();
+                        pending.stop || pending.close || pending.open.is_some()
+                    };
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if cancelled() {
+                            return Ok(None);
+                        }
                         let watch = FileWatch::new(request.path.clone(), Instant::now());
-                        let pdf = document::load(&request.path, &request.password)?;
-                        let dimensions: Vec<_> = pdf
-                            .pages()
-                            .iter()
-                            .map(|page| {
-                                let (w, h) = page.render_dimensions();
-                                [w, h]
-                            })
-                            .collect();
-                        if dimensions.iter().any(|size| {
-                            size.iter()
-                                .any(|dimension| !dimension.is_finite() || *dimension <= 0.0)
-                        }) {
-                            return Err("This PDF contains invalid page dimensions.".into());
+                        let Some(pdf) = load(&request.path, &request.password, &cancelled)? else {
+                            return Ok(None);
+                        };
+                        if cancelled() {
+                            return Ok(None);
+                        }
+                        let mut dimensions = Vec::with_capacity(pdf.pages().len());
+                        for (index, page) in pdf.pages().iter().enumerate() {
+                            if index % 256 == 0 && cancelled() {
+                                return Ok(None);
+                            }
+                            let (w, h) = page.render_dimensions();
+                            if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+                                return Err("This PDF contains invalid page dimensions.".into());
+                            }
+                            dimensions.push([w, h]);
+                        }
+                        if cancelled() {
+                            return Ok(None);
                         }
                         let outline = crate::outline::read(&pdf);
+                        if cancelled() {
+                            return Ok(None);
+                        }
                         let labels = crate::page_labels::PageLabels::read(&pdf);
+                        if cancelled() {
+                            return Ok(None);
+                        }
                         let info = crate::document_info::DocumentInfo::read(&pdf);
-                        Ok::<_, String>((pdf, dimensions, outline, labels, info, watch))
+                        Ok::<_, String>(Some((pdf, dimensions, outline, labels, info, watch)))
                     }))
                     .unwrap_or_else(|_| {
                         Err("The PDF engine could not process this document.".into())
                     });
+                    // Obsolete errors must not reopen a password prompt, and
+                    // old completions must not occupy the bounded event queue.
+                    if cancelled() {
+                        continue;
+                    }
                     match result {
-                        Ok((pdf, dimensions, outline, labels, info, watch)) => {
+                        Ok(Some((pdf, dimensions, outline, labels, info, watch))) => {
                             active = Some((pdf, id, watch));
                             emit(
                                 &tx,
@@ -254,6 +288,7 @@ impl Worker {
                                 },
                             );
                         }
+                        Ok(None) => continue,
                         Err(message) => emit(
                             &tx,
                             &context,
@@ -1064,6 +1099,119 @@ mod tests {
         pending.open = None;
         pending.stop = true;
         assert!(!pending.finish_render(render_key(0), revision));
+    }
+
+    #[test]
+    fn superseded_loads_do_not_publish_old_documents_or_errors() {
+        for fail_first in [false, true] {
+            for close_first in [false, true] {
+                let (entered_tx, entered_rx) = mpsc::channel();
+                let (release_tx, release_rx) = mpsc::channel();
+                let mut first = true;
+                let worker =
+                    Worker::with_loader(egui::Context::default(), move |path, password, _| {
+                        let result = document::load(path, password).map(Some);
+                        if std::mem::take(&mut first) {
+                            entered_tx.send(()).unwrap();
+                            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                        }
+                        result
+                    });
+                worker.open(
+                    1,
+                    if fail_first {
+                        sample().with_extension("missing")
+                    } else {
+                        sample()
+                    },
+                    String::new(),
+                );
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                if close_first {
+                    worker.close();
+                }
+                worker.open(2, sample(), String::new());
+                release_tx.send(()).unwrap();
+                assert!(
+                    matches!(receive(&worker), Event::Opened { id: 2, .. }),
+                    "an obsolete load must not consume output capacity or request an old view"
+                );
+                worker.copy(0);
+                assert!(
+                    matches!(receive(&worker), Event::Text { id: 2, text, .. } if text.contains("little"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cancelled_reload_does_not_replace_the_snapshot_kept_after_a_later_failure() {
+        let original = dense_sample(1);
+        let replacement = dense_sample(1);
+        let data = std::fs::read_to_string(replacement.path())
+            .unwrap()
+            .replace("dense", "fresh");
+        std::fs::write(replacement.path(), data).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut calls = 0;
+        let worker = Worker::with_loader(egui::Context::default(), move |path, password, _| {
+            calls += 1;
+            let result = document::load(
+                match calls {
+                    1 => original.path(),
+                    2 => replacement.path(),
+                    _ => path,
+                },
+                password,
+            )
+            .map(Some);
+            if calls == 2 {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            result
+        });
+        worker.open(7, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { id: 7, .. }));
+        worker.reload(7, sample(), String::new());
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.reload(7, sample().with_extension("missing"), String::new());
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            receive(&worker),
+            Event::Error {
+                id: 7,
+                opening: true,
+                ..
+            }
+        ));
+        worker.copy(0);
+        assert!(
+            matches!(receive(&worker), Event::Text { id: 7, text, .. } if text.contains("dense") && !text.contains("fresh"))
+        );
+    }
+
+    #[test]
+    fn shutdown_cancels_an_inflight_load_and_exits_without_another_request() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = Worker::with_loader(egui::Context::default(), move |_, _, cancelled| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            done_tx.send(cancelled()).unwrap();
+            Ok(None)
+        });
+        worker.open(1, sample(), String::new());
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        drop(worker);
+        release_tx.send(()).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_secs(5)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
     }
 
     #[test]

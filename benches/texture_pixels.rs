@@ -3,6 +3,9 @@ mod bitmap;
 #[allow(dead_code)]
 #[path = "../src/document.rs"]
 mod document;
+#[allow(dead_code, unused_imports)]
+#[path = "../src/document_bytes.rs"]
+mod document_bytes;
 #[path = "support/texture_pixels_previous.rs"]
 mod previous;
 #[path = "../src/texture_pixels.rs"]

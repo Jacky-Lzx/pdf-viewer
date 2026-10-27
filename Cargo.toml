@@ -76,3 +76,7 @@ harness = false
 [[bench]]
 name = "link_visibility"
 harness = false
+
+[[bench]]
+name = "document_bytes"
+harness = false

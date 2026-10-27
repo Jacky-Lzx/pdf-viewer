@@ -35,6 +35,32 @@ impl RasterSize {
 pub fn load(path: &Path, password: &str) -> Result<Pdf, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    parse(data, password)
+}
+
+pub fn load_cancellable(
+    path: &Path,
+    password: &str,
+    cancelled: impl Fn() -> bool,
+) -> Result<Option<Pdf>, String> {
+    if cancelled() {
+        return Ok(None);
+    }
+    let bytes = (|| {
+        let mut file = std::fs::File::open(path)?;
+        let expected = file.metadata()?.len();
+        crate::document_bytes::read(&mut file, expected, &cancelled)
+    })()
+    .map_err(|error: std::io::Error| format!("Cannot read {}: {error}", path.display()))?;
+    let Some(bytes) = bytes else { return Ok(None) };
+    if cancelled() {
+        return Ok(None);
+    }
+    let pdf = parse(bytes, password)?;
+    Ok((!cancelled()).then_some(pdf))
+}
+
+fn parse(data: Vec<u8>, password: &str) -> Result<Pdf, String> {
     let pdf = Pdf::new_with_password(data, password)
         .map_err(|error| format!("Cannot open PDF: {error:?}"))?;
     if pdf.pages().is_empty() {
@@ -159,6 +185,29 @@ fn encode_png(bitmap: &Bitmap, output: impl std::io::Write) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellable_loading_preserves_documents_passwords_and_read_errors() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("assets/folio-guide.pdf");
+        let ordinary = load(&path, "").unwrap();
+        let interactive = load_cancellable(&path, "", || false).unwrap().unwrap();
+        assert_eq!(ordinary.data().as_ref(), interactive.data().as_ref());
+        assert_eq!(ordinary.pages().len(), interactive.pages().len());
+        let encrypted = root.join("tests/fixtures/encrypted.pdf");
+        assert!(load_cancellable(&encrypted, "wrong", || false).is_err());
+        assert!(
+            load_cancellable(&encrypted, "jkgdi", || false)
+                .unwrap()
+                .is_some()
+        );
+        let missing = path.with_extension("missing");
+        assert!(load_cancellable(&missing, "", || true).unwrap().is_none());
+        assert_eq!(
+            load_cancellable(&missing, "", || false).err(),
+            load(&missing, "").err()
+        );
+    }
 
     #[test]
     fn png_exports_report_final_flush_errors() {

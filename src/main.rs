@@ -4,6 +4,7 @@ mod cache;
 mod cli;
 mod destination;
 mod document;
+mod document_bytes;
 mod document_info;
 mod file_watch;
 mod fonts;
