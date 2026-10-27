@@ -66,8 +66,8 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "properties reader window")
                 expect(document, 0)
-                keyboard.click((140, 805))
-                assert "Title: 中文 😀 reading" in details(), "status filename opens document information"
+                keyboard.key("s")
+                assert "Title: 中文 😀 reading" in details(), "s opens document information"
                 keyboard.key(0xFF1B)
                 application.send_signal(signal.SIGSTOP)
                 try:
@@ -123,7 +123,7 @@ def run(binary):
                 expect(document, 3)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: status filename entry, Unicode/PDFDocEncoding metadata, exact document details, same-frame modal input, prefix reset, Find focus, reload, clean document switch, close/reopen, compact window and graceful quit")
+                print("PASS: document information shortcut, Unicode/PDFDocEncoding metadata, exact document details, same-frame modal input, prefix reset, Find focus, reload, clean document switch, close/reopen, compact window and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

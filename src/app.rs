@@ -1654,21 +1654,6 @@ impl Folio {
                         {
                             self.step(-1);
                         }
-                        self.input_buttons.page = Some(
-                            ui.button(format!(
-                                "{} / {}",
-                                self.page_name(self.nav.page),
-                                self.nav.count
-                            ))
-                            .on_hover_ui(|ui| {
-                                ui.set_max_width(ui.spacing().tooltip_width);
-                                ui.label(format!(
-                                    "Go to page · :\n{}",
-                                    self.labels.label(self.nav.page).unwrap_or_default()
-                                ));
-                            })
-                            .id,
-                        );
                         if ui.button("›").on_hover_text("Next page · J / ]").clicked() {
                             self.step(1);
                         }
@@ -2397,6 +2382,27 @@ impl Folio {
                         ));
                     }
                     ui.separator();
+                    if self.nav.count > 0 {
+                        self.input_buttons.page = Some(
+                            ui.add(
+                                egui::Button::new(format!(
+                                    "{} / {}",
+                                    self.page_name(self.nav.page),
+                                    self.nav.count
+                                ))
+                                .frame(false),
+                            )
+                            .on_hover_ui(|ui| {
+                                ui.set_max_width(ui.spacing().tooltip_width);
+                                ui.label(format!(
+                                    "Go to page · :\n{}",
+                                    self.labels.label(self.nav.page).unwrap_or_default()
+                                ));
+                            })
+                            .id,
+                        );
+                        ui.separator();
+                    }
                     if self.loading && self.reloading {
                         ui.spinner();
                         ui.label("Reloading document…");
@@ -2405,15 +2411,7 @@ impl Folio {
                     {
                         ui.label(message);
                         context.request_repaint_after(Duration::from_secs(5) - at.elapsed());
-                    } else if self.nav.count > 0 {
-                        if ui
-                            .add(egui::Label::new(self.filename()).sense(egui::Sense::click()))
-                            .on_hover_text("Document information · s")
-                            .clicked()
-                        {
-                            self.show_properties(context);
-                        }
-                    } else {
+                    } else if self.nav.count == 0 {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

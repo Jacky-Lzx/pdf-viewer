@@ -92,9 +92,9 @@ def run(binary):
                 expect(1)
                 keyboard.key(0xFF1B)
                 keyboard.key("9"); keyboard.key("9"); keyboard.key("m")
-                click_burst((370, 28), "4", enter=True)
+                click_burst((130, 805), "4", enter=True)
                 expect(3)
-                print("PASS: same-frame mouse click plus chapter/search text, toolbar search/page input, actual clipboard content, immediate Enter, no reader action leakage and Escape focus release")
+                print("PASS: same-frame mouse click plus chapter/search text, toolbar search and bottom page input, actual clipboard content, immediate Enter, no reader action leakage and Escape focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
