@@ -73,6 +73,10 @@ name = "search_snippet"
 harness = false
 
 [[bench]]
+name = "search_result_text"
+harness = false
+
+[[bench]]
 name = "pdf_strings"
 harness = false
 

@@ -1,5 +1,9 @@
 /// Keep 32 preceding and 80 following Unicode scalars, including the match start.
-pub(super) fn snippet(text: &str, start: usize) -> String {
+pub(super) fn snippet(
+    text: &str,
+    matched: std::ops::Range<usize>,
+) -> (String, std::ops::Range<usize>) {
+    let start = matched.start;
     let first = text[..start]
         .char_indices()
         .rev()
@@ -9,7 +13,12 @@ pub(super) fn snippet(text: &str, start: usize) -> String {
         .char_indices()
         .nth(80)
         .map_or(text.len(), |(offset, _)| start + offset);
-    text[first..end].replace('\n', " ")
+    // Replacing LF with a space preserves byte offsets, including matches
+    // spanning lines. A long match may extend beyond the preview budget.
+    (
+        text[first..end].replace('\n', " "),
+        start - first..matched.end.min(end) - first,
+    )
 }
 
 #[cfg(test)]
@@ -49,8 +58,25 @@ mod tests {
                 .map(|(offset, _)| offset)
                 .chain(std::iter::once(text.len()))
             {
-                assert_eq!(snippet(&text, start), original(&text, start), "{start}");
+                assert_eq!(
+                    snippet(&text, start..start).0,
+                    original(&text, start),
+                    "{start}"
+                );
             }
         }
+    }
+
+    #[test]
+    fn matched_preview_offsets_preserve_unicode_newlines_and_clipped_long_matches() {
+        let text = format!("{}Straße\n中文{}", "前".repeat(40), "后".repeat(100));
+        let start = text.find("Straße").unwrap();
+        let end = text.find("中文").unwrap() + "中文".len();
+        let (preview, matched) = snippet(&text, start..end);
+        assert_eq!(&preview[matched.clone()], "Straße 中文");
+        assert_eq!(preview[..matched.start], "前".repeat(32));
+        let (preview, matched) = snippet(&text, start..text.len());
+        assert_eq!(matched.end, preview.len());
+        assert_eq!(preview[matched].chars().count(), 80);
     }
 }

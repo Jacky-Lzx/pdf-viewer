@@ -33,6 +33,7 @@ impl Pagewing {
     pub(super) fn restart_search(&mut self) {
         self.revision += 1;
         self.hits.clear();
+        self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
         self.scanned = 0;
@@ -378,6 +379,7 @@ mod tests {
                         page,
                         rects: Vec::new(),
                         snippet: "Rust".into(),
+                        snippet_match: 0..4,
                     })
                     .collect();
                 app.hit_index = Some(1);

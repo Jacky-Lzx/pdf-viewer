@@ -82,6 +82,7 @@ impl Pagewing {
         self.pending_focus = None;
         self.pending_destination = None;
         self.hits = Vec::new();
+        self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
         self.pending_search_jump = None;
@@ -294,6 +295,7 @@ mod tests {
                 page,
                 rects: Vec::new(),
                 snippet: String::new(),
+                snippet_match: 0..0,
             })
             .collect();
         app.query = "previous query ".repeat(2048);

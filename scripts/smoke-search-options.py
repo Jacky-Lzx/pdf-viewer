@@ -235,10 +235,34 @@ def run(binary):
                 time.sleep(0.4)
                 first(); find()
                 expect(0, "mouse option changes restore insensitive substring behavior after restart")
+                # The result list highlights the actual hit inside its excerpt,
+                # including after a query replaces index zero or the theme changes.
+                find("Case 4")
+                expect(3, "unique title result before opening the sidebar")
+                first()
+                keyboard.key("f", ctrl=True)
+                for _ in range(5):
+                    keyboard.key(0xFF09)
+                keyboard.key(0xFF0D)  # Results always opens the sidebar.
+                keyboard.key(0xFF1B)
+
+                def highlighted_points(color):
+                    return [(x, y) for y in range(145, 360, 2) for x in range(20, 240, 4)
+                            if keyboard.pixel((x, y)) == color]
+
+                points = wait_for(lambda: highlighted_points((250, 220, 125)), "light-theme inline result highlight")
+                keyboard.click(points[len(points) // 2])
+                expect(3, "clicking the highlighted excerpt follows its result page")
+                keyboard.key("d")
+                wait_for(lambda: highlighted_points((100, 80, 25)), "dark-theme inline result highlight")
+                keyboard.key("d")
+                find("absent")
+                assert not highlighted_points((250, 220, 125)), "replacement query must clear old highlighted labels"
+                first()
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert json.loads(config_path.read_text())["recent"][0]["page"] == 0
-                print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, actual focused-button visibility and click after 240x240 resize, manual scrolling, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
+                print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, actual focused-button visibility and click after 240x240 resize, manual scrolling, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches, compact buttons and clickable inline result highlights across light/dark themes and replacement queries")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

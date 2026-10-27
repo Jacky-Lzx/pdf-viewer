@@ -46,7 +46,10 @@ fn main() {
             .map(|index| boundaries[(index * 7919) % boundaries.len()])
             .collect();
         for &start in &positions {
-            assert_eq!(snippet::snippet(&text, start), original(&text, start));
+            assert_eq!(
+                snippet::snippet(&text, start..start).0,
+                original(&text, start)
+            );
         }
         let mut times = [Vec::with_capacity(passes), Vec::with_capacity(passes)];
         for pass in 0..passes {
@@ -55,7 +58,7 @@ fn main() {
                 let start = Instant::now();
                 for &position in &positions {
                     black_box(if improved == 1 {
-                        snippet::snippet(black_box(&text), black_box(position))
+                        snippet::snippet(black_box(&text), black_box(position..position)).0
                     } else {
                         original(black_box(&text), black_box(position))
                     });

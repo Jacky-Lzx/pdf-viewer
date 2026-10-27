@@ -472,6 +472,14 @@ impl Pagewing {
                         );
                         let mut selected = None;
                         let row_height = Self::sidebar_row_height(ui);
+                        let font = egui::FontSelection::Default
+                            .resolve_with_fallback(ui.style(), egui::TextStyle::Button.into());
+                        let highlight = if ui.visuals().dark_mode {
+                            Color32::from_rgb(100, 80, 25)
+                        } else {
+                            Color32::from_rgb(250, 220, 125)
+                        };
+                        self.result_text.set_style(font.clone(), highlight);
                         let mut results = egui::ScrollArea::vertical()
                             .id_salt("search-results")
                             .max_height(
@@ -483,20 +491,24 @@ impl Pagewing {
                             );
                         }
                         results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
-                            let mut previous_page = None;
-                            let mut page_name = String::new();
                             for index in range {
                                 let hit = &self.hits[index];
-                                if previous_page != Some(hit.page) {
-                                    page_name = self.page_name(hit.page);
-                                    previous_page = Some(hit.page);
-                                }
+                                let labels = &self.labels;
+                                let label = self.result_text.get_or_insert_with(index, || {
+                                    crate::search_result_text::result_label(
+                                        labels.display_name(hit.page),
+                                        &hit.snippet,
+                                        hit.snippet_match.clone(),
+                                        font.clone(),
+                                        highlight,
+                                    )
+                                });
                                 if ui
                                     .add_sized(
                                         Vec2::new(ui.available_width(), row_height),
                                         egui::Button::selectable(
                                             self.hit_index == Some(index),
-                                            format!("{page_name}   {}", hit.snippet),
+                                            label,
                                         )
                                         .truncate(),
                                     )
@@ -571,6 +583,92 @@ impl Pagewing {
 mod tests {
     use super::*;
     use crate::{destination::Destination, navigation::Navigation, outline::OutlineEntry};
+
+    #[test]
+    fn result_highlights_update_with_queries_themes_and_fonts() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.nav = Navigation::new(2, 0);
+        app.dimensions = vec![[600.0, 800.0]; 2];
+        app.library.sidebar = true;
+        let mut page = crate::text::PageText::default();
+        page.text = "Straße 中文 tail".into();
+        for (query, expected, dark, size) in [
+            ("STRASSE", "Straße", false, 14.0),
+            ("STRASSE", "Straße", true, 14.0),
+            ("STRASSE", "Straße", true, 20.0),
+            ("中文", "中文", false, 14.0),
+        ] {
+            if app.query != query {
+                app.query = query.into();
+                app.restart_search();
+                app.hits = page.search(0, query);
+            }
+            context.set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            context.style_mut(|style| {
+                style
+                    .text_styles
+                    .insert(egui::TextStyle::Button, egui::FontId::proportional(size));
+            });
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1180.0, 820.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |context| {
+                        app.sidebar(context);
+                        egui::CentralPanel::default().show(context, |_| {});
+                    },
+                );
+            }
+            let job = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text.contains("中文 tail") => {
+                        Some(&text.galley.job)
+                    }
+                    _ => None,
+                })
+                .expect("the result row must be painted");
+            let highlighted: Vec<_> = job
+                .sections
+                .iter()
+                .filter(|section| section.format.background != Color32::TRANSPARENT)
+                .collect();
+            assert_eq!(highlighted.len(), 1);
+            assert_eq!(&job.text[highlighted[0].byte_range.clone()], expected);
+            assert_eq!(highlighted[0].format.font_id.size, size);
+            assert_eq!(
+                highlighted[0].format.background,
+                if dark {
+                    Color32::from_rgb(100, 80, 25)
+                } else {
+                    Color32::from_rgb(250, 220, 125)
+                }
+            );
+        }
+        app.clear_document(&context);
+        let label = app.result_text.get_or_insert_with(0, || {
+            egui::text::LayoutJob::simple_singleline(
+                "new document".into(),
+                egui::FontId::default(),
+                Color32::PLACEHOLDER,
+            )
+        });
+        assert_eq!(label.text, "new document");
+    }
 
     #[test]
     fn chapter_focus_keeps_the_input_and_selected_row_visible_in_short_windows() {

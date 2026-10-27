@@ -70,6 +70,8 @@ pub struct SearchHit {
     pub page: usize,
     pub rects: Vec<Rect>,
     pub snippet: String,
+    /// UTF-8 byte range of this hit within the possibly clipped preview.
+    pub snippet_match: Range<usize>,
 }
 
 #[derive(Default)]
@@ -366,10 +368,12 @@ impl PageText {
             }
             cursor.previous = Some((start, end));
             let rects = self.rects_for_range(start..end);
+            let (snippet, snippet_match) = snippet::snippet(&self.text, start..end);
             hits.push(SearchHit {
                 page,
                 rects,
-                snippet: snippet::snippet(&self.text, start),
+                snippet,
+                snippet_match,
             });
         }
         SearchBatch {
@@ -583,6 +587,7 @@ mod tests {
                     assert_eq!(actual.page, reference.page);
                     assert_eq!(actual.rects, reference.rects);
                     assert_eq!(actual.snippet, reference.snippet);
+                    assert_eq!(actual.snippet_match, reference.snippet_match);
                 }
                 assert!(
                     page.search_batch(4, &query, &mut cursor, limit)
@@ -787,7 +792,7 @@ mod tests {
                     .map(|(start, matched)| {
                         (
                             page.rects_for_range(start..start + matched.len()),
-                            snippet::snippet(&page.text, start),
+                            snippet::snippet(&page.text, start..start + matched.len()),
                         )
                     })
                     .collect();
@@ -797,7 +802,7 @@ mod tests {
                     let batch = page.search_batch(number, &query, &mut cursor, 3);
                     for hit in batch.hits {
                         assert_eq!(hit.page, number);
-                        actual.push((hit.rects, hit.snippet));
+                        actual.push((hit.rects, (hit.snippet, hit.snippet_match)));
                     }
                     if batch.complete {
                         break;
@@ -866,6 +871,55 @@ mod tests {
     }
 
     #[test]
+    fn result_highlights_follow_source_scalars_for_case_folding_and_multiline_matches() {
+        let page = PageText {
+            text: "Straße ﬃ İ Σσς 中文\ntail".into(),
+            ..Default::default()
+        };
+        for (query, expected) in [
+            ("STRASSE", vec!["Straße"]),
+            ("FFI", vec!["ﬃ"]),
+            ("i\u{307}", vec!["İ"]),
+            ("σ", vec!["Σ", "σ", "ς"]),
+            ("中文\ntail", vec!["中文 tail"]),
+        ] {
+            for match_case in [false, true] {
+                let hits = page.search_with(
+                    0,
+                    &SearchQuery::new(
+                        query.into(),
+                        SearchOptions {
+                            match_case,
+                            whole_word: false,
+                        },
+                    ),
+                );
+                let matches: Vec<_> = hits
+                    .iter()
+                    .map(|hit| &hit.snippet[hit.snippet_match.clone()])
+                    .collect();
+                let exact: Vec<_> = page
+                    .text
+                    .match_indices(query)
+                    .map(|(_, text)| text.replace('\n', " "))
+                    .collect();
+                if match_case {
+                    assert_eq!(matches, exact, "{query}");
+                } else {
+                    assert_eq!(matches, expected, "{query}");
+                }
+            }
+        }
+        let long = PageText {
+            text: "中".repeat(120),
+            ..Default::default()
+        };
+        let hit = long.search(0, &"中".repeat(100)).remove(0);
+        assert_eq!(hit.snippet_match, 0.."中".len() * 80);
+        assert_eq!(&hit.snippet[hit.snippet_match], "中".repeat(80));
+    }
+
+    #[test]
     fn page_hit_ranges_preserve_global_selection_indices() {
         let hits: Vec<_> = [0, 0, 2, 2, 2, 7]
             .into_iter()
@@ -873,6 +927,7 @@ mod tests {
                 page,
                 rects: Vec::new(),
                 snippet: String::new(),
+                snippet_match: 0..0,
             })
             .collect();
         assert_eq!(page_hits(&hits, 0), 0..2);
@@ -954,6 +1009,7 @@ mod tests {
                     assert_eq!(actual.page, expected.page);
                     assert_eq!(actual.rects, expected.rects);
                     assert_eq!(actual.snippet, expected.snippet);
+                    assert_eq!(actual.snippet_match, expected.snippet_match);
                 }
             }
         }
@@ -1033,6 +1089,7 @@ mod tests {
                     assert_eq!(actual.page, expected.page);
                     assert_eq!(actual.rects, expected.rects);
                     assert_eq!(actual.snippet, expected.snippet);
+                    assert_eq!(actual.snippet_match, expected.snippet_match);
                 }
             }
         }

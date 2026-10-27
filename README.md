@@ -166,6 +166,8 @@ night = []                 # 停用该动作的快捷键
 
 搜索框与搜索按钮之间可用 Tab / Shift+Tab 移动焦点，Enter 或 Space 激活按钮。横向控件栏会在焦点变化或窗口变窄时显露当前控件；手动滚动后保留滚动位置。切换 Aa / Word 后焦点回到搜索框，可继续输入查询；按钮上的空格不会滚动页面或写进搜索词。
 
+侧栏搜索结果会在摘要中标出当前命中的原文，支持 Unicode 大小写折叠，例如 `STRASSE` 对应 `Straße`。结果行保留少量前文，让命中词靠近行首；悬停可查看较完整的上下文。浅色与深色界面均提供高亮，点击结果跳转到对应页面。
+
 按 `Ctrl/Cmd+Alt+Z` 或点击底栏的缩放比例可直接输入百分比，例如 `125` 或 `125%`，按 Enter 或点击 Apply 应用；也可选择 50%、100%、150%、200% 预设。快捷键可通过配置中的 `zoom` 动作更改或停用。缩放保留视口中心，支持单页、连续和双页模式。超出页面允许范围的比例会限制到实际可用值；错误输入保留在框内，Escape 或 Cancel 放弃修改。
 
 缩放窗口在 240 × 240 的最小阅读窗口中同时显示输入框、错误提示、全部预设及 Apply / Cancel，无需滚动。按 Tab 可依次选择预设与操作，Enter 执行；调整窗口尺寸保留正在编辑的比例。
@@ -345,6 +347,8 @@ cargo bench --locked --bench sparse_selection -- 9
 cargo bench --locked --bench search_index -- 9
 # 搜索摘要，比较临时字符串拼接与直接截取上下文
 cargo bench --locked --bench search_snippet -- 9
+# 搜索结果文字和高亮格式，比较重建、有界缓存、换行任务复制和分配次数
+cargo bench --locked --bench search_result_text -- 9
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
 cargo bench --locked --bench search_matching -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径
