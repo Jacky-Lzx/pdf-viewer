@@ -38,6 +38,19 @@ impl Pagewing {
         dialog::window(context, "Recent documents", "Recent", 580.0)
             .open(&mut open)
             .show(context, |ui| {
+                let viewport_id = ui.make_persistent_id("recent-viewport");
+                let resized = ui.data_mut(|data| {
+                    let previous = data.get_temp::<egui::Vec2>(viewport_id);
+                    if previous != Some(size) {
+                        data.insert_temp(viewport_id, size);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                // The result viewport shrinks with the screen budget. Reveal
+                // the selection again without overriding ordinary wheel scroll.
+                picker.reveal |= resized;
                 let (input, _) = super::shortcuts::text_input(
                     ui,
                     egui::Id::new("pagewing-recent-input"),
@@ -64,7 +77,7 @@ impl Pagewing {
                         picker.len()
                     ));
                 }
-                let reveal = std::mem::take(&mut picker.reveal);
+                let reveal = !ui.is_sizing_pass() && std::mem::take(&mut picker.reveal);
                 egui::ScrollArea::vertical()
                     .id_salt("pagewing-recent-results")
                     .max_height((size.y - if compact { 180.0 } else { 230.0 }).clamp(32.0, 280.0))
@@ -149,15 +162,22 @@ mod tests {
             .collect()
     }
 
-    fn frame(app: &mut Pagewing, context: &egui::Context, mut events: Vec<egui::Event>) {
+    fn frame(app: &mut Pagewing, context: &egui::Context, events: Vec<egui::Event>) {
+        let _ = sized_frame(app, context, egui::vec2(1180.0, 820.0), events);
+    }
+
+    fn sized_frame(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+        mut events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
         let mut deferred = std::mem::take(&mut app.deferred_input);
         deferred.append(&mut events);
-        let _ = context.run(
+        context.run(
             egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1180.0, 820.0),
-                )),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                time: Some(context.input(|input| input.time) + 0.25),
                 events: deferred,
                 ..Default::default()
             },
@@ -166,7 +186,84 @@ mod tests {
                 app.recent_dialog(context);
                 egui::CentralPanel::default().show(context, |_| {});
             },
+        )
+    }
+
+    fn selected_row(context: &egui::Context, output: &egui::FullOutput) -> Option<egui::Rect> {
+        let selected = context.style().visuals.selection.bg_fill;
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == selected
+                    && rect.rect.width() > 60.0
+                    && shape.clip_rect.contains_rect(rect.rect) =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn resizing_keeps_the_selected_recent_document_visible() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.recent_picker =
+            Some(RecentPicker::new((0..24).map(|index| {
+                directory.path().join(format!("book-{index}.pdf"))
+            })));
+        for _ in 0..4 {
+            frame(&mut app, &context, Vec::new());
+        }
+        frame(&mut app, &context, vec![egui::Event::Paste("book".into())]);
+        app.recent_picker.as_mut().unwrap().step(23);
+        let mut output = egui::FullOutput::default();
+        for size in [
+            egui::vec2(1180.0, 820.0),
+            egui::vec2(860.0, 240.0),
+            egui::vec2(240.0, 240.0),
+        ] {
+            for _ in 0..4 {
+                output = sized_frame(&mut app, &context, size, Vec::new());
+            }
+            assert!(
+                selected_row(&context, &output).is_some(),
+                "selected recent row must be visible at {size:?}"
+            );
+            assert_eq!(app.recent_picker.as_ref().unwrap().selected, 23);
+            assert_eq!(app.recent_picker.as_ref().unwrap().query, "book");
+            assert!(
+                context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")))
+            );
+        }
+        let pos = selected_row(&context, &output).unwrap().center();
+        let size = egui::vec2(240.0, 240.0);
+        sized_frame(
+            &mut app,
+            &context,
+            size,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 4000.0),
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
         );
+        for _ in 0..4 {
+            output = sized_frame(&mut app, &context, size, Vec::new());
+        }
+        assert!(
+            selected_row(&context, &output).is_none(),
+            "do not undo manual scrolling"
+        );
+        assert_eq!(app.recent_picker.as_ref().unwrap().selected, 23);
+        for _ in 0..4 {
+            output = sized_frame(&mut app, &context, egui::vec2(1180.0, 820.0), Vec::new());
+        }
+        assert!(selected_row(&context, &output).is_some());
     }
 
     #[test]

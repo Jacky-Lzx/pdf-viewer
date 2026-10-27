@@ -57,12 +57,20 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
 
-            def selected_row_visible(minimum=False):
-                for y in (range(100, 184, 2) if minimum else range(150, 480, 2)):
-                    colors = [keyboard.pixel((x, y)) for x in ((40, 100, 170) if minimum else (200, 400, 600))]
+            def selected_rows(size=(860, 540)):
+                width, height = size
+                gap = min(80, (width - 64) // 4)
+                rows = []
+                for y in range(80, height - 40, 2):
+                    colors = [keyboard.pixel((x, y)) for x in (width // 2 - gap, width // 2, width // 2 + gap)]
                     if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
-                        return True
-                return False
+                        rows.append(y)
+                return rows
+
+            def selected_row_visible(size=(860, 540)):
+                # Require a broad fill on several scanlines, excluding thin
+                # focus borders and green text in the input or title.
+                return len(selected_rows(size)) >= 6
 
             try:
                 window = wait_for(lambda: keyboard.focus("alpha.pdf"), "recent picker reader window")
@@ -98,6 +106,21 @@ def run(binary):
                 for _ in range(23):
                     keyboard.key("j", ctrl=True, delay=0.015)
                 wait_for(selected_row_visible, "last selected recent document is drawn in the compact window")
+                for size in ((1180, 820), (860, 240), (240, 240)):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, *size)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.2)
+                    wait_for(lambda: selected_row_visible(size), f"selected result remains visible after resize to {size}")
+                rows = selected_rows((240, 240))
+                keyboard.wheel((120, rows[len(rows) // 2]), down=False, steps=20)
+                wait_for(lambda: not selected_row_visible((240, 240)), "manual scrolling can hide the selected result")
+                time.sleep(0.3)
+                assert not selected_row_visible((240, 240)), "ordinary redraw must preserve manual scroll"
+                for size in ((240, 400), (240, 240), (860, 540)):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, *size)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.2)
+                    wait_for(lambda: selected_row_visible(size), f"resizing reveals the retained selection at {size}")
                 keyboard.key(0xFF0D)
                 expect(paths[-1], 5, "last of 24 documents opens with its saved reading state")
                 picker("jkgmissing")
@@ -113,7 +136,7 @@ def run(binary):
                 picker()
                 for _ in range(23):
                     keyboard.key("j", ctrl=True, delay=0.015)
-                wait_for(lambda: selected_row_visible(minimum=True), "last result stays visible at minimum size")
+                wait_for(lambda: selected_row_visible((240, 240)), "last result stays visible at minimum size")
                 keyboard.key(0xFF0D)
                 expect(paths[-2], 4, "last recent result opens at minimum size")
                 picker("alpha")
@@ -143,7 +166,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
