@@ -154,6 +154,8 @@ night = []                 # 停用该动作的快捷键
 
 配置格式、字段、按键或绑定冲突有误时，阅读器显示包含配置路径的错误，并使用内置默认设置，不覆盖原文件。文本编辑快捷键、数字计数及 `gg`、`z…`、`m…`、`'…` 等 Vim 组合命令保留。自定义阅读快捷键在输入框中不会触发阅读操作；帮助窗口和按钮提示会显示配置的按键。下表列出默认绑定。
 
+底部错误栏的长消息可滚动，Copy error 可复制完整诊断，Dismiss 关闭提示。页面渲染失败可重画页面，文档读取失败可重开或重载；重载按钮提示显示实际配置的快捷键。窄窗口将按钮简写为 Retry / Copy，操作含义保留在悬停提示中。
+
 ## 键盘操作
 
 窗口最小尺寸为 240 × 240 像素，支持同时缩窄宽度和高度。顶部工具栏和搜索栏在按钮放不下时可横向滚动：将指针移到栏内使用鼠标滚轮、触控板左右滑动，或拖动栏底部的横向滚动条。底部缩放与 View 显示模式菜单在窄窗口中也可横向滚动访问；侧栏内容可纵向滚动。
@@ -397,6 +399,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py tar
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-history.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-password.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-errors.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-vim-view.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-percentage.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-relative.py target/release/pagewing

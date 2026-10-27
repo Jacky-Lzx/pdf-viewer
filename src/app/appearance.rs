@@ -216,6 +216,11 @@ pub(super) fn apply(context: &egui::Context, dark: bool) {
     visuals.menu_corner_radius = 10.into();
     visuals.weak_text_color = Some(muted);
     visuals.hyperlink_color = accent;
+    visuals.error_fg_color = if dark {
+        Color32::from_rgb(255, 160, 140)
+    } else {
+        Color32::from_rgb(165, 45, 35)
+    };
     visuals.selection.bg_fill = tint;
     visuals.selection.stroke = Stroke::new(1.0_f32, accent);
     for widget in [

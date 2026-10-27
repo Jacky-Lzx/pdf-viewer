@@ -19,6 +19,11 @@ pub(super) enum InputButton {
     Zoom,
     ReloadChanged,
     DismissChange,
+    RetryError,
+    DismissError,
+    CopyError,
+    DismissConfig,
+    CopyConfig,
 }
 
 #[derive(Default)]
@@ -31,6 +36,11 @@ pub(super) struct InputButtons {
     pub zoom: Option<Id>,
     pub reload_changed: Option<Id>,
     pub dismiss_change: Option<Id>,
+    pub retry_error: Option<Id>,
+    pub dismiss_error: Option<Id>,
+    pub copy_error: Option<Id>,
+    pub dismiss_config: Option<Id>,
+    pub copy_config: Option<Id>,
 }
 
 impl InputButtons {
@@ -44,6 +54,11 @@ impl InputButtons {
             (self.zoom, InputButton::Zoom),
             (self.reload_changed, InputButton::ReloadChanged),
             (self.dismiss_change, InputButton::DismissChange),
+            (self.retry_error, InputButton::RetryError),
+            (self.dismiss_error, InputButton::DismissError),
+            (self.copy_error, InputButton::CopyError),
+            (self.dismiss_config, InputButton::DismissConfig),
+            (self.copy_config, InputButton::CopyConfig),
         ] {
             let Some(response) = id.and_then(|id| context.read_response(id)) else {
                 continue;

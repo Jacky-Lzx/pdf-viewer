@@ -4,6 +4,7 @@ mod comments;
 mod config;
 mod continuous;
 mod dialog;
+mod errors;
 mod help;
 mod input_dialogs;
 mod properties;
@@ -20,7 +21,6 @@ mod zoom;
 
 use crate::{
     cache::TextureCache,
-    document::LoadError,
     link_hints::LinkHints,
     links::LinkTarget,
     navigation::{Fit, Navigation},
@@ -90,7 +90,7 @@ pub struct Pagewing {
     file_changed: bool,
     auto_reload_pending: bool,
     automatic_reload: bool,
-    error: Option<String>,
+    error: Option<errors::Notice>,
     configuration_error: Option<String>,
     message: Option<(String, Instant)>,
     pan: Vec2,
@@ -950,7 +950,7 @@ impl Pagewing {
                                 }
                             });
                         }
-                        Err(error) => self.error = Some(error),
+                        Err(error) => self.error = Some(error.into()),
                     }
                 }
                 Event::FileChanged { id } if id == self.id => {
@@ -1106,38 +1106,8 @@ impl Pagewing {
                         self.notify(format!("Copied text from page {}", page + 1));
                     }
                 }
-                Event::Error { id, error, opening } if id == self.id => {
-                    if self.loading && !opening {
-                        continue;
-                    }
-                    let automatic = opening && self.automatic_reload;
-                    if opening && self.loading && self.reloading {
-                        self.restart_search();
-                        self.requested = None;
-                        self.thumbnails.invalidate_requests();
-                    }
-                    if opening {
-                        self.loading = false;
-                        self.automatic_reload = false;
-                        if !error.needs_password() {
-                            self.synctex.cancel_pending();
-                        }
-                    }
-                    if opening && error.needs_password() && !automatic {
-                        self.open_password(
-                            context,
-                            matches!(error, LoadError::PasswordRequired { rejected: true }),
-                        );
-                    }
-                    self.error = if opening && error.needs_password() && !automatic {
-                        None
-                    } else {
-                        Some(if automatic && error.needs_password() {
-                            "PDF changed but needs a password. Press Ctrl/Cmd+R to unlock the new version.".into()
-                        } else {
-                            error.to_string()
-                        })
-                    };
+                Event::Error { id, error } if id == self.id => {
+                    self.worker_error(context, error);
                 }
                 _ => {}
             }
@@ -1196,6 +1166,19 @@ impl Pagewing {
             Some(shortcuts::InputButton::DismissChange) => {
                 self.file_changed = false;
                 self.auto_reload_pending = false;
+            }
+            Some(shortcuts::InputButton::RetryError) => self.retry_error(),
+            Some(shortcuts::InputButton::DismissError) => self.error = None,
+            Some(shortcuts::InputButton::CopyError) => {
+                if let Some(error) = &self.error {
+                    context.copy_text(error.message.clone());
+                }
+            }
+            Some(shortcuts::InputButton::DismissConfig) => self.configuration_error = None,
+            Some(shortcuts::InputButton::CopyConfig) => {
+                if let Some(error) = &self.configuration_error {
+                    context.copy_text(error.clone());
+                }
             }
             None => {}
         }
@@ -2962,44 +2945,7 @@ impl Pagewing {
         self.page_dialog(context);
         self.password_dialog(context);
         self.help_window(context);
-        if let Some(error) = self.configuration_error.clone() {
-            egui::TopBottomPanel::bottom("configuration-error").show(context, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(Color32::from_rgb(200, 75, 55), error);
-                    if ui.button("Dismiss").clicked() {
-                        self.configuration_error = None;
-                    }
-                });
-            });
-        }
-        if let Some(error) = self.error.clone() {
-            egui::TopBottomPanel::bottom("error").show(context, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(Color32::from_rgb(200, 75, 55), error);
-                    if ui.button("Dismiss").clicked() {
-                        self.error = None;
-                    }
-                    if !self.reading.path.as_os_str().is_empty()
-                        && ui
-                            .button(if self.nav.count == 0 {
-                                "Retry open"
-                            } else if self.reloading {
-                                "Retry reload"
-                            } else {
-                                "Retry page"
-                            })
-                            .clicked()
-                    {
-                        if self.nav.count == 0 || self.reloading {
-                            self.reload();
-                        } else {
-                            self.requested = None;
-                            self.error = None;
-                        }
-                    }
-                });
-            });
-        }
+        self.error_panels(context);
     }
 }
 

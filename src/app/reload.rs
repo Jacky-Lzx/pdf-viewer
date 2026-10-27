@@ -240,7 +240,9 @@ mod tests {
         assert_eq!(app.error, error);
         fs::remove_file(&path).unwrap();
         wait(&mut app, &context, |a| {
-            a.error.as_ref().is_some_and(|e| e.contains("Cannot read"))
+            a.error
+                .as_ref()
+                .is_some_and(|e| e.message.contains("Cannot read"))
         });
         assert_eq!(title(&app), "Edition one");
         fs::write(&path, pdf("Edition two")).unwrap();
@@ -292,7 +294,7 @@ mod tests {
                 app.automatic_reload = automatic;
                 wait(&mut app, &context, |a| !a.loading && a.error.is_some());
                 assert!(app.password_input.is_none());
-                assert!(!app.error.as_ref().unwrap().contains("password"));
+                assert!(!app.error.as_ref().unwrap().message.contains("password"));
                 assert_eq!(title(&app), "Edition one");
             }
         }
@@ -346,7 +348,13 @@ mod tests {
             }],
         );
         assert!(app.password_input.is_none());
-        assert!(app.error.as_ref().unwrap().contains("Ctrl/Cmd+R"));
+        assert!(
+            app.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("needs a password")
+        );
         app.reload();
         wait(&mut app, &context, |a| a.password_input.is_some());
         assert!(app.error.is_none());
@@ -361,7 +369,7 @@ mod tests {
         wait(&mut app, &context, |a| !a.loading && a.error.is_some());
         assert!(app.password_input.is_none());
         assert_eq!(title(&app), "Edition one");
-        assert!(app.error.as_ref().unwrap().contains("password"));
+        assert!(app.error.as_ref().unwrap().message.contains("password"));
         app.reload();
         wait(&mut app, &context, |a| a.password_input.is_some());
         assert!(!app.automatic_reload);

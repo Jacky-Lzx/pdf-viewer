@@ -1000,7 +1000,7 @@ mod tests {
         assert!(
             app.error
                 .as_ref()
-                .is_some_and(|error| error.contains("changed on disk"))
+                .is_some_and(|error| error.message.contains("changed on disk"))
         );
         assert!(app.comments.editor.is_some());
         assert_eq!(

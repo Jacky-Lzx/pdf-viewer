@@ -106,7 +106,7 @@ impl Pagewing {
             if id == self.id {
                 match result {
                     Ok(message) => self.notify(message),
-                    Err(error) => self.error = Some(error),
+                    Err(error) => self.error = Some(error.into()),
                 }
             }
         }

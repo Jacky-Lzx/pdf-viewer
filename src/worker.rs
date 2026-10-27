@@ -15,6 +15,13 @@ use std::{
     time::Instant,
 };
 
+/// Recovery depends on whether one render failed or the whole session stopped.
+pub enum Failure {
+    Open(LoadError),
+    Render(String),
+    Session,
+}
+
 pub enum Event {
     Comments {
         id: u64,
@@ -73,8 +80,7 @@ pub enum Event {
     },
     Error {
         id: u64,
-        error: LoadError,
-        opening: bool,
+        error: Failure,
     },
 }
 
@@ -325,8 +331,7 @@ impl Worker {
                             &context,
                             Event::Error {
                                 id,
-                                error,
-                                opening: true,
+                                error: Failure::Open(error),
                             },
                         ),
                     }
@@ -341,8 +346,7 @@ impl Worker {
                             &context,
                             Event::Error {
                                 id: *active_id,
-                                error: "The PDF engine could not process this document.".into(),
-                                opening: false,
+                                error: Failure::Session,
                             },
                         );
                     }
@@ -693,8 +697,7 @@ fn session(
                             context,
                             Event::Error {
                                 id,
-                                error: message.into(),
-                                opening: false,
+                                error: Failure::Render(message),
                             },
                         );
                     }
@@ -1189,7 +1192,10 @@ mod tests {
         });
         assert!(matches!(
             receive(&worker),
-            Event::Error { opening: false, .. }
+            Event::Error {
+                error: Failure::Render(_),
+                ..
+            }
         ));
         assert!(matches!(
             receive(&worker),
@@ -1298,7 +1304,7 @@ mod tests {
             receive(&worker),
             Event::Error {
                 id: 7,
-                opening: true,
+                error: Failure::Open(_),
                 ..
             }
         ));
@@ -1351,7 +1357,7 @@ mod tests {
             receive(&worker),
             Event::Error {
                 id: 2,
-                opening: true,
+                error: Failure::Open(_),
                 ..
             }
         ));
@@ -1405,7 +1411,7 @@ mod tests {
             receive(&worker),
             Event::Error {
                 id: 31,
-                opening: true,
+                error: Failure::Open(_),
                 ..
             }
         ));
@@ -1512,7 +1518,7 @@ mod tests {
             receive(&worker),
             Event::Error {
                 id: 7,
-                opening: false,
+                error: Failure::Render(_),
                 ..
             }
         ));
@@ -1634,7 +1640,7 @@ mod tests {
             receive(&worker),
             Event::Error {
                 id: 12,
-                opening: true,
+                error: Failure::Open(_),
                 ..
             }
         ));

@@ -97,7 +97,9 @@ impl Pagewing {
 
     pub(super) fn close_password_input(&mut self, context: &egui::Context) {
         if self.password_input.take().is_some() {
-            self.error = Some("This PDF needs a password. Press Ctrl/Cmd+R to unlock it.".into());
+            self.error = Some(super::errors::Notice::retry_document(
+                "This PDF needs a password.",
+            ));
         }
         context.memory_mut(|memory| memory.surrender_focus(password_id()));
     }

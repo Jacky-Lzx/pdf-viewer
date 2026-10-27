@@ -64,7 +64,7 @@ jobs:
         include:
           - shard: 1
             tests: >-
-              vim-view fit-height paths close properties cli load-cancel
+              vim-view fit-height paths close properties cli load-cancel errors
           - shard: 2
             tests: >-
               search-options percentage bookmarks link-copy link-hints
