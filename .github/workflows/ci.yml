@@ -19,7 +19,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Linux desktop dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev xvfb libxtst6 libglib2.0-bin desktop-file-utils shellcheck
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev xvfb libxtst6 libglib2.0-bin desktop-file-utils shellcheck
       - name: Linux installer checks
         if: runner.os == 'Linux'
         run: shellcheck scripts/install-linux.sh
