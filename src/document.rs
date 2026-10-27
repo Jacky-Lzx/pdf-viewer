@@ -6,6 +6,32 @@ use std::path::Path;
 
 pub const MAX_PIXELS: f64 = 16_000_000.0;
 
+pub fn check_output_path(source: &Path, output: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    let same = {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(source), std::fs::metadata(output)) {
+            (Ok(source), Ok(output)) => {
+                source.dev() == output.dev() && source.ino() == output.ino()
+            }
+            _ => false,
+        }
+    };
+    #[cfg(not(unix))]
+    let same = source
+        .canonicalize()
+        .ok()
+        .zip(output.canonicalize().ok())
+        .is_some_and(|(source, output)| source == output);
+    if same {
+        return Err(format!(
+            "Cannot export PNG over the source PDF: {}",
+            output.display()
+        ));
+    }
+    Ok(())
+}
+
 pub struct RasterSize {
     pub scale: f32,
     pub size: [usize; 2],
@@ -185,6 +211,33 @@ fn encode_png(bitmap: &Bitmap, output: impl std::io::Write) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_output_rejects_the_source_file_and_accepts_distinct_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("文档.pdf");
+        std::fs::write(&source, b"source PDF").unwrap();
+        assert!(check_output_path(&source, &source).is_err());
+        assert!(check_output_path(&source, &root.path().join("./文档.pdf")).is_err());
+        let output = root.path().join("image.png");
+        assert!(check_output_path(&source, &output).is_ok());
+        std::fs::write(&output, b"source PDF").unwrap();
+        assert!(check_output_path(&source, &output).is_ok());
+        let missing = root.path().join("missing.pdf");
+        assert!(check_output_path(&missing, &missing).is_ok());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let hard = root.path().join("hard.png");
+            std::fs::hard_link(&source, &hard).unwrap();
+            assert!(check_output_path(&source, &hard).is_err());
+            let link = root.path().join("symlink.png");
+            symlink(&source, &link).unwrap();
+            assert!(check_output_path(&source, &link).is_err());
+            assert!(check_output_path(&link, &source).is_err());
+        }
+        assert_eq!(std::fs::read(source).unwrap(), b"source PDF");
+    }
 
     #[test]
     fn cancellable_loading_preserves_documents_passwords_and_read_errors() {

@@ -51,6 +51,20 @@ def run(binary):
         ]:
             invoke(args, error)
         assert not output.exists(), "invalid commands must not create output files"
+        source_bytes = document.read_bytes()
+        aliases = [document, Path(".") / document.name]
+        hard = root / "same-inode.png"
+        hard.hardlink_to(document)
+        link = root / "same-target.png"
+        link.symlink_to(document)
+        aliases += [hard, link]
+        for alias in aliases:
+            invoke(["--render", document, alias, "1", "32"],
+                   "Cannot export PNG over the source PDF")
+            assert document.read_bytes() == source_bytes, "failed export must preserve the source PDF"
+        invoke(["--render", link, document, "1", "32"],
+               "Cannot export PNG over the source PDF")
+        assert document.read_bytes() == source_bytes
         assert "READING" in invoke(["--text", document, "3"])
         invoke(["--render", document, output, "1", "64"])
         data = output.read_bytes()
@@ -126,7 +140,7 @@ def run(binary):
                 assert keyboard.clipboard() == invoke(["--text", document, "6"]).removesuffix("\n")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: CLI validation/exports, special paths, physical start page and clamping, saved-view override, retained zoom/rotation/bookmarks/marks and ordinary session restore")
+                print("PASS: CLI validation/exports, source PDF preservation through path aliases, special paths, physical start page and clamping, saved-view override, retained zoom/rotation/bookmarks/marks and ordinary session restore")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

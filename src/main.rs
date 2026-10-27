@@ -69,6 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn headless(command: cli::Command) -> Result<(), String> {
     let path = command.path().ok_or("Missing PDF path")?;
+    if let cli::Command::Render { output, .. } = &command {
+        document::check_output_path(path, output)?;
+    }
     let start = Instant::now();
     let pdf = document::load(path, "")?;
     let load_ms = start.elapsed().as_secs_f64() * 1000.0;
