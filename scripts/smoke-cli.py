@@ -76,6 +76,28 @@ def run(binary):
             # Dropping the encoder used to swallow ENOSPC and report success.
             invoke(["--render", document, "/dev/full", "1", "1"], "Cannot write /dev/full")
         assert "6 pages × 1 passes" in invoke(["--benchmark", document, "1"])
+        pipe_image = root / "pipe.png"
+        for args in [
+            ["--help"], ["--version"], ["--text", document, "1"],
+            ["--benchmark", document, "1"],
+            ["--render", document, pipe_image, "1", "32"],
+        ]:
+            reader, writer = os.pipe()
+            os.close(reader)  # No reader exists before the process starts.
+            try:
+                result = subprocess.run([str(binary), *map(str, args)], cwd=root,
+                                        env=environment, stdout=writer, stderr=subprocess.PIPE,
+                                        text=True, timeout=30)
+            finally:
+                os.close(writer)
+            assert result.returncode == 0 and not result.stderr, (args, result.returncode, result.stderr)
+        assert pipe_image.read_bytes().endswith(b"\0\0\0\0IEND\xaeB`\x82")
+        if sys.platform.startswith("linux"):
+            with open("/dev/full", "wb") as full:
+                result = subprocess.run([str(binary), "--help"], stdout=full,
+                                        stderr=subprocess.PIPE, text=True, timeout=30)
+            assert result.returncode != 0 and "Cannot write standard output" in result.stderr
+            assert "panicked" not in result.stderr
 
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
@@ -140,7 +162,7 @@ def run(binary):
                 assert keyboard.clipboard() == invoke(["--text", document, "6"]).removesuffix("\n")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: CLI validation/exports, source PDF preservation through path aliases, special paths, physical start page and clamping, saved-view override, retained zoom/rotation/bookmarks/marks and ordinary session restore")
+                print("PASS: CLI validation/exports, closed pipes, real stdout write errors, source PDF preservation through path aliases, special paths, physical start page and clamping, saved-view override, retained zoom/rotation/bookmarks/marks and ordinary session restore")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

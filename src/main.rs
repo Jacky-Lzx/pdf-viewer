@@ -17,6 +17,7 @@ mod links;
 mod navigation;
 mod outline;
 mod outline_view;
+mod output;
 mod page_labels;
 mod pdf_string;
 mod recent;
@@ -37,13 +38,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let (path, page) = match cli::parse(&args)? {
         cli::Command::Help => {
-            println!(
+            output::line(format_args!(
                 "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
-            );
+            ))?;
             return Ok(());
         }
         cli::Command::Version => {
-            println!("Folio {}", env!("CARGO_PKG_VERSION"));
+            output::line(format_args!("Folio {}", env!("CARGO_PKG_VERSION")))?;
             return Ok(());
         }
         cli::Command::Gui { path, page } => (path, page),
@@ -80,14 +81,14 @@ fn headless(command: cli::Command) -> Result<(), String> {
             if page >= pdf.pages().len() {
                 return Err("Page out of range".into());
             }
-            println!(
+            output::line(format_args!(
                 "{}",
                 text::extract(
                     &pdf.pages()[page],
                     &hayro::hayro_interpret::InterpreterCache::new()
                 )
                 .text
-            );
+            ))?;
         }
         cli::Command::Render {
             output,
@@ -109,12 +110,12 @@ fn headless(command: cli::Command) -> Result<(), String> {
             )?;
             let elapsed = start.elapsed();
             document::write_png(&bitmap, &output)?;
-            println!(
+            output::line(format_args!(
                 "{} × {} · load {load_ms:.1} ms · render {:.1} ms",
                 bitmap.size[0],
                 bitmap.size[1],
                 elapsed.as_secs_f64() * 1000.0
-            );
+            ))?;
         }
         cli::Command::Benchmark { iterations, .. } => {
             let cache = hayro::RenderCache::new();
@@ -136,13 +137,13 @@ fn headless(command: cli::Command) -> Result<(), String> {
                 }
             }
             times.sort_by(f64::total_cmp);
-            println!(
+            output::line(format_args!(
                 "{} pages × {iterations} passes · load {load_ms:.1} ms · mean {:.1} ms · median {:.1} ms · p95 {:.1} ms",
                 pdf.pages().len(),
                 times.iter().sum::<f64>() / times.len() as f64,
                 times[times.len() / 2],
                 times[((times.len() - 1) as f64 * 0.95).ceil() as usize]
-            );
+            ))?;
         }
         _ => return Err("Expected a document export command".into()),
     }
