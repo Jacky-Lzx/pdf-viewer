@@ -7,6 +7,7 @@ const LIMIT: usize = 256;
 pub struct ViewHistory {
     back: VecDeque<ReadingMark>,
     forward: VecDeque<ReadingMark>,
+    previous_jump: Option<ReadingMark>,
 }
 
 fn same_view(left: &ReadingMark, right: &ReadingMark) -> bool {
@@ -31,8 +32,16 @@ fn push(stack: &mut VecDeque<ReadingMark>, position: ReadingMark) {
 
 impl ViewHistory {
     pub fn record(&mut self, position: ReadingMark) {
+        self.previous_jump = Some(position.clone());
         push(&mut self.back, position);
         self.forward.clear();
+    }
+
+    pub fn previous_jump(&self, count: usize) -> Option<ReadingMark> {
+        self.previous_jump
+            .as_ref()
+            .filter(|position| position.page < count)
+            .cloned()
     }
 
     pub fn go(&mut self, forward: bool, current: ReadingMark, count: usize) -> Option<ReadingMark> {
@@ -43,6 +52,7 @@ impl ViewHistory {
         };
         while let Some(position) = from.pop_back() {
             if position.page < count && !same_view(&position, &current) {
+                self.previous_jump = Some(current.clone());
                 push(to, current);
                 return Some(position);
             }
@@ -53,6 +63,13 @@ impl ViewHistory {
     pub fn retain_pages(&mut self, count: usize) {
         self.back.retain(|position| position.page < count);
         self.forward.retain(|position| position.page < count);
+        if self
+            .previous_jump
+            .as_ref()
+            .is_some_and(|position| position.page >= count)
+        {
+            self.previous_jump = None;
+        }
     }
 }
 
@@ -68,6 +85,57 @@ mod tests {
             rotation: 1,
             offset: [0.25, offset],
         }
+    }
+
+    #[test]
+    fn previous_jump_toggles_complete_views_including_same_page_positions() {
+        let mut history = ViewHistory::default();
+        assert!(history.previous_jump(10).is_none());
+        let mut current = position(3, 0.8);
+        current.fit = Fit::Height;
+        current.rotation = 3;
+        history.record(position(3, 0.2));
+        for index in 0..6 {
+            let target = history.previous_jump(10).unwrap();
+            let expected = if index % 2 == 0 {
+                position(3, 0.2)
+            } else {
+                ReadingMark {
+                    fit: Fit::Height,
+                    rotation: 3,
+                    ..position(3, 0.8)
+                }
+            };
+            assert!(same_view(&target, &expected));
+            history.record(current);
+            current = target;
+        }
+        // Toggling is also a regular jump: Back returns to its origin, and
+        // a later new jump clears Forward without losing the last position.
+        let target = history.go(false, current.clone(), 10).unwrap();
+        assert!(same_view(&history.previous_jump(10).unwrap(), &current));
+        let current = history.go(true, target, 10).unwrap();
+        history.record(current);
+        assert!(history.go(true, position(7, 0.0), 10).is_none());
+    }
+
+    #[test]
+    fn previous_jump_tracks_history_traversal_and_prunes_removed_pages() {
+        let mut history = ViewHistory::default();
+        history.record(position(2, 0.2));
+        let current = history.go(false, position(5, 0.8), 6).unwrap();
+        assert_eq!(history.previous_jump(6).unwrap().page, 5);
+        assert!(history.previous_jump(3).is_none());
+        // A failed history move must not change the last jump.
+        assert!(history.go(false, current, 6).is_none());
+        assert_eq!(history.previous_jump(6).unwrap().page, 5);
+        history.retain_pages(3);
+        assert!(history.previous_jump(6).is_none());
+        history.record(position(2, 0.2));
+        history.retain_pages(3);
+        assert_eq!(history.previous_jump(3).unwrap().page, 2);
+        history.retain_pages(0);
+        assert!(history.previous_jump(6).is_none());
     }
 
     #[test]

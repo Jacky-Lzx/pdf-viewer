@@ -41,9 +41,15 @@ def run(binary):
                     return item if item and predicate(item) else None
                 return wait_for(saved, description)
 
-            def sequence(text):
-                for character in text:
-                    keyboard.key(character.lower(), shift=character.isupper() or character == "+", delay=0.025)
+            def sequence(text, burst=False):
+                if burst:
+                    application.send_signal(signal.SIGSTOP)
+                try:
+                    for character in text:
+                        keyboard.key(character.lower(), shift=character.isupper() or character == "+", delay=0 if burst else 0.025)
+                finally:
+                    if burst:
+                        application.send_signal(signal.SIGCONT)
 
             def button(forward=False, delay=0.15):
                 keyboard.xtst.XTestFakeMotionEvent(keyboard.display, -1, 800, 500, 0)
@@ -65,6 +71,12 @@ def run(binary):
                 first = expect(lambda item: item["fit"] == "Width" and item["offset"][1] == 1, "first full reading view")
                 sequence("Jr+zz")
                 second = expect(lambda item: item["page"] == 1 and item["rotation"] == 1 and isinstance(item["fit"], dict) and abs(item["offset"][1] - 0.5) < 0.001, "second rotated and zoomed reading view")
+                sequence("''", burst=True)
+                restored(first, "Vim quotes restore the full view before a jump")
+                sequence("``", burst=True)
+                restored(second, "Vim backticks toggle to the view just left")
+                sequence("''``", burst=True)
+                restored(second, "two same-frame Vim last-jump commands preserve their order")
                 button()
                 restored(first, "mouse Back restores page, fit, rotation and scroll")
                 button(True)
@@ -112,13 +124,30 @@ def run(binary):
                 keyboard.key(0xFF0D)
                 expect(lambda item: item["page"] == 2, "reopen saved view after side buttons on welcome")
                 time.sleep(0.4)
+                sequence("''", burst=True)
+                expect(lambda item: item["page"] == 2, "reopened documents start with no last-jump position")
                 sequence("999")
                 button()
                 sequence("J")
                 expect(lambda item: item["page"] == 3, "empty history still consumes the numeric prefix")
+                sequence("/''``")
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "''``", "last-jump keys remain literal in search inputs"
+                keyboard.key(0xFF1B)
+                sequence("Rwzbma")
+                same_page = expect(lambda item: item["page"] == 3 and item["fit"] == "Width"
+                                   and item["offset"][1] == 1, "save bottom mark for a same-page jump")
+                sequence("p")
+                fitted = expect(lambda item: item["page"] == 3 and item["fit"] == "Page", "fit same page before restoring a mark")
+                sequence("'a", burst=True)
+                restored(same_page, "named mark still restores the saved full view")
+                sequence("''", burst=True)
+                restored(fitted, "Vim quotes return to the previous view on the same page")
+                sequence("``", burst=True)
+                restored(same_page, "Vim backticks restore same-page scrolling and fit")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: real mouse Back/Forward, full reading views, ordered same-frame round trips, modal/search/recent guards, input focus, counts and mark prompts, welcome and empty history")
+                print("PASS: real mouse Back/Forward, Vim last-jump toggles, full and same-page reading views, ordered same-frame round trips, modal/search/recent guards, input focus, counts and mark prompts, welcome and empty history")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

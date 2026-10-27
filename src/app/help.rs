@@ -50,6 +50,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("b", "Toggle bookmark"),
     ("Tab", "Toggle sidebar"),
     ("ma   /   'a or `a", "Save / restore named position a–z"),
+    (
+        "''   or   ``",
+        "Toggle the last two jump positions, including the full view",
+    ),
     ("t", "Toggle page previews and open sidebar"),
     (
         "c",

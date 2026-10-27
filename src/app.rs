@@ -1204,7 +1204,16 @@ impl Folio {
             if let Some(action) = self.mark_action.take() {
                 if !modifiers.ctrl && !modifiers.command && !modifiers.alt {
                     let name = key.name().to_ascii_lowercase();
-                    if name.len() == 1 && name.as_bytes()[0].is_ascii_lowercase() {
+                    if matches!(action, MarkAction::Jump)
+                        && !modifiers.shift
+                        && matches!(key, Key::Quote | Key::Backtick)
+                    {
+                        if let Some(position) = self.history.previous_jump(self.nav.count) {
+                            self.restore_position(position, true);
+                        } else {
+                            self.notify("No previous jump position");
+                        }
+                    } else if name.len() == 1 && name.as_bytes()[0].is_ascii_lowercase() {
                         self.mark(name.as_bytes()[0] as char, action);
                     } else {
                         self.notify("Use a letter a–z for a mark");
@@ -2252,7 +2261,7 @@ impl Folio {
                     ui.label(
                         RichText::new(match self.mark_action {
                             Some(MarkAction::Set) => "SET MARK · a–z",
-                            Some(MarkAction::Jump) => "GO TO MARK · a–z",
+                            Some(MarkAction::Jump) => "GO TO MARK · a–z or ' / `",
                             None if self.hints.active => "LINKS",
                             None if self.selection.active => "VISUAL",
                             None if self.recent_picker.is_some() => "RECENT",
