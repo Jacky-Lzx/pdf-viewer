@@ -3,6 +3,8 @@ use crate::annotations::{Comment, Comments, ReviewStatus};
 use crate::comment_view::{CommentFilter, CommentView};
 use eframe::egui::{self, Color32, Vec2};
 
+mod editor;
+
 fn preview_text(text: &str, limit: usize) -> String {
     let mut chars = text.chars();
     let mut result: String = chars
@@ -331,23 +333,52 @@ impl Pagewing {
             .width_range(220.0_f32.min(maximum)..=maximum)
             .resizable(true)
             .show(context, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if ui.available_width() < 220.0 {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if ui.available_width() < 120.0 {
+                            ui.label(egui::RichText::new("Comments").small().strong());
+                        } else {
+                            ui.strong("Comments");
+                        }
+                    } else {
+                        ui.heading("Comments");
+                        ui.weak(format!("{} total", self.comments.comments.items.len()));
+                    }
+                    self.input_buttons.close_comments = Some(
+                        ui.small_button("×")
+                            .on_hover_text(format!(
+                                "Hide comments · {}",
+                                self.library.shortcuts.label("comments")
+                            ))
+                            .id,
+                    );
+                });
+                if self.comments.editor.is_some() {
+                    let compact = ui.available_width() < 220.0 || ui.available_height() < 220.0;
+                    egui::TopBottomPanel::bottom("pagewing-comment-actions")
+                        .frame(egui::Frame::NONE)
+                        .resizable(false)
+                        .default_height(100.0)
+                        .show_separator_line(false)
+                        .show_inside(ui, |ui| {
+                            let allocated = ui.available_height();
+                            actions = self.comment_editor_actions(ui, compact);
+                            if (ui.min_size().y - allocated).abs() > 1.0 {
+                                // Reflow wrapped actions in the same frame so
+                                // opening an editor or resizing cannot expose
+                                // buttons at obsolete interaction coordinates.
+                                context.request_discard("comment action footer reflowed");
+                            }
+                        });
+                }
                 let panel_height = ui.available_height();
                 egui::ScrollArea::vertical()
                     .id_salt("pagewing-comments-panel")
+                    .min_scrolled_height(0.0)
+                    .max_height(panel_height.max(0.0))
                     .show(ui, |ui| {
                         let content_top = ui.cursor().top();
-                        ui.horizontal_wrapped(|ui| {
-                            ui.heading("Comments");
-                            ui.weak(format!("{} total", self.comments.comments.items.len()));
-                            self.input_buttons.close_comments = Some(
-                                ui.small_button("×")
-                                    .on_hover_text(format!(
-                                        "Hide comments · {}",
-                                        self.library.shortcuts.label("comments")
-                                    ))
-                                    .id,
-                            );
-                        });
                         self.comment_filters(ui);
                         if ui
                             .add_enabled(
@@ -401,9 +432,9 @@ impl Pagewing {
                         let remaining =
                             (panel_height - (ui.cursor().top() - content_top)).max(40.0);
                         let list_height = if self.comments.editor.is_some() {
-                            // Keep the editor's save/discard actions reachable when
-                            // filters or status controls take more vertical space.
-                            (remaining - 360.0).clamp(40.0, 160.0)
+                            // Leave room for the editor; its actions are pinned
+                            // below this scroll area even for a very long draft.
+                            (remaining * 0.3).clamp(40.0, 160.0)
                         } else {
                             remaining
                         };
@@ -411,7 +442,9 @@ impl Pagewing {
                         if confirm && !self.loading && !self.comments.busy() {
                             selected = self.comments.view.selected();
                         }
-                        actions = self.comment_editor(ui);
+                        if self.comment_editor_fields(ui) {
+                            context.request_repaint();
+                        }
                         // InputState retains text events after TextEdit handles
                         // them. Later actions must inspect the actual draft.
                         self.comments.input_pass = None;
@@ -576,100 +609,6 @@ impl Pagewing {
         selected
     }
 
-    fn comment_editor(&mut self, ui: &mut egui::Ui) -> CommentActions {
-        let mut actions = CommentActions::default();
-        if self.comments.editor.is_some() {
-            egui::ScrollArea::vertical()
-                .id_salt("pagewing-comment-editor")
-                .max_height(360.0)
-                .show(ui, |ui| {
-                    ui.separator();
-                    let busy = self.comments.busy();
-                    let saving = self.comments.saving;
-                    if let Some(comment) = &mut self.comments.editor {
-                        ui.label(format!(
-                            "{} · page {}",
-                            if comment.slot.is_none() {
-                                if comment.parent.is_some() { "New reply" } else { "New highlight" }
-                            } else {
-                                "Edit comment"
-                            },
-                            comment.page + 1
-                        ));
-                        let read_only = !comment.editable();
-                        if read_only {
-                            ui.label(if comment.locked { "This annotation is read-only." } else { "Comment text is read-only." });
-                        }
-                        // A queued save must still receive this batch's text;
-                        // other editor actions already stay disabled via busy.
-                        ui.add_enabled_ui(!saving && !read_only, |ui| {
-                            shortcuts::text_input(
-                                ui,
-                                egui::Id::new("pagewing-comment-input"),
-                                &mut self.comments.focus,
-                                &mut self.deferred_input,
-                                egui::TextEdit::multiline(&mut comment.contents)
-                                    .desired_rows(5)
-                                    .desired_width(f32::INFINITY)
-                                    .hint_text("Write a comment…"),
-                            );
-                        });
-                        ui.add_enabled_ui(!busy && !comment.locked, |ui| {
-                            egui::ComboBox::from_id_salt("pagewing-comment-status")
-                                .selected_text(format!("Status: {}", comment.review.label()))
-                                .show_ui(ui, |ui| {
-                                    for status in ReviewStatus::ALL {
-                                        ui.selectable_value(&mut comment.review, status, status.label());
-                                    }
-                                });
-                            ui.checkbox(&mut comment.marked, "Marked (Acrobat checkmark)");
-                        });
-                        if !comment.states.is_empty() {
-                            egui::CollapsingHeader::new("Status history").show(ui, |ui| {
-                                for state in &comment.states {
-                                    ui.label(format!("{} · {}: {}", state.author, state.model, state.value));
-                                }
-                            });
-                        }
-                        ui.label("Save writes this comment directly to the current PDF.");
-                        let existing = comment.slot.is_some();
-                        let deletable = !comment.locked;
-                        ui.horizontal_wrapped(|ui| {
-                            actions.save = ui
-                                .add_enabled(
-                                    !busy && !comment.locked && (comment.editable() || comment.contents == self.comments.original),
-                                    egui::Button::new("Save comment"),
-                                )
-                                .clicked();
-                            if existing {
-                                actions.reply = ui.add_enabled(!busy && deletable, egui::Button::new("Reply")).clicked();
-                                actions.delete = ui.add_enabled(!busy && deletable,
-                                    egui::Button::new(if comment.parent.is_some() { "Delete reply & replies" } else { "Delete comment & highlight" }))
-                                    .on_hover_text("Delete this annotation and all its replies from the current PDF.")
-                                    .clicked();
-                            }
-                            if ui
-                                .add_enabled(
-                                    !busy,
-                                    egui::Button::new("Discard / close editor"),
-                                )
-                                .clicked()
-                            {
-                                actions.discard = true;
-                            }
-                            if busy {
-                                ui.spinner();
-                                ui.label("Saving…");
-                            }
-                        });
-                    } else {
-                        ui.label("Choose an annotation to read or edit its comment.");
-                    }
-                });
-        }
-        actions
-    }
-
     pub(super) fn comment_overlays(
         &mut self,
         ui: &mut egui::Ui,
@@ -758,6 +697,7 @@ mod tests {
                 app.events(context);
                 app.keys(context);
                 app.toolbar(context);
+                app.status(context);
                 app.comments_sidebar(context);
                 app.sidebar(context);
                 app.canvas(context);
@@ -794,23 +734,30 @@ mod tests {
     }
 
     fn click_text(app: &mut Pagewing, context: &Context, label: &str) {
-        let output = frame(app, context, Vec::new());
-        let point = output
-            .shapes
-            .iter()
-            .rev()
-            .find_map(|shape| {
-                if let egui::Shape::Text(text) = &shape.shape
-                    && text.galley.text() == label
-                {
-                    Some(text.pos + text.galley.size() * 0.5)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| panic!("Missing visible button: {label}"));
+        click_text_size(app, context, label, Vec2::new(1180.0, 820.0));
+    }
+
+    fn click_text_size(app: &mut Pagewing, context: &Context, label: &str, size: Vec2) {
+        let output = frame_size(app, context, Vec::new(), size);
+        // Prefer footer actions over matching card previews. An open menu
+        // paints above both, so choose its last matching label instead.
+        let mut points = output.shapes.iter().filter_map(|shape| {
+            if let egui::Shape::Text(text) = &shape.shape
+                && text.galley.text() == label
+            {
+                Some(text.pos + text.galley.size() * 0.5)
+            } else {
+                None
+            }
+        });
+        let point = if egui::Popup::is_any_open(context) {
+            points.next_back()
+        } else {
+            points.next()
+        }
+        .unwrap_or_else(|| panic!("Missing visible button: {label}"));
         for pressed in [true, false] {
-            frame(
+            frame_size(
                 app,
                 context,
                 vec![
@@ -822,6 +769,7 @@ mod tests {
                         modifiers: Modifiers::NONE,
                     },
                 ],
+                size,
             );
         }
     }
@@ -1336,6 +1284,127 @@ mod tests {
         assert_eq!(app.nav.page, 1, "deletion must preserve the current page");
         let saved = crate::document::load(&path, "").unwrap();
         assert!(crate::annotations::read(&saved, || false).items.is_empty());
+    }
+
+    #[test]
+    fn editor_actions_stay_visible_with_long_drafts_in_short_windows() {
+        let (_root, context, mut app) = saved_comment_editor();
+        app.comments.editor.as_mut().unwrap().contents = "Long draft line\n".repeat(100);
+        let expected = app.comments.editor.as_ref().unwrap().contents.clone();
+        let mut save_pos = egui::Pos2::ZERO;
+        for size in [
+            Vec2::new(640.0, 480.0),
+            Vec2::new(500.0, 360.0),
+            Vec2::new(240.0, 240.0),
+        ] {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = frame_size(&mut app, &context, Vec::new(), size);
+            }
+            assert!(
+                app.viewport.x >= 60.0,
+                "editor collapsed the PDF viewport at {size:?}: {:?}",
+                app.viewport
+            );
+            let compact = output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "Save")
+            });
+            save_pos = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text() == if compact { "Save" } else { "Save comment" } =>
+                    {
+                        Some(text.pos + text.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .expect("visible save action");
+            for label in if compact {
+                ["Save", "Discard"]
+            } else {
+                ["Save comment", "Discard / close editor"]
+            } {
+                assert!(
+                    output.shapes.iter().any(|shape| {
+                        if let egui::Shape::Text(text) = &shape.shape {
+                            let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                            text.galley.text() == label
+                                && shape.clip_rect.contains_rect(rect)
+                                && egui::Rect::from_min_size(egui::Pos2::ZERO, size)
+                                    .contains_rect(rect)
+                        } else {
+                            false
+                        }
+                    }),
+                    "{label} must remain visible at {size:?}"
+                );
+            }
+        }
+        for pressed in [true, false] {
+            frame_size(
+                &mut app,
+                &context,
+                vec![
+                    Event::PointerMoved(save_pos),
+                    Event::PointerButton {
+                        pos: save_pos,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+                Vec2::new(240.0, 240.0),
+            );
+        }
+        assert!(
+            app.comments.saving,
+            "the pinned action must accept clicks: loading {}, editor {}, message {:?}",
+            app.loading,
+            app.comments.editor.is_some(),
+            app.message
+        );
+        wait(&mut app, &context, |app| {
+            !app.comments.saving && !app.loading && app.comments.loaded
+        });
+        assert_eq!(app.comments.comments.items[0].contents, expected);
+    }
+
+    #[test]
+    fn compact_editor_menu_can_reply_and_delete_after_resizing() {
+        let (_root, context, mut app) = saved_comment_editor();
+        let size = Vec2::new(240.0, 240.0);
+        for _ in 0..3 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+        click_text_size(&mut app, &context, "More…", size);
+        click_text_size(&mut app, &context, "Reply", size);
+        let editor = app.comments.editor.as_ref().unwrap();
+        assert!(editor.slot.is_none() && editor.parent.is_some());
+        frame_size(
+            &mut app,
+            &context,
+            vec![Event::Text("Compact reply".into())],
+            size,
+        );
+        click_text_size(&mut app, &context, "Save", size);
+        wait(&mut app, &context, |app| {
+            !app.comments.busy() && !app.loading && app.comments.loaded
+        });
+        assert_eq!(app.comments.comments.items[1].contents, "Compact reply");
+        app.edit_comment(1, &context);
+        for _ in 0..3 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+        click_text_size(&mut app, &context, "More…", size);
+        click_text_size(&mut app, &context, "Delete reply & replies", size);
+        wait(&mut app, &context, |app| {
+            !app.comments.busy() && !app.loading && app.comments.loaded
+        });
+        assert_eq!(app.comments.comments.items.len(), 1);
+        assert_eq!(app.comments.comments.items[0].contents, "Original comment");
     }
 
     #[test]
