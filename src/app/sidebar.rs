@@ -96,16 +96,18 @@ impl Pagewing {
             ui.weak("No matching chapters.");
         }
         let row_height = Self::sidebar_row_height(ui);
+        let viewport_height =
+            (ui.clip_rect().bottom() - ui.cursor().top()).clamp(row_height, 260.0);
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("contents")
-            .max_height(260.0);
+            .max_height(viewport_height);
         if keyboard_focus
             && std::mem::take(&mut self.outline.reveal)
             && let Some(row) = self.outline.selected_row()
         {
-            scroll = scroll.vertical_scroll_offset(
-                row.saturating_sub(3) as f32 * (row_height + ui.spacing().item_spacing.y),
-            );
+            let row_top = row as f32 * (row_height + ui.spacing().item_spacing.y);
+            scroll = scroll
+                .vertical_scroll_offset((row_top - (viewport_height - row_height) * 0.5).max(0.0));
         }
         let mut selected = None;
         scroll.show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
@@ -378,24 +380,45 @@ impl Pagewing {
         // Leave room for the page even when reopening a wide saved sidebar
         // in a narrow window.
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 380.0);
+        let short = context.available_rect().height() < 320.0;
         egui::SidePanel::left("sidebar")
             .frame(appearance::panel(context, 14))
             .default_width(256.0_f32.min(maximum))
             .width_range(180.0_f32.min(maximum)..=maximum)
             .show(context, |ui| {
+                // Recenter focused chapters when resizing changes how many rows fit.
+                let viewport_id = ui.make_persistent_id("chapter-viewport");
+                let viewport = ui.available_size();
+                let resized = ui.ctx().data_mut(|data| {
+                    let previous = data.get_temp::<Vec2>(viewport_id);
+                    if previous != Some(viewport) {
+                        data.insert_temp(viewport_id, viewport);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                let chapter_focus = self.outline.focus
+                    || context
+                        .memory(|memory| memory.has_focus(egui::Id::new("pagewing-outline-input")));
                 let mut sidebar_scroll = egui::ScrollArea::vertical();
-                if self.outline.focus {
+                if self.outline.focus || (resized && chapter_focus) {
                     sidebar_scroll = sidebar_scroll.vertical_scroll_offset(0.0);
+                    self.outline.reveal = true;
                 }
                 sidebar_scroll.show(ui, |ui| {
                     ui.add_space(6.0);
-                    appearance::section(ui, "YOUR DOCUMENT");
-                    ui.add(egui::Label::new(RichText::new(self.filename()).strong()).truncate())
+                    if !short {
+                        appearance::section(ui, "YOUR DOCUMENT");
+                        ui.add(
+                            egui::Label::new(RichText::new(self.filename()).strong()).truncate(),
+                        )
                         .on_hover_text(self.reading.path.display().to_string());
-                    ui.weak(format!("PDF document  ·  {} pages", self.nav.count));
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(10.0);
+                        ui.weak(format!("PDF document  ·  {} pages", self.nav.count));
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+                    }
                     self.contents(ui);
                     appearance::section(ui, "BOOKMARKS");
                     if self.reading.bookmarks.is_empty() {
@@ -540,6 +563,88 @@ impl Pagewing {
             && let Some(keys) = self.thumbnails.requests()
         {
             self.worker.thumbnails(keys);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{destination::Destination, navigation::Navigation, outline::OutlineEntry};
+
+    #[test]
+    fn chapter_focus_keeps_the_input_and_selected_row_visible_in_short_windows() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.nav = Navigation::new(80, 0);
+        app.dimensions = vec![[600.0, 800.0]; 80];
+        app.outline.set_entries(
+            (0..80)
+                .map(|page| OutlineEntry {
+                    title: format!("Chapter {page:03}"),
+                    destination: Some(Destination::page(page)),
+                    depth: 0,
+                })
+                .collect(),
+        );
+        app.focus_contents();
+        for page in [0, 40, 79] {
+            app.outline.select(page);
+            app.outline.reveal = true;
+            for size in super::super::dialog::TEST_SIZES {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output = egui::FullOutput::default();
+                for _ in 0..6 {
+                    output = context.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |context| {
+                            app.keys(context);
+                            app.toolbar(context);
+                            app.status(context);
+                            app.sidebar(context);
+                            egui::CentralPanel::default().show(context, |_| {});
+                        },
+                    );
+                }
+                let input = context
+                    .read_response(egui::Id::new("pagewing-outline-input"))
+                    .unwrap();
+                assert!(input.has_focus());
+                assert!(
+                    input.interact_rect.contains_rect(input.rect.shrink(1.0)),
+                    "{size:?}: input {:?} clipped by {:?}",
+                    input.rect,
+                    input.interact_rect
+                );
+                assert!(
+                    screen.contains_rect(input.rect),
+                    "{size:?}: {:?}",
+                    input.rect
+                );
+                let (clip, text) = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.text() == format!("Chapter {page:03}") =>
+                        {
+                            Some((shape.clip_rect, text))
+                        }
+                        _ => None,
+                    })
+                    .expect("the selected row should be drawn");
+                let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                assert!(screen.contains_rect(bounds), "{size:?}: {bounds:?}");
+                assert!(
+                    clip.contains_rect(bounds),
+                    "{size:?}: {bounds:?} clipped by {clip:?}"
+                );
+            }
         }
     }
 }

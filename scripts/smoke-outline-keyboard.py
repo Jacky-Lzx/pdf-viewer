@@ -48,12 +48,12 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
 
-            def selected_row_visible():
+            def selected_row_visible(bounds=(228, 486), xs=(50, 80, 110)):
                 # Only inspect the chapter list, excluding headings, text input
                 # and page list. Filled row backgrounds span all three points.
                 filled = 0
-                for y in range(228, 486, 2):
-                    colors = [keyboard.pixel((x, y)) for x in (50, 80, 110)]
+                for y in range(*bounds, 2):
+                    colors = [keyboard.pixel((x, y)) for x in xs]
                     if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         filled += 1
                 return filled >= 6
@@ -95,9 +95,41 @@ def run(binary):
                 wait_for(selected_row_visible, "chapter focus reveals the list after the outer sidebar was scrolled")
                 keyboard.key(ENTER)
                 expect(0, "chapter selection works after scrolling the outer sidebar")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 860, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                burst([("c", {}), ("a", {"ctrl": True}), (0xFF08, {})]
+                      + [(0xFF54, {})] * 39)
+                wait_for(lambda: selected_row_visible((120, 190)),
+                         "middle chapter is visible in a short window")
+                for width, height in ((240, 240), (1180, 820), (240, 240)):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, width, height)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.3)
+                    narrow = width == 240
+                    wait_for(lambda: selected_row_visible(
+                        (120, 190) if narrow else (228, 486),
+                        (45, 65, 85) if narrow else (50, 80, 110)),
+                        "resizing preserves the visible chapter selection")
+                keyboard.key(ENTER)
+                expect(39, "minimum-size chapter confirmation follows the retained selection")
+                keyboard.key("y")
+                assert "Chapter 040" in keyboard.clipboard()
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "080 chapter"])
+                wait_for(lambda: selected_row_visible((120, 190), (45, 65, 85)),
+                         "filtered chapter remains visible at minimum size")
+                keyboard.key(ENTER)
+                expect(79, "minimum-size filter follows the final chapter")
+                burst([("c", {}), ("a", {"ctrl": True}), (0xFF08, {})]
+                      + [(0xFF52, {})] * 79)
+                wait_for(lambda: selected_row_visible((120, 190), (45, 65, 85)),
+                         "first chapter remains visible at minimum size")
+                keyboard.key(ENTER)
+                expect(0, "minimum-size navigation reaches the first chapter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact layout, filtering after scrolling and outer sidebar focus")
+                print("PASS: 80 chapter rows, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
