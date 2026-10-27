@@ -366,19 +366,22 @@ impl Folio {
             }
             return;
         }
+        // Leave room for the page even when reopening a wide saved sidebar
+        // in a narrow window.
+        let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 380.0);
         egui::SidePanel::left("sidebar")
-            .default_width(230.0)
-            .width_range(180.0..=380.0)
+            .default_width(230.0_f32.min(maximum))
+            .width_range(180.0_f32.min(maximum)..=maximum)
             .show(context, |ui| {
-                ui.add_space(16.0);
-                ui.label(RichText::new(self.filename()).strong());
-                ui.weak(format!("{} pages", self.nav.count));
-                ui.add_space(16.0);
                 let mut sidebar_scroll = egui::ScrollArea::vertical();
                 if self.outline.focus {
                     sidebar_scroll = sidebar_scroll.vertical_scroll_offset(0.0);
                 }
                 sidebar_scroll.show(ui, |ui| {
+                    ui.add_space(16.0);
+                    ui.label(RichText::new(self.filename()).strong());
+                    ui.weak(format!("{} pages", self.nav.count));
+                    ui.add_space(16.0);
                     self.contents(ui);
                     ui.label(RichText::new("BOOKMARKS").small().strong().color(ACCENT));
                     if self.reading.bookmarks.is_empty() {

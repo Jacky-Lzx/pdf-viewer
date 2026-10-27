@@ -5,6 +5,7 @@ mod recent;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
+mod toolbar;
 
 use crate::{
     cache::TextureCache,
@@ -1620,7 +1621,7 @@ impl Folio {
             .exact_height(56.0)
             .show(context, |ui| {
                 let compact = ui.available_width() < 1100.0;
-                ui.horizontal_centered(|ui| {
+                toolbar::horizontal_bar(ui, "reader-controls", |ui| {
                     ui.add_space(12.0);
                     ui.label(RichText::new("F").size(28.0).strong().color(ACCENT));
                     if !compact {
@@ -1701,16 +1702,14 @@ impl Folio {
                             self.pan = Vec2::ZERO;
                             self.dirty = true;
                         }
-                        if !compact && ui.button("Width").on_hover_text("Fit width · w").clicked()
-                        {
+                        if ui.button("Width").on_hover_text("Fit width · w").clicked() {
                             self.reading.fit = Fit::Width;
                             self.dirty = true;
                         }
-                        if !compact
-                            && ui
-                                .button("Rotate")
-                                .on_hover_text("Rotate · r / Shift+R")
-                                .clicked()
+                        if ui
+                            .button("Rotate")
+                            .on_hover_text("Rotate · r / Shift+R")
+                            .clicked()
                         {
                             self.rotate_page(false, 1);
                         }
@@ -1725,35 +1724,39 @@ impl Folio {
                             self.toggle_continuous();
                         }
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(12.0);
-                        self.input_buttons.help = Some(ui.button("?").id);
-                        if ui
-                            .button(if self.library.dark { "Light" } else { "Dark" })
-                            .clicked()
-                        {
-                            self.library.dark = !self.library.dark;
-                            set_theme(context, self.library.dark);
-                            self.dirty = true;
-                        }
-                        if self.nav.count > 0 {
-                            self.input_buttons.find = Some(
-                                ui.button("Find")
-                                    .on_hover_text("Search · / or Ctrl/Cmd+F")
-                                    .id,
-                            );
+                    toolbar::right_group(
+                        ui,
+                        if self.nav.count > 0 { 240.0 } else { 100.0 },
+                        |ui| {
+                            ui.add_space(12.0);
+                            self.input_buttons.help = Some(ui.button("?").id);
                             if ui
-                                .selectable_label(
-                                    self.reading.bookmarks.contains(&self.nav.page),
-                                    "Bookmark",
-                                )
-                                .on_hover_text("b")
+                                .button(if self.library.dark { "Light" } else { "Dark" })
                                 .clicked()
                             {
-                                self.bookmark();
+                                self.library.dark = !self.library.dark;
+                                set_theme(context, self.library.dark);
+                                self.dirty = true;
                             }
-                        }
-                    });
+                            if self.nav.count > 0 {
+                                self.input_buttons.find = Some(
+                                    ui.button("Find")
+                                        .on_hover_text("Search · / or Ctrl/Cmd+F")
+                                        .id,
+                                );
+                                if ui
+                                    .selectable_label(
+                                        self.reading.bookmarks.contains(&self.nav.page),
+                                        "Bookmark",
+                                    )
+                                    .on_hover_text("b")
+                                    .clicked()
+                                {
+                                    self.bookmark();
+                                }
+                            }
+                        },
+                    );
                 });
             });
     }
@@ -1765,7 +1768,7 @@ impl Folio {
         egui::TopBottomPanel::top("search")
             .exact_height(42.0)
             .show(context, |ui| {
-                ui.horizontal_centered(|ui| {
+                toolbar::horizontal_bar(ui, "search-controls", |ui| {
                     ui.add_space(16.0);
                     ui.label("Find");
                     let (response, focused_now) = shortcuts::text_input(
@@ -2286,58 +2289,65 @@ impl Folio {
     }
 
     fn welcome(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space((ui.available_height() * 0.18).max(30.0));
-            ui.label(RichText::new("F").size(72.0).strong().color(ACCENT));
-            ui.add_space(8.0);
-            ui.heading(RichText::new("A little room to read.").size(30.0));
-            ui.add_space(12.0);
-            ui.weak("Open a PDF. Keep your hands on the keyboard.");
-            ui.add_space(24.0);
-            if self.loading {
-                ui.spinner();
-                ui.label("Opening document…");
-            } else if ui
-                .add(
-                    egui::Button::new(RichText::new("Open a document").color(Color32::WHITE))
-                        .fill(ACCENT)
-                        .min_size(Vec2::new(190.0, 42.0)),
-                )
-                .clicked()
-            {
-                self.choose_file();
-            }
-            ui.add_space(12.0);
-            ui.weak("or drop a PDF anywhere · Ctrl / Cmd + O");
-            if !self.library.recent.is_empty() {
-                ui.add_space(32.0);
-                ui.label(
-                    RichText::new("PICK UP WHERE YOU LEFT OFF")
-                        .small()
-                        .color(ACCENT),
-                );
-                let mut open = None;
-                for item in self.library.recent.iter().take(5) {
-                    let name = item.path.file_name().unwrap_or_default().to_string_lossy();
-                    if ui
-                        .button(format!("{name}    ·    page {}", item.page + 1))
-                        .on_hover_ui(|ui| {
-                            ui.set_max_width(ui.spacing().tooltip_width);
-                            ui.label(item.path.display().to_string());
-                        })
+        egui::ScrollArea::vertical()
+            .id_salt("welcome")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space((ui.available_height() * 0.18).max(30.0));
+                    ui.label(RichText::new("F").size(72.0).strong().color(ACCENT));
+                    ui.add_space(8.0);
+                    ui.heading(RichText::new("A little room to read.").size(30.0));
+                    ui.add_space(12.0);
+                    ui.weak("Open a PDF. Keep your hands on the keyboard.");
+                    ui.add_space(24.0);
+                    if self.loading {
+                        ui.spinner();
+                        ui.label("Opening document…");
+                    } else if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("Open a document").color(Color32::WHITE),
+                            )
+                            .fill(ACCENT)
+                            .min_size(Vec2::new(190.0, 42.0)),
+                        )
                         .clicked()
                     {
-                        open = Some(item.path.clone());
+                        self.choose_file();
                     }
-                }
-                if let Some(path) = open {
-                    self.open(path, ui.ctx());
-                }
-                if ui.button("Find recent documents · Ctrl/Cmd+P").clicked() {
-                    self.toggle_recent(ui.ctx());
-                }
-            }
-        });
+                    ui.add_space(12.0);
+                    ui.weak("or drop a PDF anywhere · Ctrl / Cmd + O");
+                    if !self.library.recent.is_empty() {
+                        ui.add_space(32.0);
+                        ui.label(
+                            RichText::new("PICK UP WHERE YOU LEFT OFF")
+                                .small()
+                                .color(ACCENT),
+                        );
+                        let mut open = None;
+                        for item in self.library.recent.iter().take(5) {
+                            let name = item.path.file_name().unwrap_or_default().to_string_lossy();
+                            if ui
+                                .button(format!("{name}    ·    page {}", item.page + 1))
+                                .on_hover_ui(|ui| {
+                                    ui.set_max_width(ui.spacing().tooltip_width);
+                                    ui.label(item.path.display().to_string());
+                                })
+                                .clicked()
+                            {
+                                open = Some(item.path.clone());
+                            }
+                        }
+                        if let Some(path) = open {
+                            self.open(path, ui.ctx());
+                        }
+                        if ui.button("Find recent documents · Ctrl/Cmd+P").clicked() {
+                            self.toggle_recent(ui.ctx());
+                        }
+                    }
+                });
+            });
     }
 
     fn status(&mut self, context: &egui::Context) {

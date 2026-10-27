@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 820.0])
-            .with_min_inner_size([860.0, 540.0])
+            .with_min_inner_size([240.0, 240.0])
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(
                 "../assets/icon.png"
             ))?)
