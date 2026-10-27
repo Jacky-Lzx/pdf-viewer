@@ -792,13 +792,22 @@ impl Folio {
                     self.comments.comments = comments;
                     self.comments.loaded = true;
                 }
-                Event::CommentSaved { id, result } if id == self.id => {
+                Event::CommentChanged {
+                    id,
+                    operation,
+                    result,
+                } if id == self.id => {
                     self.comments.saving = false;
                     match result {
                         Ok(()) => {
                             self.comments.editor = None;
                             self.reload();
-                            self.notify("Comment saved in PDF.");
+                            self.notify(match operation {
+                                crate::annotations::Operation::Save => "Comment saved in PDF.",
+                                crate::annotations::Operation::Delete => {
+                                    "Comment and highlight deleted from PDF."
+                                }
+                            });
                         }
                         Err(error) => self.error = Some(error),
                     }

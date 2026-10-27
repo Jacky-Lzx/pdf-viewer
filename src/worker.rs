@@ -20,8 +20,9 @@ pub enum Event {
         id: u64,
         comments: crate::annotations::Comments,
     },
-    CommentSaved {
+    CommentChanged {
         id: u64,
+        operation: crate::annotations::Operation,
         result: Result<(), String>,
     },
     FileChanged {
@@ -76,8 +77,9 @@ pub enum Event {
     },
 }
 
-struct SaveComment {
+struct EditComment {
     id: u64,
+    operation: crate::annotations::Operation,
     source: PathBuf,
     comment: crate::annotations::Comment,
 }
@@ -129,7 +131,7 @@ struct Pending {
     links: Option<usize>,
     inspect: Option<Inspection>,
     comments: bool,
-    save_comment: Option<SaveComment>,
+    edit_comment: Option<EditComment>,
     stop: bool,
 }
 
@@ -147,7 +149,7 @@ impl Pending {
         self.links = None;
         self.inspect = None;
         self.comments = false;
-        self.save_comment = None;
+        self.edit_comment = None;
     }
 
     fn replace_renders(&mut self, keys: Vec<RenderKey>) {
@@ -393,12 +395,27 @@ impl Worker {
     }
 
     pub fn save_comment(&self, id: u64, source: PathBuf, comment: crate::annotations::Comment) {
+        self.edit_comment(id, source, comment, crate::annotations::Operation::Save);
+    }
+
+    pub fn delete_comment(&self, id: u64, source: PathBuf, comment: crate::annotations::Comment) {
+        self.edit_comment(id, source, comment, crate::annotations::Operation::Delete);
+    }
+
+    fn edit_comment(
+        &self,
+        id: u64,
+        source: PathBuf,
+        comment: crate::annotations::Comment,
+        operation: crate::annotations::Operation,
+    ) {
         self.update(|pending| {
-            pending.save_comment = Some(SaveComment {
+            pending.edit_comment = Some(EditComment {
                 id,
                 source,
                 comment,
-            })
+                operation,
+            });
         });
     }
 
@@ -435,7 +452,7 @@ fn emit(tx: &SyncSender<Event>, context: &egui::Context, event: Event) {
 
 enum Job {
     Comments,
-    SaveComment(SaveComment),
+    EditComment(EditComment),
     Render(RenderKey, u64),
     Thumbnail(RenderKey, u64),
     Search(usize),
@@ -482,8 +499,8 @@ fn session(
                         Some(SearchProgress::new(request))
                     };
                 }
-                if let Some(request) = pending.save_comment.take() {
-                    break Job::SaveComment(request);
+                if let Some(request) = pending.edit_comment.take() {
+                    break Job::EditComment(request);
                 }
                 if let Some(request) = pending.inspect.take() {
                     break Job::Inspect(request);
@@ -551,15 +568,31 @@ fn session(
                     emit(tx, context, Event::Comments { id, comments });
                 }
             }
-            Job::SaveComment(request) => {
+            Job::EditComment(request) => {
                 if request.id != id {
                     continue;
                 }
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    crate::annotations::save(pdf, &request.comment, &request.source)
-                }))
-                .unwrap_or_else(|_| Err("The PDF engine could not save this comment.".into()));
-                emit(tx, context, Event::CommentSaved { id, result });
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        match request.operation {
+                            crate::annotations::Operation::Save => {
+                                crate::annotations::save(pdf, &request.comment, &request.source)
+                            }
+                            crate::annotations::Operation::Delete => {
+                                crate::annotations::delete(pdf, &request.comment, &request.source)
+                            }
+                        }
+                    }))
+                    .unwrap_or_else(|_| Err("The PDF engine could not save this comment.".into()));
+                emit(
+                    tx,
+                    context,
+                    Event::CommentChanged {
+                        id,
+                        operation: request.operation,
+                        result,
+                    },
+                );
             }
             Job::Links(page) => {
                 if let Some(data) = pdf.pages().get(page) {

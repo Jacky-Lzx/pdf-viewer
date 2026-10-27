@@ -91,7 +91,7 @@ impl Folio {
             .comments
             .editor
             .as_ref()
-            .filter(|c| !c.locked && !c.truncated)
+            .filter(|c| c.editable())
             .cloned()
         else {
             return;
@@ -101,6 +101,24 @@ impl Folio {
             .save_comment(self.id, self.reading.path.clone(), comment);
     }
 
+    fn delete_comment(&mut self) {
+        if self.loading || self.comments.busy() {
+            return;
+        }
+        let Some(comment) = self
+            .comments
+            .editor
+            .as_ref()
+            .filter(|c| c.slot.is_some() && !c.locked)
+            .cloned()
+        else {
+            return;
+        };
+        self.comments.saving = true;
+        self.worker
+            .delete_comment(self.id, self.reading.path.clone(), comment);
+    }
+
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
         if !self.comments.open || self.nav.count == 0 {
             return;
@@ -108,6 +126,7 @@ impl Folio {
         let mut open = true;
         let mut selected = None;
         let mut save = false;
+        let mut delete = false;
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
         egui::SidePanel::right("folio-comments-sidebar")
             .default_width(320.0_f32.min(maximum))
@@ -203,7 +222,7 @@ impl Folio {
                                     },
                                     comment.page + 1
                                 ));
-                                let read_only = comment.truncated || comment.locked;
+                                let read_only = !comment.editable();
                                 if read_only {
                                     ui.label("This annotation is read-only.");
                                 }
@@ -220,6 +239,8 @@ impl Folio {
                                     );
                                 });
                                 ui.label("Save writes this comment directly to the current PDF.");
+                                let existing = comment.slot.is_some();
+                                let deletable = !comment.locked;
                                 ui.horizontal_wrapped(|ui| {
                                     save = ui
                                         .add_enabled(
@@ -227,6 +248,12 @@ impl Folio {
                                             egui::Button::new("Save comment"),
                                         )
                                         .clicked();
+                                    if existing {
+                                        delete = ui.add_enabled(!busy && deletable,
+                                            egui::Button::new("Delete comment & highlight"))
+                                            .on_hover_text("Delete this annotation, its highlight and replies from the current PDF.")
+                                            .clicked();
+                                    }
                                     if ui
                                         .add_enabled(
                                             !busy,
@@ -253,6 +280,8 @@ impl Folio {
         }
         if save {
             self.save_comment();
+        } else if delete {
+            self.delete_comment();
         }
     }
 
@@ -493,6 +522,64 @@ mod tests {
             include_bytes!("../../assets/folio-guide.pdf")
         );
         assert!(!root.path().join("source-annotated.pdf").exists());
+        // Failed deletion must leave the selected comment available for retry.
+        let snapshot = std::fs::read(&path).unwrap();
+        std::fs::write(&path, b"changed by another application").unwrap();
+        app.delete_comment();
+        wait(&mut app, &context, |app| !app.comments.busy());
+        assert!(
+            app.error
+                .as_ref()
+                .is_some_and(|error| error.contains("changed on disk"))
+        );
+        assert!(app.comments.editor.is_some());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"changed by another application"
+        );
+        std::fs::write(&path, snapshot).unwrap();
+        let output = frame(&mut app, &context, Vec::new());
+        let delete_button = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == "Delete comment & highlight"
+                {
+                    Some(text.pos + text.galley.size() * 0.5)
+                } else {
+                    None
+                }
+            })
+            .expect("Delete comment button");
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &context,
+                vec![
+                    Event::PointerMoved(delete_button),
+                    Event::PointerButton {
+                        pos: delete_button,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert!(
+            app.comments.saving,
+            "the visible delete button must submit deletion"
+        );
+        wait(&mut app, &context, |app| {
+            !app.comments.busy() && !app.loading && app.comments.loaded
+        });
+        assert!(app.comments.editor.is_none());
+        assert!(app.comments.comments.items.is_empty());
+        assert!(app.comments.open);
+        assert_eq!(app.nav.page, 1, "deletion must preserve the current page");
+        let saved = crate::document::load(&path, "").unwrap();
+        assert!(crate::annotations::read(&saved, || false).items.is_empty());
     }
 
     #[test]

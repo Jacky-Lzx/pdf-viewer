@@ -23,6 +23,12 @@ pub struct Comment {
     pub locked: bool,
 }
 
+impl Comment {
+    pub fn editable(&self) -> bool {
+        !self.locked && !self.truncated && self.kind != "FreeText"
+    }
+}
+
 #[derive(Default)]
 pub struct Comments {
     pub items: Vec<Comment>,
@@ -119,15 +125,30 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
                 rects,
                 truncated,
                 has_appearance: dict.get::<Dict<'_>>(b"AP").is_some(),
-                locked: flags & (64 | 128 | 512) != 0 || kind.as_ref() == b"FreeText",
+                locked: flags & (64 | 128 | 512) != 0,
             });
         }
     }
     result
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operation {
+    Save,
+    Delete,
+}
+
 /// Save an incremental PDF update atomically over the current document.
 pub fn save(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
+    write(pdf, comment, source, Operation::Save)
+}
+
+/// Remove the selected annotation, its popup and replies from the page.
+pub fn delete(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
+    write(pdf, comment, source, Operation::Delete)
+}
+
+fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> Result<(), String> {
     let source = source
         .canonicalize()
         .map_err(|e| format!("Cannot locate PDF: {e}"))?;
@@ -147,7 +168,7 @@ pub fn save(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
                 .into(),
         );
     }
-    if comment.truncated || comment.locked {
+    if comment.locked || (operation == Operation::Save && !comment.editable()) {
         return Err("This annotation is read-only.".into());
     }
     let page = pdf
@@ -172,7 +193,12 @@ pub fn save(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
         Err(_) => Vec::new(),
     };
     use lopdf::{Object as O, dictionary};
-    if let Some(slot) = comment.slot {
+    if operation == Operation::Delete {
+        let slot = comment
+            .slot
+            .ok_or("This comment has not been saved. Use Discard to remove the draft.")?;
+        annots = without_comment(previous, &annots, slot)?;
+    } else if let Some(slot) = comment.slot {
         let value = annots.get(slot).ok_or("Annotation no longer exists")?;
         let mut dict = previous
             .dereference(value)
@@ -270,6 +296,63 @@ pub fn save(pdf: &Pdf, comment: &Comment, source: &Path) -> Result<(), String> {
     temp.persist(&source)
         .map_err(|e| format!("Cannot finish saving PDF: {e}"))?;
     Ok(())
+}
+
+/// Preserve raw /Annots entries, including unrelated and malformed objects.
+/// A work queue follows popup/reply links without repeatedly scanning the array.
+fn without_comment(
+    document: &lopdf::Document,
+    annots: &[lopdf::Object],
+    slot: usize,
+) -> Result<Vec<lopdf::Object>, String> {
+    use lopdf::{Object, ObjectId};
+    use std::collections::{HashMap, VecDeque};
+    let selected = annots.get(slot).ok_or("Annotation no longer exists")?;
+    document
+        .dereference(selected)
+        .and_then(|(_, value)| value.as_dict())
+        .map_err(|e| format!("Cannot delete annotation: {e}"))?;
+    let mut references: HashMap<ObjectId, Vec<usize>> = HashMap::new();
+    let mut children: HashMap<ObjectId, Vec<usize>> = HashMap::new();
+    let mut popups = vec![None; annots.len()];
+    for (index, value) in annots.iter().enumerate() {
+        if let Ok(id) = value.as_reference() {
+            references.entry(id).or_default().push(index);
+        }
+        let Ok((_, value)) = document.dereference(value) else {
+            continue;
+        };
+        let Ok(dict) = value.as_dict() else { continue };
+        popups[index] = dict.get(b"Popup").and_then(Object::as_reference).ok();
+        if let Ok(parent) = dict.get(b"IRT").and_then(Object::as_reference) {
+            children.entry(parent).or_default().push(index);
+        }
+        if dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Popup")
+            && let Ok(parent) = dict.get(b"Parent").and_then(Object::as_reference)
+        {
+            children.entry(parent).or_default().push(index);
+        }
+    }
+    let mut removed = vec![false; annots.len()];
+    let mut queue = VecDeque::from([slot]);
+    while let Some(index) = queue.pop_front() {
+        if std::mem::replace(&mut removed[index], true) {
+            continue;
+        }
+        if let Ok(id) = annots[index].as_reference() {
+            queue.extend(references.remove(&id).unwrap_or_default());
+            queue.extend(children.remove(&id).unwrap_or_default());
+        }
+        if let Some(popup) = popups[index] {
+            queue.extend(references.remove(&popup).unwrap_or_default());
+        }
+    }
+    Ok(annots
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !removed[*index])
+        .map(|(_, value)| value.clone())
+        .collect())
 }
 
 /// Never replace a file which another program changed since it was loaded.
@@ -497,5 +580,157 @@ mod tests {
         );
         let saved = crate::document::load(&source, "").unwrap();
         assert_eq!(read(&saved, || false).items[0].contents, draft().contents);
+    }
+
+    #[test]
+    fn deleting_saved_highlight_restores_page_and_keeps_document_content() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, original) = source(root.path());
+        save(&original, &draft(), &source).unwrap();
+        let highlighted = crate::document::load(&source, "").unwrap();
+        let comment = read(&highlighted, || false).items.remove(0);
+        delete(&highlighted, &comment, &source).unwrap();
+        let deleted = crate::document::load(&source, "").unwrap();
+        assert!(read(&deleted, || false).items.is_empty());
+        let before =
+            crate::document::rasterize_untransformed(&original, &hayro::RenderCache::new(), 0, 600)
+                .unwrap();
+        let after =
+            crate::document::rasterize_untransformed(&deleted, &hayro::RenderCache::new(), 0, 600)
+                .unwrap();
+        assert_eq!(
+            before.rgba, after.rgba,
+            "deletion must remove the highlight appearance"
+        );
+        assert_eq!(
+            crate::links::LinkReader::new(&original)
+                .read(&original.pages()[0])
+                .len(),
+            crate::links::LinkReader::new(&deleted)
+                .read(&deleted.pages()[0])
+                .len()
+        );
+        let cache = hayro::hayro_interpret::InterpreterCache::new();
+        assert_eq!(
+            crate::text::extract(&original.pages()[0], &cache).text,
+            crate::text::extract(&deleted.pages()[0], &cache).text
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert!(
+            delete(&highlighted, &comment, &source)
+                .unwrap_err()
+                .contains("changed on disk")
+        );
+        assert!(
+            delete(&deleted, &draft(), &source).is_err(),
+            "unsaved drafts have no PDF annotation to delete"
+        );
+    }
+
+    #[test]
+    fn deletion_handles_raw_slots_indirect_arrays_popups_and_nested_replies() {
+        for indirect_array in [false, true] {
+            for indirect_comment in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let mut doc =
+                    lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+                let page = doc.get_pages()[&1];
+                let parent = doc.new_object_id();
+                let popup = doc.add_object(dictionary! { "Subtype" => "Popup", "Parent" => parent, "Rect" => vec![0.into(), 0.into(), 20.into(), 20.into()] });
+                let annotation = dictionary! { "Subtype" => "Highlight", "Contents" => lopdf::text_string("delete me"), "Popup" => popup, "Rect" => vec![50.into(), 600.into(), 150.into(), 620.into()] };
+                doc.set_object(parent, annotation.clone());
+                let unrelated = O::Dictionary(
+                    dictionary! { "Subtype" => "Text", "Contents" => lopdf::text_string("keep me"), "Rect" => vec![200.into(), 600.into(), 220.into(), 620.into()] },
+                );
+                let mut entries = vec![O::Null, O::Reference((99999, 0)), O::Reference(popup)];
+                if indirect_comment {
+                    let reply = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => parent, "RT" => "R", "Contents" => lopdf::text_string("reply"), "Rect" => vec![30.into(), 30.into(), 40.into(), 40.into()] });
+                    let nested = doc.add_object(dictionary! { "Subtype" => "Text", "IRT" => reply, "RT" => "R", "Contents" => lopdf::text_string("nested reply"), "Rect" => vec![30.into(), 30.into(), 40.into(), 40.into()] });
+                    entries.extend([O::Reference(nested), O::Reference(reply)]);
+                }
+                let slot = entries.len();
+                entries.push(if indirect_comment {
+                    O::Reference(parent)
+                } else {
+                    O::Dictionary(annotation)
+                });
+                entries.push(unrelated);
+                let expected = vec![
+                    entries[0].clone(),
+                    entries[1].clone(),
+                    entries.last().unwrap().clone(),
+                ];
+                let array = O::Array(entries);
+                let annots = if indirect_array {
+                    O::Reference(doc.add_object(array))
+                } else {
+                    array
+                };
+                doc.get_dictionary_mut(page).unwrap().set("Annots", annots);
+                let path = root.path().join("source.pdf");
+                doc.save(&path).unwrap();
+                let pdf = crate::document::load(&path, "").unwrap();
+                let comment = read(&pdf, || false)
+                    .items
+                    .into_iter()
+                    .find(|c| c.slot == Some(slot))
+                    .unwrap();
+                delete(&pdf, &comment, &path).unwrap();
+                let saved = lopdf::Document::load(&path).unwrap();
+                assert_eq!(
+                    saved
+                        .get_dictionary(page)
+                        .unwrap()
+                        .get(b"Annots")
+                        .unwrap()
+                        .as_array()
+                        .unwrap(),
+                    &expected
+                );
+                let pdf = crate::document::load(&path, "").unwrap();
+                assert_eq!(
+                    read(&pdf, || false)
+                        .items
+                        .iter()
+                        .map(|c| c.contents.as_str())
+                        .collect::<Vec<_>>(),
+                    ["keep me"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deletion_supports_uneditable_contents_but_respects_locked_annotations() {
+        for (kind, contents, flags) in [
+            ("FreeText", "A free text note".into(), 0),
+            ("Text", "x".repeat(65_537), 0),
+            ("Highlight", "locked".into(), 128),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut doc =
+                lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+            let page = doc.get_pages()[&1];
+            let id = doc.add_object(dictionary! { "Subtype" => kind, "Contents" => lopdf::text_string(&contents), "F" => flags, "Rect" => vec![50.into(), 600.into(), 150.into(), 620.into()] });
+            doc.get_dictionary_mut(page)
+                .unwrap()
+                .set("Annots", vec![O::Reference(id)]);
+            let path = root.path().join("source.pdf");
+            doc.save(&path).unwrap();
+            let pdf = crate::document::load(&path, "").unwrap();
+            let comment = read(&pdf, || false).items.remove(0);
+            assert!(!comment.editable());
+            if flags == 128 {
+                assert!(delete(&pdf, &comment, &path).is_err());
+                assert_eq!(std::fs::read(&path).unwrap(), pdf.data().as_ref());
+            } else {
+                delete(&pdf, &comment, &path).unwrap();
+                assert!(
+                    read(&crate::document::load(&path, "").unwrap(), || false)
+                        .items
+                        .is_empty()
+                );
+            }
+        }
     }
 }
