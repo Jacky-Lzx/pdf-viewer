@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cancel an unfinished FIFO read and open another PDF without waiting for EOF."""
+"""Cancel disconnected/stalled FIFOs without extra input, then read another PDF."""
 import errno
 import json
 import os
@@ -15,7 +15,7 @@ desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
-def run(binary):
+def run_case(binary, connected):
     with tempfile.TemporaryDirectory(prefix="pagewing-load-cancel-") as directory:
         root = Path(directory)
         slow, document = root / "unfinished.pdf", root / "pagewing-smoke.pdf"
@@ -50,8 +50,9 @@ def run(binary):
 
             try:
                 wait_for(lambda: keyboard.focus("unfinished.pdf"), "slow document window")
-                writer = wait_for(connect_writer, "background FIFO reader")
-                os.write(writer, b"%")
+                if connected:
+                    writer = wait_for(connect_writer, "background FIFO reader")
+                    os.write(writer, b"%")
                 time.sleep(0.1)
                 assert keyboard.pixel((350, 100))[0] < 245, "slow input must still be loading"
                 keyboard.key("w", ctrl=True)
@@ -61,19 +62,8 @@ def run(binary):
                 keyboard.key(0xFF0D)
                 wait_for(keyboard.focus, "replacement PDF selected")
 
-                # Finish at most one read block, but deliberately leave the
-                # writer open. A read-to-EOF loader cannot reach the next PDF.
-                remaining = 1024 * 1024 - 1
-                data = b"x" * 65536
-                deadline = time.monotonic() + 8
-                while remaining:
-                    assert time.monotonic() < deadline, "slow read did not release pipe capacity"
-                    try:
-                        remaining -= os.write(writer, data[:min(remaining, len(data))])
-                    except BlockingIOError:
-                        time.sleep(0.005)
-                    except BrokenPipeError:
-                        break  # Cancellation may have happened before its first read.
+                # Send no more bytes and never signal EOF. Neither a blocking
+                # open nor a blocking block read can reach the replacement PDF.
                 wait_for(lambda: keyboard.pixel((350, 100))[0] > 245,
                          "replacement PDF visible while old stream has no EOF")
                 keyboard.key("y")
@@ -84,8 +74,9 @@ def run(binary):
                 assert "A thought worth keeping." in keyboard.clipboard()
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: close an unfinished background read, open a saved PDF without EOF "
-                      "after at most one block, exact page text, Vim navigation and graceful quit")
+                state = "one byte with writer still open" if connected else "no writer connected"
+                print(f"PASS: cancel FIFO ({state}), open saved PDF without extra input or EOF, "
+                      "exact page text, Vim navigation and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -101,4 +92,6 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())
+    binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve()
+    for connected in (False, True):
+        run_case(binary, connected)

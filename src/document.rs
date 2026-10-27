@@ -109,12 +109,8 @@ pub fn load_cancellable(
     if cancelled() {
         return Ok(None);
     }
-    let bytes = (|| {
-        let mut file = std::fs::File::open(path)?;
-        let expected = file.metadata()?.len();
-        crate::document_bytes::read(&mut file, expected, &cancelled)
-    })()
-    .map_err(|error: std::io::Error| format!("Cannot read {}: {error}", path.display()))?;
+    let bytes = crate::document_bytes::read_file(path, &cancelled)
+        .map_err(|error: std::io::Error| format!("Cannot read {}: {error}", path.display()))?;
     let Some(bytes) = bytes else { return Ok(None) };
     if cancelled() {
         return Ok(None);

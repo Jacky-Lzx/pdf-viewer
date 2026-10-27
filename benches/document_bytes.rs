@@ -1,8 +1,8 @@
-#[allow(unused_imports)]
+#[allow(dead_code, unused_imports)]
 #[path = "../src/document_bytes.rs"]
 mod document_bytes;
 
-use std::{fs::File, hint::black_box, sync::Mutex, time::Instant};
+use std::{hint::black_box, sync::Mutex, time::Instant};
 
 fn main() {
     let passes: usize = std::env::args()
@@ -13,9 +13,7 @@ fn main() {
     let file = tempfile::NamedTempFile::new().unwrap();
     let pending = Mutex::new(false);
     let current = || {
-        let mut reader = File::open(file.path()).unwrap();
-        let length = reader.metadata().unwrap().len();
-        document_bytes::read(&mut reader, length, || *pending.lock().unwrap())
+        document_bytes::read_file(file.path(), || *pending.lock().unwrap())
             .unwrap()
             .unwrap()
     };
