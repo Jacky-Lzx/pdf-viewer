@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 impl Pagewing {
     pub(super) fn open(&mut self, path: PathBuf, context: &egui::Context) {
-        if self.comment_change_blocked() {
+        if self.comment_change_blocked(context) {
             return;
         }
         self.remember();
@@ -119,7 +119,7 @@ impl Pagewing {
     }
 
     pub(super) fn close_document(&mut self, context: &egui::Context) {
-        if self.comment_change_blocked() {
+        if self.comment_change_blocked(context) {
             return;
         }
         if !self.reading.path.as_os_str().is_empty() {
@@ -137,7 +137,7 @@ impl Pagewing {
         self.mark_action = None;
         // A draft or in-flight save postpones the document change. Retain
         // the target until a later shortcut can actually attempt to open it.
-        if self.last_closed.is_some() && self.comment_change_blocked() {
+        if self.last_closed.is_some() && self.comment_change_blocked(context) {
             return;
         }
         if let Some(path) = self.last_closed.take() {
@@ -147,8 +147,8 @@ impl Pagewing {
         }
     }
 
-    pub(super) fn reload(&mut self) {
-        if self.comment_change_blocked() {
+    pub(super) fn reload(&mut self, context: &egui::Context) {
+        if self.comment_change_blocked(context) {
             return;
         }
         if self.reading.path.as_os_str().is_empty() || self.loading {

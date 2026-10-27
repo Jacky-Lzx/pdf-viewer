@@ -673,6 +673,7 @@ impl Pagewing {
     }
 
     fn events(&mut self, context: &egui::Context) {
+        self.begin_comment_input(context);
         if let Some(Err(error)) = self.state_writer.result() {
             self.notify(format!("Could not save reading progress: {error}"));
             self.dirty = true;
@@ -691,7 +692,7 @@ impl Pagewing {
                     match result {
                         Ok(()) => {
                             self.comments.editor = None;
-                            self.reload();
+                            self.reload(context);
                             self.notify(match operation {
                                 crate::annotations::Operation::Save => "Comment saved in PDF.",
                                 crate::annotations::Operation::Delete => {
@@ -911,14 +912,14 @@ impl Pagewing {
             Some(shortcuts::InputButton::Zoom) => self.open_zoom(context),
             Some(shortcuts::InputButton::ReloadChanged) => {
                 if self.file_changed {
-                    self.reload();
+                    self.reload(context);
                 }
             }
             Some(shortcuts::InputButton::DismissChange) => {
                 self.file_changed = false;
                 self.auto_reload_pending = false;
             }
-            Some(shortcuts::InputButton::RetryError) => self.retry_error(),
+            Some(shortcuts::InputButton::RetryError) => self.retry_error(context),
             Some(shortcuts::InputButton::DismissError) => self.error = None,
             Some(shortcuts::InputButton::CopyError) => {
                 if let Some(error) = &self.error {
@@ -1123,10 +1124,10 @@ impl Pagewing {
                 && modifiers.command
                 && modifiers.shift
             {
-                self.set_comments_open(context, !self.comments.open);
                 context.input_mut(|input| {
                     shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                 });
+                self.set_comments_open(context, !self.comments.open);
                 continue;
             }
             if !popup_open
@@ -1136,10 +1137,10 @@ impl Pagewing {
                 && key == Key::H
                 && self.nav.count > 0
             {
-                self.add_comment();
                 context.input_mut(|input| {
                     shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                 });
+                self.add_comment(context);
                 continue;
             }
             if self.comments.open
@@ -1251,7 +1252,10 @@ impl Pagewing {
                 continue;
             }
             if modifiers.command && key == Key::R {
-                self.reload();
+                context.input_mut(|input| {
+                    shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                });
+                self.reload(context);
                 continue;
             }
             if modifiers.command && key == Key::W {
@@ -2489,8 +2493,6 @@ impl Pagewing {
 
 impl eframe::App for Pagewing {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
-        #[cfg(target_os = "macos")]
-        self.macos_open_documents(context);
         let popup_view = (
             self.id,
             self.nav.page,
@@ -2508,9 +2510,11 @@ impl eframe::App for Pagewing {
         }
         let _side_button_focus = shortcuts::preserve_side_button_focus(context);
         self.events(context);
+        #[cfg(target_os = "macos")]
+        self.macos_open_documents(context);
         self.synctex_events(context);
         if context.input(|input| input.viewport().close_requested())
-            && self.comment_change_blocked()
+            && self.comment_change_blocked(context)
         {
             context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }

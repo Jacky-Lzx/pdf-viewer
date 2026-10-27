@@ -54,14 +54,14 @@ impl Pagewing {
                 self.error = Some("Invalid SyncTeX target".into());
                 return;
             }
-            if self.comment_change_blocked() {
+            if self.comment_change_blocked(context) {
                 return;
             }
             self.synctex.pending = Some(target);
             if !self.loading && self.nav.count > 0 {
                 // A forward search commonly follows a rebuild. Load that PDF before
                 // applying the new coordinates, even if the watcher hasn't fired yet.
-                self.reload();
+                self.reload(context);
             }
         }
         if request.options.focus != Some(false) {

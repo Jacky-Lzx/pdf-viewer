@@ -16,7 +16,7 @@ impl Pagewing {
         {
             return;
         }
-        self.reload();
+        self.reload(context);
         self.automatic_reload = self.loading;
     }
 }
@@ -258,7 +258,7 @@ mod tests {
         let context = Context::default();
         let mut app =
             Pagewing::with_context(&context, None, None, root.path().join("library.json"));
-        app.reload();
+        app.reload(&context);
         assert!(!app.loading, "An empty reader has no file to retry");
         // A path containing an engine error name must remain an ordinary I/O failure.
         let path = root.path().join("Decryption.pdf");
@@ -269,7 +269,7 @@ mod tests {
         let output = frame(&mut app, &context);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Retry open")));
         fs::write(&path, pdf("Repaired PDF")).unwrap();
-        app.reload();
+        app.reload(&context);
         wait(&mut app, &context, |a| !a.loading && a.nav.count > 0);
         assert!(!app.reloading);
         assert!(app.error.is_none());
@@ -290,7 +290,7 @@ mod tests {
                     .unwrap();
                 data[offset..offset + from.len()].copy_from_slice(to.as_bytes());
                 fs::write(&path, data).unwrap();
-                app.reload();
+                app.reload(&context);
                 app.automatic_reload = automatic;
                 wait(&mut app, &context, |a| !a.loading && a.error.is_some());
                 assert!(app.password_input.is_none());
@@ -355,7 +355,7 @@ mod tests {
                 .message
                 .contains("needs a password")
         );
-        app.reload();
+        app.reload(&context);
         wait(&mut app, &context, |a| a.password_input.is_some());
         assert!(app.error.is_none());
     }
@@ -370,7 +370,7 @@ mod tests {
         assert!(app.password_input.is_none());
         assert_eq!(title(&app), "Edition one");
         assert!(app.error.as_ref().unwrap().message.contains("password"));
-        app.reload();
+        app.reload(&context);
         wait(&mut app, &context, |a| a.password_input.is_some());
         assert!(!app.automatic_reload);
     }

@@ -70,7 +70,7 @@ impl Pagewing {
                             .id,
                         );
                         if !self.selection.rects.is_empty() && ui.button("Add comment").clicked() {
-                            self.add_comment();
+                            self.add_comment(ui.ctx());
                         }
                         ui.separator();
                         if appearance::tool(ui, appearance::Icon::Previous, "Previous page", false)

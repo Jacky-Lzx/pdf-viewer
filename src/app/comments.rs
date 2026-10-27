@@ -53,6 +53,31 @@ fn comment_card(
     response
 }
 
+// Match the inputs accepted by the multiline editor. This is deliberately
+// conservative for edits such as undo or Delete that may leave text unchanged:
+// let the widget apply them before allowing a document change.
+fn edits_comment(event: &egui::Event) -> bool {
+    use egui::{Event, ImeEvent, Key};
+    match event {
+        Event::Cut => true,
+        Event::Paste(text) => !text.is_empty(),
+        Event::Text(text) => !text.is_empty() && text != "\n" && text != "\r",
+        Event::Ime(ImeEvent::Preedit(_) | ImeEvent::Commit(_)) => true,
+        Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            matches!(key, Key::Backspace | Key::Delete)
+                || (*key == Key::Enter && modifiers.is_none())
+                || (modifiers.command && matches!(key, Key::Z | Key::Y))
+                || (modifiers.ctrl && matches!(key, Key::H | Key::K | Key::U | Key::W))
+        }
+        _ => false,
+    }
+}
+
 #[derive(Default)]
 struct CommentActions {
     save: bool,
@@ -74,6 +99,9 @@ pub(super) struct CommentUi {
     pub focus: bool,
     pub saving: bool,
     pub save_requested: bool,
+    // Only the pass before TextEdit handles events can contain pending edits.
+    // The pass number also expires this state outside Context::run.
+    input_pass: Option<u64>,
     pub filter_motions: Vec<isize>,
     pub filter_confirm: bool,
 }
@@ -131,9 +159,10 @@ impl Pagewing {
             self.comments.filter_motions.clear();
             self.comments.filter_confirm = false;
         }
-        // A queued save still needs the focused editor to consume this batch's
-        // final text, even if a later action hides the panel in the same frame.
-        if !open && !self.comments.save_requested {
+        // Consume final text before hiding the panel, just as for a queued save.
+        let pending = self.pending_comment_input(context);
+        self.comments.focus |= !open && pending;
+        if !open && !self.comments.save_requested && !pending {
             self.comments.focus = false;
             context.memory_mut(|memory| {
                 for name in ["pagewing-comment-input", "pagewing-comment-filter"] {
@@ -143,8 +172,27 @@ impl Pagewing {
         }
     }
 
-    pub(super) fn comment_change_blocked(&mut self) -> bool {
-        if self.comments.busy() || self.comments.unsaved() {
+    pub(super) fn begin_comment_input(&mut self, context: &egui::Context) {
+        self.comments.input_pass = (self.comments.open
+            && !self.comments.saving
+            && self.comments.editor.as_ref().is_some_and(Comment::editable)
+            && (self.comments.focus
+                || context
+                    .memory(|memory| memory.has_focus(egui::Id::new("pagewing-comment-input")))))
+        .then(|| context.cumulative_pass_nr());
+    }
+
+    fn pending_comment_input(&self, context: &egui::Context) -> bool {
+        self.comments.input_pass == Some(context.cumulative_pass_nr())
+            && context.input(|input| input.events.iter().any(edits_comment))
+    }
+
+    pub(super) fn comment_change_blocked(&mut self, context: &egui::Context) -> bool {
+        let pending = self.pending_comment_input(context);
+        if self.comments.busy() || self.comments.unsaved() || pending {
+            // A pointer action may have surrendered focus before the editor
+            // draws. Give its unprocessed text back to the same draft.
+            self.comments.focus |= pending;
             self.comments.open = true;
             self.notify("Save or discard the comment before changing documents.");
             true
@@ -153,8 +201,8 @@ impl Pagewing {
         }
     }
 
-    pub(super) fn add_comment(&mut self) {
-        if self.loading || self.comment_change_blocked() {
+    pub(super) fn add_comment(&mut self, context: &egui::Context) {
+        if self.loading || self.comment_change_blocked(context) {
             return;
         }
         let Some(text) = self
@@ -194,8 +242,8 @@ impl Pagewing {
         ));
     }
 
-    fn edit_comment(&mut self, index: usize) {
-        if self.loading || self.comment_change_blocked() {
+    fn edit_comment(&mut self, index: usize, context: &egui::Context) {
+        if self.loading || self.comment_change_blocked(context) {
             return;
         }
         let comment = self.comments.comments.items[index].clone();
@@ -228,8 +276,8 @@ impl Pagewing {
             .save_comment(self.id, self.reading.path.clone(), comment);
     }
 
-    fn reply_comment(&mut self) {
-        if self.loading || self.comment_change_blocked() {
+    fn reply_comment(&mut self, context: &egui::Context) {
+        if self.loading || self.comment_change_blocked(context) {
             return;
         }
         let Some(reply) = self
@@ -269,7 +317,9 @@ impl Pagewing {
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
         self.input_buttons.close_comments = None;
         let save_requested = self.comments.save_requested;
-        if (!self.comments.open && !save_requested) || self.nav.count == 0 {
+        if (!self.comments.open && !save_requested && !self.pending_comment_input(context))
+            || self.nav.count == 0
+        {
             return;
         }
         let mut selected = None;
@@ -306,7 +356,7 @@ impl Pagewing {
                             )
                             .clicked()
                         {
-                            self.add_comment();
+                            self.add_comment(context);
                         }
                         ui.separator();
                         if !self.comments.loaded {
@@ -362,6 +412,9 @@ impl Pagewing {
                             selected = self.comments.view.selected();
                         }
                         actions = self.comment_editor(ui);
+                        // InputState retains text events after TextEdit handles
+                        // them. Later actions must inspect the actual draft.
+                        self.comments.input_pass = None;
                     });
             });
         let save_requested = std::mem::take(&mut self.comments.save_requested);
@@ -369,7 +422,7 @@ impl Pagewing {
             self.comments.editor = None;
         }
         if let Some(index) = selected {
-            self.edit_comment(index);
+            self.edit_comment(index, context);
         }
         // Keyboard confirmation is queued before widgets run. Save only after
         // the editor has applied text events from this same input batch.
@@ -378,7 +431,7 @@ impl Pagewing {
         } else if actions.delete {
             self.delete_comment();
         } else if actions.reply {
-            self.reply_comment();
+            self.reply_comment(context);
         }
         if !self.comments.open {
             self.set_comments_open(context, false);
@@ -667,7 +720,7 @@ impl Pagewing {
             }
         }
         if let Some(index) = selected {
-            self.edit_comment(index);
+            self.edit_comment(index, ui.ctx());
         }
     }
 }
@@ -773,6 +826,169 @@ mod tests {
         }
     }
 
+    fn saved_comment_editor() -> (tempfile::TempDir, Context, Pagewing) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("comments.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let pdf = crate::document::load(&path, "").unwrap();
+        crate::annotations::save(
+            &pdf,
+            &Comment {
+                page: 0,
+                slot: None,
+                parent: None,
+                review: ReviewStatus::None,
+                marked: false,
+                states: Vec::new(),
+                kind: "Highlight".into(),
+                contents: "Original comment".into(),
+                author: "Pagewing".into(),
+                rects: vec![hayro::kurbo::Rect::new(50.0, 80.0, 150.0, 100.0)],
+                has_appearance: false,
+                truncated: false,
+                locked: false,
+            },
+            &path,
+        )
+        .unwrap();
+        let context = Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path.clone()),
+            None,
+            root.path().join("library.json"),
+        );
+        wait(&mut app, &context, |app| app.comments.loaded);
+        app.edit_comment(0, &context);
+        for _ in 0..3 {
+            frame(&mut app, &context, Vec::new());
+        }
+        assert!(!app.comments.unsaved());
+        (root, context, app)
+    }
+
+    #[test]
+    fn pending_editor_text_survives_document_shortcuts() {
+        for (action_key, modifiers) in [
+            (Key::W, Modifiers::COMMAND),
+            (Key::R, Modifiers::COMMAND),
+            (Key::T, Modifiers::COMMAND | Modifiers::SHIFT),
+        ] {
+            for (edits, expected) in [
+                (vec![Event::Text("Final draft 📝".into())], "Final draft 📝"),
+                (vec![Event::Paste("Pasted draft".into())], "Pasted draft"),
+                (vec![Event::Paste("\n".into())], "\n"),
+                (vec![Event::Cut], ""),
+                (key(Key::Backspace, Modifiers::NONE), ""),
+                (key(Key::Delete, Modifiers::NONE), ""),
+                (key(Key::Enter, Modifiers::NONE), "\n"),
+                (
+                    vec![
+                        Event::Ime(egui::ImeEvent::Enabled),
+                        Event::Ime(egui::ImeEvent::Preedit("草稿".into())),
+                        Event::Ime(egui::ImeEvent::Commit("草稿".into())),
+                    ],
+                    "草稿",
+                ),
+            ] {
+                let (root, context, mut app) = saved_comment_editor();
+                let path = app.reading.path.clone();
+                let target = root.path().join("closed.pdf");
+                app.last_closed = Some(target.clone());
+                let mut events = key(Key::A, Modifiers::COMMAND);
+                events.extend(edits);
+                let mut action = key(action_key, modifiers);
+                // Shortcut-generated text must be consumed without swallowing
+                // the user's earlier draft in this same event batch.
+                action.insert(1, Event::Text(format!("{action_key:?}")));
+                events.extend(action);
+                frame(&mut app, &context, events);
+                assert_eq!(app.reading.path, path, "{action_key:?}: {expected:?}");
+                assert!(!app.loading, "{action_key:?}");
+                assert!(
+                    app.comments.unsaved(),
+                    "{action_key:?}: {expected:?}, {:?}",
+                    app.comments.editor
+                );
+                assert_eq!(
+                    app.comments.editor.as_ref().unwrap().contents,
+                    expected,
+                    "{action_key:?}"
+                );
+                assert_eq!(app.last_closed.as_ref(), Some(&target));
+                // A previous input batch must not block a later clean close.
+                app.comments.editor.as_mut().unwrap().contents = "Original comment".into();
+                let mut close = key(Key::W, Modifiers::COMMAND);
+                close.insert(1, Event::Text("w".into()));
+                frame(&mut app, &context, close);
+                assert_eq!(app.nav.count, 0);
+                assert!(app.comments.editor.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_transitions_preserve_pending_editor_input() {
+        for action in ["open", "reload", "close", "hide"] {
+            let (root, context, mut app) = saved_comment_editor();
+            let path = app.reading.path.clone();
+            let mut button = egui::Rect::NOTHING;
+            let mut draw = |events| {
+                let _ = context.run(
+                    RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(1180.0, 820.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |context| {
+                        app.events(context);
+                        egui::TopBottomPanel::top("transition").show(context, |ui| {
+                            let response = ui.button(action);
+                            button = response.rect;
+                            if response.clicked() {
+                                match action {
+                                    "open" => app.open(root.path().join("another.pdf"), context),
+                                    "reload" => app.reload(context),
+                                    "close" => app.close_document(context),
+                                    "hide" => app.set_comments_open(context, false),
+                                    _ => unreachable!(),
+                                }
+                            }
+                        });
+                        app.comments_sidebar(context);
+                        app.canvas(context);
+                    },
+                );
+                button.center()
+            };
+            let mut pos = egui::Pos2::ZERO;
+            for _ in 0..3 {
+                pos = draw(Vec::new());
+            }
+            let mut events = key(Key::A, Modifiers::COMMAND);
+            events.push(Event::Text("Pointer draft 📝".into()));
+            events.push(Event::PointerMoved(pos));
+            events.extend([true, false].map(|pressed| Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            }));
+            draw(events);
+            assert_eq!(app.reading.path, path, "{action}");
+            assert!(!app.loading, "{action}");
+            assert_eq!(
+                app.comments.editor.as_ref().unwrap().contents,
+                "Pointer draft 📝",
+                "{action}"
+            );
+            assert_eq!(app.comments.open, action != "hide");
+        }
+    }
+
     #[test]
     fn queued_save_protects_the_editor_and_final_input_until_the_worker_starts() {
         for action in [
@@ -781,44 +997,9 @@ mod tests {
             Some((Key::T, Modifiers::COMMAND | Modifiers::SHIFT)),
             None,
         ] {
-            let root = tempfile::tempdir().unwrap();
-            let path = root.path().join("comments.pdf");
-            std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
-            let pdf = crate::document::load(&path, "").unwrap();
-            crate::annotations::save(
-                &pdf,
-                &Comment {
-                    page: 0,
-                    slot: None,
-                    parent: None,
-                    review: ReviewStatus::None,
-                    marked: false,
-                    states: Vec::new(),
-                    kind: "Highlight".into(),
-                    contents: "Original comment".into(),
-                    author: "Pagewing".into(),
-                    rects: vec![hayro::kurbo::Rect::new(50.0, 80.0, 150.0, 100.0)],
-                    has_appearance: false,
-                    truncated: false,
-                    locked: false,
-                },
-                &path,
-            )
-            .unwrap();
-            let context = Context::default();
-            let mut app = Pagewing::with_context(
-                &context,
-                Some(path.clone()),
-                None,
-                root.path().join("library.json"),
-            );
-            wait(&mut app, &context, |app| app.comments.loaded);
-            app.edit_comment(0);
-            let mut output = egui::FullOutput::default();
-            for _ in 0..3 {
-                output = frame(&mut app, &context, Vec::new());
-            }
-            assert!(!app.comments.unsaved());
+            let (root, context, mut app) = saved_comment_editor();
+            let path = app.reading.path.clone();
+            let output = frame(&mut app, &context, Vec::new());
             let target = root.path().join("closed.pdf");
             app.last_closed = Some(target.clone());
             let expected = if action.is_some() {
@@ -906,7 +1087,7 @@ mod tests {
             root.path().join("library.json"),
         );
         wait(&mut app, &context, |app| app.comments.loaded);
-        app.edit_comment(0);
+        app.edit_comment(0, &context);
         for depth in 1..=2 {
             click_text(&mut app, &context, "Reply");
             let editor = app.comments.editor.as_ref().unwrap();
@@ -925,7 +1106,7 @@ mod tests {
                     && app.comments.editor.is_none()
             });
             assert_eq!(app.comments.comments.items.len(), depth + 1);
-            app.edit_comment(depth);
+            app.edit_comment(depth, &context);
         }
         assert_eq!(
             app.comments.comments.thread_rows(),
@@ -938,9 +1119,9 @@ mod tests {
             ReviewStatus::Completed
         );
         assert!(app.comments.unsaved(), "status changes are drafts too");
-        app.reload();
+        app.reload(&context);
         assert!(!app.reloading, "status drafts must defer reloads");
-        app.edit_comment(0);
+        app.edit_comment(0, &context);
         assert_eq!(
             app.comments.editor.as_ref().unwrap().slot,
             app.comments.comments.items[2].slot,
@@ -966,7 +1147,7 @@ mod tests {
             "saving must retain the active filters"
         );
         assert_eq!(app.comments.comments.items.len(), 3);
-        app.edit_comment(1);
+        app.edit_comment(1, &context);
         click_text(&mut app, &context, "Delete reply & replies");
         wait(&mut app, &context, |app| {
             !app.comments.busy()
@@ -1050,7 +1231,7 @@ mod tests {
         );
         app.close_document(&context);
         assert_eq!(app.nav.count, 6, "unsaved comment must block closing");
-        app.reload();
+        app.reload(&context);
         assert!(!app.reloading, "unsaved comment must block reloading");
         frame(&mut app, &context, key(Key::Escape, Modifiers::NONE));
         assert!(!app.comments.open);
@@ -1086,7 +1267,7 @@ mod tests {
             !app.comments.open,
             "a later hide request must keep the comments sidebar closed"
         );
-        app.edit_comment(0);
+        app.edit_comment(0, &context);
         assert_eq!(
             app.comments.editor.as_ref().unwrap().contents,
             "中文 comment\nj k / ? should stay in the comment last 📝"
@@ -1344,7 +1525,7 @@ mod tests {
         assert_eq!(app.reading.rotation, 0);
         assert_eq!(app.comments.view.matches(), 1);
         assert_eq!(app.comments.view.filter.query, "jkg STRASSE");
-        app.edit_comment(0);
+        app.edit_comment(0, &context);
         app.comments.editor.as_mut().unwrap().contents = "unsaved draft".into();
         click_text(&mut app, &context, "Current page");
         click_text(&mut app, &context, "Marked only");

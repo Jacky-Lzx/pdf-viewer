@@ -88,6 +88,14 @@ def run(binary):
                 application.send_signal(signal.SIGSTOP)
                 try:
                     text("Updated elsewhere comment", delay=0)
+                    keyboard.key("w", ctrl=True, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                assert copied() == "Updated elsewhere comment", "same-frame close retains the final unsaved text"
+                assert document.read_bytes() == original, "draft protection does not write the PDF"
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    text("Saved elsewhere comment", delay=0)
                     keyboard.key(0xFF0D, ctrl=True, delay=0)
                     keyboard.key("r", ctrl=True, delay=0)
                 finally:
@@ -99,7 +107,7 @@ def run(binary):
                 # the new list to become interactive before checking its editor.
                 def saved_comment():
                     keyboard.click((1000, 300))
-                    return copied() == "Updated elsewhere comment"
+                    return copied() == "Saved elsewhere comment"
                 wait_for(saved_comment, "saved text survives the worker reload")
                 query("jkg STRASSE")
                 assert copied() == "jkg STRASSE", "Unicode folding query does not navigate or rotate"
@@ -125,7 +133,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame final text/save/reload protection, page navigation and save/reload")
+                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, page navigation and save/reload")
             except Exception:
                 log.flush()
                 log.seek(0)

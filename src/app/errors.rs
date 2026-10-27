@@ -80,12 +80,12 @@ impl Pagewing {
         });
     }
 
-    pub(super) fn retry_error(&mut self) {
+    pub(super) fn retry_error(&mut self, context: &egui::Context) {
         if self.loading {
             return;
         }
         match self.error.as_ref().and_then(|error| error.recovery) {
-            Some(Recovery::Document) => self.reload(),
+            Some(Recovery::Document) => self.reload(context),
             Some(Recovery::Page) => {
                 self.requested = None;
                 self.error = None;
@@ -171,7 +171,7 @@ impl Pagewing {
                         });
                         self.input_buttons.retry_error = Some(retry.id);
                         if retry.clicked() {
-                            self.retry_error();
+                            self.retry_error(context);
                         }
                     }
                     let copy = copy_button(ui);
@@ -309,10 +309,10 @@ mod tests {
         app.reloading = true;
         app.worker_error(&context, Failure::Render("page failed".into()));
         assert_eq!(app.error.as_ref().unwrap().recovery, Some(Recovery::Page));
-        app.retry_error();
+        app.retry_error(&context);
         assert!(app.error.is_none() && !app.loading);
         app.error = Some("SyncTeX target is invalid".into());
-        app.retry_error();
+        app.retry_error(&context);
         assert_eq!(app.error.as_ref().unwrap().recovery, None);
         assert!(!app.loading);
         app.worker_error(&context, Failure::Session);
@@ -350,7 +350,7 @@ mod tests {
         wait(&mut app);
         assert_eq!(app.nav.count, 6);
         app.worker_error(&context, Failure::Session);
-        app.retry_error();
+        app.retry_error(&context);
         assert!(app.loading && app.reloading);
         wait(&mut app);
         assert!(app.error.is_none() && !app.reloading);
