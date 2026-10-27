@@ -74,6 +74,8 @@ pub(super) struct CommentUi {
     pub focus: bool,
     pub saving: bool,
     pub save_requested: bool,
+    pub filter_motions: Vec<isize>,
+    pub filter_confirm: bool,
 }
 
 impl CommentUi {
@@ -109,8 +111,23 @@ impl CommentUi {
 }
 
 impl Pagewing {
+    pub(super) fn comment_filter_focused(&self, context: &egui::Context) -> bool {
+        self.comments.open
+            && !self.search_focus
+            && !self.goto_open
+            && !self.password_open
+            && !self.help
+            && !self.properties_open
+            && self.recent_picker.is_none()
+            && context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-comment-filter")))
+    }
+
     pub(super) fn set_comments_open(&mut self, context: &egui::Context, open: bool) {
         self.comments.open = open;
+        if !open {
+            self.comments.filter_motions.clear();
+            self.comments.filter_confirm = false;
+        }
         // A queued save still needs the focused editor to consume this batch's
         // final text, even if a later action hides the panel in the same frame.
         if !open && !self.comments.save_requested {
@@ -179,6 +196,7 @@ impl Pagewing {
             return;
         }
         let comment = self.comments.comments.items[index].clone();
+        self.comments.view.select(index);
         self.jump(comment.page);
         self.pending_focus = comment.rects.first().copied();
         self.comments.original = comment.contents.clone();
@@ -300,10 +318,19 @@ impl Pagewing {
                                 "Showing a limited number of annotations.",
                             );
                         }
-                        let changed = self
-                            .comments
+                        self.comments
                             .view
                             .update(&self.comments.comments, self.nav.page);
+                        let filter_focused = self.comment_filter_focused(context);
+                        let mut motions = std::mem::take(&mut self.comments.filter_motions);
+                        for delta in motions.drain(..) {
+                            if filter_focused {
+                                self.comments.view.step(delta);
+                            }
+                        }
+                        self.comments.filter_motions = motions;
+                        let confirm =
+                            std::mem::take(&mut self.comments.filter_confirm) && filter_focused;
                         if self.comments.loaded
                             && self.comments.view.filter != CommentFilter::default()
                         {
@@ -327,7 +354,10 @@ impl Pagewing {
                         } else {
                             remaining
                         };
-                        selected = self.comment_list(ui, list_height, changed);
+                        selected = self.comment_list(ui, list_height);
+                        if confirm && !self.loading && !self.comments.busy() {
+                            selected = self.comments.view.selected();
+                        }
                         actions = self.comment_editor(ui);
                     });
             });
@@ -358,7 +388,8 @@ impl Pagewing {
                 .id(egui::Id::new("pagewing-comment-filter"))
                 .desired_width(f32::INFINITY)
                 .hint_text("Filter text or author…"),
-        );
+        )
+        .on_hover_text("Filter comments · ↑/↓ or Ctrl+J/K to select · Enter to open");
         ui.horizontal_wrapped(|ui| {
             egui::ComboBox::from_id_salt("pagewing-comment-review-filter")
                 .selected_text(
@@ -393,12 +424,7 @@ impl Pagewing {
         });
     }
 
-    fn comment_list(
-        &mut self,
-        ui: &mut egui::Ui,
-        list_height: f32,
-        changed: bool,
-    ) -> Option<usize> {
+    fn comment_list(&mut self, ui: &mut egui::Ui, list_height: f32) -> Option<usize> {
         let mut selected = None;
         let row_height = ui.text_style_height(&egui::TextStyle::Button) * 3.0
             + ui.spacing().button_padding.y * 2.0;
@@ -406,9 +432,12 @@ impl Pagewing {
             .id_salt("pagewing-comment-list")
             .auto_shrink([false, false])
             .max_height(list_height);
-        if changed {
-            list = list.vertical_scroll_offset(0.0);
+        if std::mem::take(&mut self.comments.view.reveal) {
+            let row = self.comments.view.selected_row().unwrap_or(0);
+            list = list
+                .vertical_scroll_offset(row as f32 * (row_height + ui.spacing().item_spacing.y));
         }
+        let keyboard_focus = self.comment_filter_focused(ui.ctx());
         list.show_rows(
             ui,
             row_height,
@@ -456,9 +485,13 @@ impl Pagewing {
                             if matched { "" } else { " · Thread context" },
                         ),
                     ];
-                    let active = self.comments.editor.as_ref().is_some_and(|current| {
-                        current.page == comment.page && current.slot == comment.slot
-                    });
+                    let active = if keyboard_focus {
+                        self.comments.view.selected() == Some(index)
+                    } else {
+                        self.comments.editor.as_ref().is_some_and(|current| {
+                            current.page == comment.page && current.slot == comment.slot
+                        })
+                    };
                     ui.horizontal(|ui| {
                         ui.add_space(depth.min(6) as f32 * 14.0);
                         if ui
@@ -1287,5 +1320,127 @@ mod tests {
             assert_eq!(app.nav.page, page);
             assert_eq!(app.comments.view.filter.query, "draft filter");
         }
+    }
+
+    #[test]
+    fn comment_filter_keyboard_confirms_new_query_and_protects_editor_drafts() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("keyboard.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let context = Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path),
+            Some(0),
+            root.path().join("library.json"),
+        );
+        wait(&mut app, &context, |app| app.comments.loaded);
+        let parent = Comment {
+            page: 0,
+            slot: Some(0),
+            parent: None,
+            review: ReviewStatus::None,
+            marked: false,
+            states: Vec::new(),
+            kind: "Text".into(),
+            contents: "Parent context".into(),
+            author: "Reviewer".into(),
+            rects: Vec::new(),
+            has_appearance: false,
+            truncated: false,
+            locked: false,
+        };
+        let mut other = parent.clone();
+        other.page = 2;
+        other.contents = "Another needle".into();
+        let mut reply = parent.reply().unwrap();
+        reply.page = 4;
+        reply.slot = Some(0);
+        reply.contents = "Nested needle".into();
+        app.comments.set_comments(Comments {
+            items: vec![parent, other, reply],
+            limited: false,
+        });
+        app.comments.open = true;
+        click_text(&mut app, &context, "Filter text or author…");
+        let mut events = vec![Event::Text("needle".into())];
+        events.extend(key(Key::Enter, Modifiers::NONE));
+        frame(&mut app, &context, events);
+        assert_eq!(
+            app.nav.page, 4,
+            "Enter follows the new query's first match, not its ancestor"
+        );
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Nested needle"
+        );
+        frame(&mut app, &context, Vec::new());
+        app.comments.editor.as_mut().unwrap().contents = "Unsaved draft".into();
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+        let mut events = key(Key::J, Modifiers::CTRL);
+        events.extend(key(Key::Enter, Modifiers::NONE));
+        frame(&mut app, &context, events);
+        assert_eq!(app.comments.view.selected(), Some(1));
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Unsaved draft"
+        );
+        assert_eq!(app.nav.page, 4, "keyboard selection cannot discard a draft");
+        app.comments.editor = None;
+        frame(&mut app, &context, key(Key::Enter, Modifiers::NONE));
+        assert_eq!(app.nav.page, 2);
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Another needle"
+        );
+        frame(&mut app, &context, Vec::new());
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+        app.comments.view.filter.query = "missing".into();
+        let mut events = key(Key::ArrowDown, Modifiers::NONE);
+        events.extend(key(Key::Enter, Modifiers::NONE));
+        frame(&mut app, &context, events);
+        assert_eq!(app.nav.page, 2);
+        assert_eq!(app.comments.view.selected(), None);
+        // A later global Find action must cancel a queued comment confirmation.
+        app.comments.view.filter.query = "needle".into();
+        let mut events = key(Key::Enter, Modifiers::NONE);
+        events.extend(key(Key::F, Modifiers::COMMAND));
+        frame(&mut app, &context, events);
+        assert!(app.search_open);
+        assert_eq!(app.nav.page, 2);
+        // A match beneath many retained ancestors must actually be painted in
+        // the virtual viewport, rather than merely selected outside it.
+        app.search_open = false;
+        app.search_focus = false;
+        app.comments.editor = None;
+        let template = app.comments.comments.items[0].clone();
+        let items = (0..128)
+            .map(|slot| {
+                let mut comment = template.clone();
+                comment.slot = Some(slot);
+                comment.parent = (slot > 0).then(|| crate::annotations::CommentId {
+                    page: 0,
+                    slot: slot - 1,
+                });
+                comment.contents = if slot == 127 {
+                    "Deepest needle"
+                } else {
+                    "Ancestor"
+                }
+                .into();
+                comment
+            })
+            .collect();
+        app.comments.set_comments(Comments {
+            items,
+            limited: false,
+        });
+        app.comments.view.filter.query = "deepest".into();
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+        frame(&mut app, &context, Vec::new());
+        let output = frame(&mut app, &context, Vec::new());
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Deepest needle")));
+        frame(&mut app, &context, key(Key::Enter, Modifiers::NONE));
+        assert_eq!(app.comments.editor.as_ref().unwrap().slot, Some(127));
     }
 }

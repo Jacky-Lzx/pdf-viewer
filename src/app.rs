@@ -1498,6 +1498,29 @@ impl Pagewing {
                 }
                 continue;
             }
+            if self.comment_filter_focused(context) {
+                if key == Key::Enter && modifiers.is_none() {
+                    self.comments.filter_confirm = true;
+                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                } else if (matches!(key, Key::ArrowUp | Key::ArrowDown) && modifiers.is_none())
+                    || (modifiers.ctrl
+                        && !modifiers.alt
+                        && !modifiers.shift
+                        && matches!(key, Key::J | Key::K))
+                {
+                    self.comments
+                        .filter_motions
+                        .push(if matches!(key, Key::ArrowUp | Key::K) {
+                            -1
+                        } else {
+                            1
+                        });
+                    context.input_mut(|input| {
+                        shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
+                    });
+                }
+                continue;
+            }
             if !self.search_focus
                 && !self.goto_open
                 && !self.password_open

@@ -82,7 +82,7 @@ def run(binary):
                 query("elsewhere")
                 assert copied() == "elsewhere", "filter input owns text editing shortcuts"
                 expect(0)
-                keyboard.click((1000, 300))
+                keyboard.key(0xFF0D)
                 expect(1)
                 assert copied() == "Elsewhere comment", "card opens the full comment on its page"
                 text("Updated elsewhere comment")
@@ -105,7 +105,12 @@ def run(binary):
                 expect(0)
                 keyboard.key("m", ctrl=True, shift=True)
                 keyboard.click((1030, 145))  # Marked only; retain the root as context.
-                keyboard.click((1000, 365))
+                query("jkg STRASSE")
+                keyboard.key("k", ctrl=True)
+                keyboard.key(0xFF0D)
+                assert copied() == "Root question", "keyboard selection can open retained parent context"
+                query("jkg STRASSE")
+                keyboard.key(0xFF0D)
                 assert copied() == "Nested needle jkg", "filtered reply stays selectable with its parent context"
                 query("jkg STRASSE")
                 application.send_signal(signal.SIGSTOP)
@@ -115,7 +120,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, parent context, full editor, page navigation and save/reload")
+                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, page navigation and save/reload")
             except Exception:
                 log.flush()
                 log.seek(0)

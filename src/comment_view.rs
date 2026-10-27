@@ -31,6 +31,8 @@ pub struct CommentView {
     folded_bytes: usize,
     applied: Option<(CommentFilter, Option<usize>)>,
     matches: usize,
+    selected: Option<usize>,
+    pub reveal: bool,
 }
 
 impl CommentView {
@@ -54,9 +56,11 @@ impl CommentView {
         self.applied = None;
         self.visible.clear();
         self.matches = 0;
+        self.selected = None;
+        self.reveal = false;
     }
 
-    /// Returns true only when the visible list changed and should scroll to top.
+    /// Refilter only when its inputs change, selecting the first direct match.
     pub fn update(&mut self, comments: &Comments, page: usize) -> bool {
         let page = self.filter.current_page.then_some(page);
         if self
@@ -119,6 +123,8 @@ impl CommentView {
                 })
             }));
         self.applied = Some((self.filter.clone(), page));
+        self.selected = self.visible.iter().position(|row| row.matched);
+        self.reveal = true;
         true
     }
 
@@ -128,6 +134,33 @@ impl CommentView {
 
     pub fn matches(&self) -> usize {
         self.matches
+    }
+
+    pub fn selected(&self) -> Option<usize> {
+        self.visible.get(self.selected?).map(|row| row.index)
+    }
+
+    pub fn selected_row(&self) -> Option<usize> {
+        self.selected
+    }
+
+    pub fn select(&mut self, index: usize) {
+        if let Some(row) = self.visible.iter().position(|row| row.index == index) {
+            self.selected = Some(row);
+        }
+    }
+
+    pub fn step(&mut self, delta: isize) {
+        if self.visible.is_empty() {
+            return;
+        }
+        self.selected = Some(
+            self.selected
+                .unwrap_or(0)
+                .saturating_add_signed(delta)
+                .min(self.visible.len() - 1),
+        );
+        self.reveal = true;
     }
 
     /// Page painting is independent of the sidebar's filters.
@@ -183,6 +216,12 @@ mod tests {
         };
         assert!(view.update(&comments, 1));
         assert_eq!(view.matches(), 1);
+        assert_eq!(
+            view.selected(),
+            Some(0),
+            "select the matching reply, not its context"
+        );
+        assert_eq!(view.selected_row(), Some(2));
         assert_eq!(
             view.rows(),
             [
@@ -249,6 +288,11 @@ mod tests {
         assert_eq!(view.matches(), 1);
         assert_eq!(view.rows().len(), 10_000);
         assert_eq!(view.rows().last().unwrap().depth, 9_999);
+        assert_eq!(
+            view.selected_row(),
+            Some(9_999),
+            "reveal the match at the end of a deep thread"
+        );
         comments.items[0].parent = comments.items[9_999].id();
         view.set_comments(&comments);
         view.update(&comments, 0);
@@ -300,5 +344,37 @@ mod tests {
             assert!(view.folded_bytes <= SEARCH_BYTES);
             assert!(view.folded[0].is_none());
         }
+    }
+
+    #[test]
+    fn keyboard_selection_clamps_each_motion_and_refilter_resets_it() {
+        let comments = Comments {
+            items: (0..3)
+                .map(|slot| comment(0, slot, None, &format!("Comment {slot}")))
+                .collect(),
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        view.update(&comments, 0);
+        view.step(isize::MIN);
+        view.step(1);
+        assert_eq!(
+            view.selected(),
+            Some(1),
+            "up at the start must not cancel the following down"
+        );
+        view.step(isize::MAX);
+        assert_eq!(view.selected(), Some(2));
+        view.select(0);
+        assert_eq!(view.selected_row(), Some(0));
+        view.filter.query = "missing".into();
+        view.update(&comments, 0);
+        view.step(1);
+        assert_eq!(view.selected(), None);
+        view.filter.query = "2".into();
+        view.update(&comments, 0);
+        assert_eq!(view.selected(), Some(2));
+        assert_eq!(view.selected_row(), Some(0));
     }
 }
