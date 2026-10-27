@@ -264,14 +264,31 @@ impl Pagewing {
         let mut open = true;
         let mut close = false;
         let mut copied = false;
-        egui::Window::new("Keyboard shortcuts")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(620.0)
-            .max_width((context.content_rect().width() - 60.0).max(280.0))
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .show(context, |ui| {
+        let size = context.content_rect().size();
+        let short = size.y < 420.0;
+        let narrow = size.x < 480.0;
+        let mut frame = egui::Frame::window(&context.style());
+        if short || narrow {
+            frame.inner_margin = 10.into();
+        }
+        egui::Window::new(if narrow {
+            "Shortcuts"
+        } else {
+            "Keyboard shortcuts"
+        })
+        .id(egui::Id::new("Keyboard shortcuts"))
+        .frame(frame)
+        .open(&mut open)
+        .collapsible(false)
+        // Refresh the layout budget on every resize, rather than retaining
+        // egui's previous narrow width or gradually growing its scroll area.
+        .fixed_size(Vec2::new(
+            (size.x - 64.0).clamp(100.0, 620.0),
+            (size.y - 100.0).max(100.0),
+        ))
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(context, |ui| {
+            if !short {
                 ui.label(
                     RichText::new("Stay in the flow.")
                         .size(23.0)
@@ -279,31 +296,39 @@ impl Pagewing {
                         .color(ACCENT),
                 );
                 ui.add_space(8.0);
-                let (input, _) = super::shortcuts::text_input(
-                    ui,
-                    egui::Id::new("pagewing-help-input"),
-                    &mut self.help_filter.focus,
-                    &mut self.deferred_input,
-                    egui::TextEdit::singleline(&mut self.help_filter.query)
-                        .desired_width(f32::INFINITY)
-                        .char_limit(256)
-                        .hint_text("Filter by a key or action…"),
-                );
-                if input.changed() {
-                    self.help_filter.filter();
-                }
-                ui.weak(format!(
-                    "{} shortcuts · Escape to close",
-                    self.help_filter.visible.len()
-                ));
-                let column_width = ((ui.available_width() - 24.0) * 0.5).max(100.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("pagewing-help-results")
-                    .max_height((context.content_rect().height() - 245.0).max(100.0))
-                    .show(ui, |ui| {
-                        if self.help_filter.visible.is_empty() {
-                            ui.label("No matching shortcuts.");
+            }
+            let (input, _) = super::shortcuts::text_input(
+                ui,
+                egui::Id::new("pagewing-help-input"),
+                &mut self.help_filter.focus,
+                &mut self.deferred_input,
+                egui::TextEdit::singleline(&mut self.help_filter.query)
+                    .desired_width(f32::INFINITY)
+                    .char_limit(256)
+                    .hint_text("Filter by a key or action…"),
+            );
+            if input.changed() {
+                self.help_filter.filter();
+            }
+            ui.weak(format!("{} shortcuts", self.help_filter.visible.len()));
+            let stacked = ui.available_width() < 420.0;
+            let column_width = (ui.available_width() - 24.0) * 0.5;
+            egui::ScrollArea::vertical()
+                .id_salt("pagewing-help-results")
+                // Reserve room for the title, filter and actions outside
+                // scrolling, including the larger frame on desktop.
+                .max_height((size.y - if short { 180.0 } else { 300.0 }).max(32.0))
+                .show(ui, |ui| {
+                    if self.help_filter.visible.is_empty() {
+                        ui.label("No matching shortcuts.");
+                    }
+                    if stacked {
+                        for (keys, action) in self.help_filter.rows() {
+                            ui.add(egui::Label::new(RichText::new(keys).monospace()).wrap());
+                            ui.add(egui::Label::new(action).wrap());
+                            ui.add_space(8.0);
                         }
+                    } else {
                         egui::Grid::new("keys")
                             .num_columns(2)
                             .spacing([24.0, 8.0])
@@ -315,24 +340,27 @@ impl Pagewing {
                                     ui.end_row();
                                 }
                             });
-                    });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            !self.help_filter.visible.is_empty(),
-                            egui::Button::new("Copy shortcuts"),
-                        )
-                        .clicked()
-                    {
-                        context.copy_text(self.help_filter.copy_text());
-                        copied = true;
-                        input.request_focus();
                     }
-                    close = ui.button("Close").clicked();
                 });
-                ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan.");
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        !self.help_filter.visible.is_empty(),
+                        egui::Button::new("Copy shortcuts"),
+                    )
+                    .clicked()
+                {
+                    context.copy_text(self.help_filter.copy_text());
+                    copied = true;
+                    input.request_focus();
+                }
+                close = ui.button("Close").on_hover_text("Escape").clicked();
             });
+            if !short {
+                ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan.");
+            }
+        });
         if copied {
             self.notify("Copied keyboard shortcuts");
         }
@@ -345,6 +373,78 @@ impl Pagewing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_and_its_actions_fit_the_minimum_reader_size() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        for size in [
+            Vec2::new(1180.0, 820.0),
+            Vec2::new(240.0, 240.0),
+            Vec2::new(240.0, 400.0),
+            Vec2::new(240.0, 420.0),
+            Vec2::new(240.0, 820.0),
+            Vec2::new(360.0, 540.0),
+            Vec2::new(480.0, 420.0),
+            Vec2::new(1180.0, 240.0),
+            Vec2::new(1180.0, 420.0),
+            Vec2::new(1180.0, 820.0),
+        ] {
+            for query in ["", "copy link", "jkgmissing"] {
+                app.open_help(&context);
+                app.help_filter.query = query.into();
+                app.help_filter.filter();
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output = egui::FullOutput::default();
+                for _ in 0..4 {
+                    output = context.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |context| app.help_window(context),
+                    );
+                }
+                let rect = context
+                    .memory(|memory| memory.area_rect(egui::Id::new("Keyboard shortcuts")))
+                    .unwrap();
+                assert!(
+                    screen.contains_rect(rect),
+                    "screen {screen:?}, window {rect:?}"
+                );
+                if size.x > 1000.0 {
+                    assert!(
+                        rect.width() > 600.0,
+                        "desktop width must recover after resizing"
+                    );
+                }
+                for label in ["Copy shortcuts", "Close"] {
+                    let (clip, text) = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == label => {
+                                Some((shape.clip_rect, text))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| panic!("missing {label} at {size:?}"));
+                    let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    assert!(
+                        screen.contains_rect(bounds),
+                        "{label}: {bounds:?} outside {screen:?}"
+                    );
+                    assert!(
+                        clip.contains_rect(bounds),
+                        "{label}: {bounds:?} clipped by {clip:?}"
+                    );
+                }
+                app.close_help(&context);
+            }
+        }
+    }
 
     #[test]
     fn filters_keys_and_descriptions_with_all_case_insensitive_tokens() {

@@ -119,14 +119,34 @@ def run(binary):
                 burst("?copy link")
                 copy_matches(["Copy a visible web-link address", "Right-click web link"])
                 keyboard.key(ESCAPE)
+
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                burst("?copy link")
+                # Stacked results scroll; both actions remain below the results.
+                copy_matches(["Copy a visible web-link address", "Right-click web link"], tabs=3)
+                # Copy returns focus to the filter; Tab through the scroller,
+                # scrollbar and Copy to activate Close with the keyboard.
+                for _ in range(4):
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                keyboard.key("k", shift=True)
+                expect(1)
+
+                burst("?missing action")
+                # Empty results disable Copy, leaving Close directly after input.
+                keyboard.key(TAB); keyboard.key(ENTER)
+                keyboard.key("k", shift=True)
+                expect(0)
                 keyboard.key("w", ctrl=True)
                 time.sleep(0.3)
                 burst("?zoom")
-                copy_matches(["Zoom in / out", "100% zoom"])
+                copy_matches(["Zoom in / out", "100% zoom"], tabs=3)
                 keyboard.key(ESCAPE)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: same-frame help filter, case-insensitive multi-token matching, copied visible/all shortcuts, empty matches, F1/reset, search/toolbar focus, count/mark cleanup, compact window and welcome screen")
+                print("PASS: same-frame help filter, case-insensitive multi-token matching, copied visible/all shortcuts, empty matches, F1/reset, search/toolbar focus, count/mark cleanup, compact and minimum-size copy/close actions and welcome screen")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
