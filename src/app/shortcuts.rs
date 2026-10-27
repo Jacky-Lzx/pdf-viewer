@@ -75,9 +75,43 @@ pub(super) fn zoom_action(key: Key, modifiers: Modifiers) -> Option<ZoomAction> 
     }
 }
 
-pub(super) fn reader_actions(
-    input: &InputState,
-) -> impl Iterator<Item = (Event, Option<char>)> + '_ {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum KeyText {
+    None,
+    Character(char),
+    Other,
+}
+
+impl KeyText {
+    pub(super) fn character(self) -> Option<char> {
+        match self {
+            Self::Character(character) => Some(character),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn count_digit(key: Key, shift: bool, text: KeyText) -> Option<char> {
+    match text {
+        KeyText::Character(character) => character.is_ascii_digit().then_some(character),
+        KeyText::None if !shift => match key {
+            Key::Num0 => Some('0'),
+            Key::Num1 => Some('1'),
+            Key::Num2 => Some('2'),
+            Key::Num3 => Some('3'),
+            Key::Num4 => Some('4'),
+            Key::Num5 => Some('5'),
+            Key::Num6 => Some('6'),
+            Key::Num7 => Some('7'),
+            Key::Num8 => Some('8'),
+            Key::Num9 => Some('9'),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub(super) fn reader_actions(input: &InputState) -> impl Iterator<Item = (Event, KeyText)> + '_ {
     input
         .events
         .iter()
@@ -97,18 +131,23 @@ pub(super) fn reader_actions(
             if !action {
                 return None;
             }
-            // egui has no Percent/Dollar keys. Match text paired with this
-            // press, since their fallback keys vary with the keyboard layout.
-            let symbol = if matches!(event, Event::Key { .. }) {
+            // Some characters have no egui key and fall back to a physical
+            // digit/letter. Keep this press's literal text to distinguish them.
+            let text = if matches!(event, Event::Key { .. }) {
                 match input.events.get(index + 1) {
-                    Some(Event::Text(text)) if text == "%" => Some('%'),
-                    Some(Event::Text(text)) if text == "$" => Some('$'),
-                    _ => None,
+                    Some(Event::Text(text)) => {
+                        let mut characters = text.chars();
+                        match (characters.next(), characters.next()) {
+                            (Some(character), None) => KeyText::Character(character),
+                            _ => KeyText::Other,
+                        }
+                    }
+                    _ => KeyText::None,
                 }
             } else {
-                None
+                KeyText::None
             };
-            Some((event.clone(), symbol))
+            Some((event.clone(), text))
         })
 }
 
@@ -459,13 +498,63 @@ mod tests {
                 assert_eq!(
                     actions
                         .iter()
-                        .map(|(_, symbol)| *symbol)
+                        .map(|(_, text)| text.character())
                         .collect::<Vec<_>>(),
-                    [None, None, Some(symbol), None]
+                    [Some('5'), Some('0'), Some(symbol), None]
                 );
                 assert!(matches!(&actions[2].0, Event::Key { key, .. } if *key == symbol_key));
             }
         }
+    }
+
+    #[test]
+    fn count_digits_use_literal_text_before_layout_fallbacks_and_ignore_other_text() {
+        for (key, digit) in [
+            (Key::Num0, '0'),
+            (Key::Num1, '1'),
+            (Key::Num2, '2'),
+            (Key::Num3, '3'),
+            (Key::Num4, '4'),
+            (Key::Num5, '5'),
+            (Key::Num6, '6'),
+            (Key::Num7, '7'),
+            (Key::Num8, '8'),
+            (Key::Num9, '9'),
+        ] {
+            for shift in [false, true] {
+                assert_eq!(
+                    count_digit(key, shift, KeyText::Character(digit)),
+                    Some(digit)
+                );
+                for character in "@#^&*()%$!５".chars() {
+                    assert_eq!(count_digit(key, shift, KeyText::Character(character)), None);
+                }
+                assert_eq!(count_digit(key, shift, KeyText::Other), None);
+                assert_eq!(
+                    count_digit(key, shift, KeyText::None),
+                    (!shift).then_some(digit)
+                );
+            }
+        }
+        let mut input = InputState::default();
+        input.events = vec![
+            key(Key::Num0, Modifiers::SHIFT, true),
+            Event::Text("0".into()),
+            key(Key::Num1, Modifiers::NONE, true),
+            Event::Text("12".into()),
+            key(Key::Num2, Modifiers::NONE, true),
+            Event::Text(String::new()),
+            key(Key::Num3, Modifiers::NONE, true),
+        ];
+        let digits: Vec<_> = reader_actions(&input)
+            .map(|(event, text)| {
+                let Event::Key { key, modifiers, .. } = event else {
+                    unreachable!()
+                };
+                count_digit(key, modifiers.shift, text)
+            })
+            .collect();
+        assert_eq!(digits, [Some('0'), None, None, Some('3')]);
     }
 
     #[test]

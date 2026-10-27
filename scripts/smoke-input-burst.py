@@ -15,6 +15,8 @@ SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 ENTER, ESCAPE, BACKSPACE = 0xFF0D, 0xFF1B, 0xFF08
+PUNCTUATION = "@#^&*()"
+PUNCTUATION_KEYS = "2367890"
 
 
 def text(value):
@@ -84,12 +86,21 @@ def run(binary):
                 expect(paths[0], 3, "the bounded prefix can be shortened and confirmed with Enter")
                 burst([(BACKSPACE, {})] * 2 + text("gg"))
                 expect(paths[0], 0, "extra Backspace presses with no count leave navigation usable")
+                # Send the actual number-row key: XKeysymToKeycode('(') may
+                # choose a dedicated multimedia key with no egui key event.
+                for punctuation, key in zip(PUNCTUATION, PUNCTUATION_KEYS):
+                    burst(text("3") + [(key, {"shift": True})] + text("J"))
+                    expect(paths[0], 1, f"literal {punctuation} cancels the count instead of appending a fallback digit")
+                    burst(text("gg"))
+                    expect(paths[0], 0, "reset after literal punctuation")
                 # Seed a nonempty clipboard so a lost query cannot pass as stale
                 # clipboard content or hang waiting for an empty selection.
                 keyboard.key("y")
                 assert "native PDF reader" in keyboard.clipboard()
                 burst([("/", {})] + text("jkgdi/path3") + [(BACKSPACE, {})])
                 copy_query("jkgdi/path")
+                burst([(key, {"shift": True}) for key in PUNCTUATION_KEYS])
+                copy_query(PUNCTUATION)
                 keyboard.key(ESCAPE)
                 keyboard.key("j", shift=True)
                 expect(paths[0], 1, "search typing neither navigates nor changes reading preferences")
@@ -133,7 +144,7 @@ def run(binary):
                 expect(paths[2], 1, "Escape cancels pending input focus before the next navigation key")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: same-frame count correction, pending g/z cancellation, bounded and empty counts, search/page Backspace isolation, search/replacement/Enter, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
+                print("PASS: same-frame count correction, pending g/z cancellation, bounded and empty counts, literal punctuation without fallback counts, search/page Backspace and punctuation isolation, search/replacement/Enter, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

@@ -990,9 +990,10 @@ impl Folio {
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
-        for (event, symbol) in
+        for (event, key_text) in
             context.input(|input| shortcuts::reader_actions(input).collect::<Vec<_>>())
         {
+            let symbol = key_text.character();
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
@@ -1343,11 +1344,12 @@ impl Folio {
                 self.nav.backspace();
                 continue;
             }
+            let digit = shortcuts::count_digit(key, modifiers.shift, key_text);
             if self.nav.pending_z {
                 let count = self.nav.take_count() as f32;
                 if symbol == Some('$') {
                     self.align_axis(0, 1.0);
-                } else if key == Key::Num0 && !modifiers.shift {
+                } else if digit == Some('0') {
                     self.align_axis(0, 0.0);
                 } else if modifiers.shift && matches!(key, Key::H | Key::L) {
                     let direction = if key == Key::H { -1.0 } else { 1.0 };
@@ -1382,19 +1384,7 @@ impl Folio {
                 self.nav.clear_prefix();
                 continue;
             }
-            if let Some(digit) = match key {
-                Key::Num0 => Some('0'),
-                Key::Num1 => Some('1'),
-                Key::Num2 => Some('2'),
-                Key::Num3 => Some('3'),
-                Key::Num4 => Some('4'),
-                Key::Num5 => Some('5'),
-                Key::Num6 => Some('6'),
-                Key::Num7 => Some('7'),
-                Key::Num8 => Some('8'),
-                Key::Num9 => Some('9'),
-                _ => None,
-            } {
+            if let Some(digit) = digit {
                 self.nav.digit(digit);
                 continue;
             }
