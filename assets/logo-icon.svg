@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Pagewing app icon</title>
+  <desc id="desc">An ivory book and wing on a forest green rounded square.</desc>
+  <rect width="64" height="64" rx="14" fill="#29725c"/>
+  <g fill="#faf9f6" transform="translate(6.4 6.4) scale(.8)">
+    <path d="M12 17c7 0 13 3 18 8v25c-5-5-11-8-18-8V17Z"/>
+    <path d="M34 25c6-6 13-10 21-13l-5 17c-6 2-11 5-16 9V25Z"/>
+    <path d="M34 43c5-4 10-7 16-9l-3 10c-5 1-9 4-13 7v-8Z"/>
+  </g>
+</svg>
