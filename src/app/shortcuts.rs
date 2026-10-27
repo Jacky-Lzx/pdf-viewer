@@ -13,6 +13,8 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
 pub(super) enum InputButton {
     Help,
     Find,
+    Comments,
+    CloseComments,
     Page,
     ReloadChanged,
     DismissChange,
@@ -22,6 +24,8 @@ pub(super) enum InputButton {
 pub(super) struct InputButtons {
     pub help: Option<Id>,
     pub find: Option<Id>,
+    pub comments: Option<Id>,
+    pub close_comments: Option<Id>,
     pub page: Option<Id>,
     pub reload_changed: Option<Id>,
     pub dismiss_change: Option<Id>,
@@ -32,6 +36,8 @@ impl InputButtons {
         for (id, action) in [
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),
+            (self.comments, InputButton::Comments),
+            (self.close_comments, InputButton::CloseComments),
             (self.page, InputButton::Page),
             (self.reload_changed, InputButton::ReloadChanged),
             (self.dismiss_change, InputButton::DismissChange),

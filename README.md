@@ -105,11 +105,11 @@ require('tex-tools').setup({
 
 ## 高亮与 comment
 
-按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
+按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。 快速输入后立即按保存快捷键也会保留末尾文字；同一批操作中的隐藏面板与翻页不会丢弃已请求的保存。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
 
 打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，以固定高度卡片显示页码、作者、状态与正文摘要；悬停或打开编辑器可查看全文。列表只绘制可见条目，面板宽度可拖动调整。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
 
-批注筛选：面板顶部可按正文与作者搜索，支持 Unicode 大小写折叠和空格分隔的多个关键词；各词可分别匹配作者或正文。可叠加 **All statuses** 状态选择、**Marked only** 勾选标记及 **Current page** 当前页筛选。命中回复时保留它的父批注作为上下文，并区分实际命中数与展示条数；**Clear filters** 清除全部条件。筛选不会改变 PDF 上的批注显示或丢弃编辑草稿；保存批注及重载当前文档后保留条件，切换文档时重置。小窗口中整个面板也可滚动。
+批注筛选：面板顶部可按正文与作者搜索，支持 Unicode 大小写折叠和空格分隔的多个关键词；各词可分别匹配作者或正文。可叠加 **All statuses** 状态选择、**Marked only** 勾选标记及 **Current page** 当前页筛选。命中回复时保留它的父批注作为上下文，并区分实际命中数与展示条数；**Clear filters** 清除全部条件。筛选不会改变 PDF 上的批注显示或丢弃编辑草稿；保存批注及重载当前文档后保留条件，切换文档时重置。小窗口中整个面板也可滚动。 通过快捷键、工具栏或面板的关闭按钮隐藏批注时会立即释放输入焦点，随后输入的阅读快捷键可直接使用；筛选和草稿继续保留。
 
 嵌套回复：选中已保存的批注，点击 **Reply**，输入回复后使用 **Save comment**（或 `Ctrl/Cmd+Enter`）保存。回复也可以继续回复，支持多层嵌套；深层回复的缩进会限制宽度，保留可读空间。回复以标准 PDF Text 批注及 `IRT` / `RT=R` 关系保存在原文件中，不会再创建文字高亮。已有 Acrobat 回复会自动组成线程。
 
@@ -346,42 +346,43 @@ cargo bench --locked --bench text_cache -- 9
 # 页面与预览纹理缓存，包含 egui 对象释放和可见纹理保护
 cargo bench --locked --bench texture_cache -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
-xvfb-run -a python3 scripts/smoke-install-linux.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-desktop.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-cli.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-outline.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-long-title.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-page-size.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-continuous.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-fit-height.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-destinations.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-link-hints.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-link-menu.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-link-copy.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-selection.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-search-load.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-search-options.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-search-dense.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-persistence.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-paths.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-recent.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-close.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-properties.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-file-watch.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-help.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-comments.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-input-burst.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-password.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-vim-view.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-percentage.py target/release/pagewing
-xvfb-run -a python3 scripts/smoke-relative.py target/release/pagewing
+# 显式指定虚拟桌面分辨率，确保窗口与测试坐标一致。
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-install-linux.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-desktop.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-cli.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline-keyboard.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-long-title.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-bookmarks.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-page-size.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-destinations.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-thumbnails.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-hints.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-menu.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-copy.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection-scroll.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-load.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-options.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-persistence.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-paths.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-close.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-load-cancel.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-file-watch.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-history.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-password.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-vim-view.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-percentage.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-relative.py target/release/pagewing
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -87,10 +88,14 @@ def run(binary):
                 text("Updated elsewhere comment")
                 keyboard.key(0xFF0D, ctrl=True)
                 wait_for(lambda: document.read_bytes() != original, "comment saved in the original PDF")
-                query("elsewhere")
+                keyboard.click((1000, 114))
                 assert copied() == "elsewhere", "saving keeps the comment filter"
-                keyboard.click((1000, 300))
-                assert copied() == "Updated elsewhere comment", "saved text survives the worker reload"
+                # Replacing the PDF precedes the asynchronous reload. Wait for
+                # the new list to become interactive before checking its editor.
+                def saved_comment():
+                    keyboard.click((1000, 300))
+                    return copied() == "Updated elsewhere comment"
+                wait_for(saved_comment, "saved text survives the worker reload")
                 query("jkg STRASSE")
                 assert copied() == "jkg STRASSE", "Unicode folding query does not navigate or rotate"
                 expect(1)
@@ -102,6 +107,14 @@ def run(binary):
                 keyboard.click((1030, 145))  # Marked only; retain the root as context.
                 keyboard.click((1000, 365))
                 assert copied() == "Nested needle jkg", "filtered reply stays selectable with its parent context"
+                query("jkg STRASSE")
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    keyboard.key("m", ctrl=True, shift=True, delay=0)
+                    keyboard.key("j", shift=True, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                expect(1)
                 print("PASS: native comment filters, Unicode author matching, current-page/marked combination, parent context, full editor, page navigation and save/reload")
             except Exception:
                 log.flush()
@@ -109,6 +122,7 @@ def run(binary):
                 print(log.read(), file=sys.stderr)
                 raise
             finally:
+                application.send_signal(signal.SIGCONT)
                 application.terminate()
                 application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)

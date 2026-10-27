@@ -1199,6 +1199,10 @@ impl Pagewing {
                 }
             }
             Some(shortcuts::InputButton::Find) => self.find(),
+            Some(shortcuts::InputButton::Comments) => {
+                self.set_comments_open(context, !self.comments.open);
+            }
+            Some(shortcuts::InputButton::CloseComments) => self.set_comments_open(context, false),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
             Some(shortcuts::InputButton::ReloadChanged) => {
                 if self.file_changed {
@@ -1256,6 +1260,12 @@ impl Pagewing {
                 || self.password_open
                 || self.recent_picker.is_some()
                 || (self.comments.open && self.comments.editor.is_some())
+                || (self.comments.open
+                    && context.memory(|memory| {
+                        ["pagewing-comment-input", "pagewing-comment-filter"]
+                            .iter()
+                            .any(|name| memory.has_focus(egui::Id::new(name)))
+                    }))
                 || context.memory(|memory| {
                     [
                         "pagewing-search-input",
@@ -1264,8 +1274,6 @@ impl Pagewing {
                         "pagewing-password-input",
                         "pagewing-help-input",
                         "pagewing-outline-input",
-                        "pagewing-comment-input",
-                        "pagewing-comment-filter",
                     ]
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
@@ -1370,7 +1378,7 @@ impl Pagewing {
                 continue;
             }
             if !popup_open && key == Key::M && modifiers.command && modifiers.shift {
-                self.comments.open = !self.comments.open;
+                self.set_comments_open(context, !self.comments.open);
                 context.input_mut(|input| {
                     shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                 });
@@ -1393,17 +1401,12 @@ impl Pagewing {
                 && key == Key::Enter
                 && self.comments.editor.is_some()
             {
-                self.save_comment();
+                self.comments.save_requested = true;
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
             if key == Key::Escape && self.comments.open {
-                self.comments.open = false;
-                self.comments.focus = false;
-                context.memory_mut(|memory| {
-                    memory.surrender_focus(egui::Id::new("pagewing-comment-input"));
-                    memory.surrender_focus(egui::Id::new("pagewing-comment-filter"));
-                });
+                self.set_comments_open(context, false);
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
@@ -1958,16 +1961,16 @@ impl Pagewing {
                             self.library.sidebar = !self.library.sidebar;
                             self.dirty = true;
                         }
-                        if appearance::tool(
-                            ui,
-                            appearance::Icon::Comments,
-                            "Comments",
-                            self.comments.open,
-                        )
-                        .clicked()
-                        {
-                            self.comments.open = !self.comments.open;
-                        }
+                        self.input_buttons.comments = Some(
+                            appearance::tool(
+                                ui,
+                                appearance::Icon::Comments,
+                                "Comments",
+                                self.comments.open,
+                            )
+                            .on_hover_text(self.library.shortcuts.label("comments"))
+                            .id,
+                        );
                         if !self.selection.rects.is_empty() && ui.button("Add comment").clicked() {
                             self.add_comment();
                         }

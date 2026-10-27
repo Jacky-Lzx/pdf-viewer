@@ -73,6 +73,7 @@ pub(super) struct CommentUi {
     original_marked: bool,
     pub focus: bool,
     pub saving: bool,
+    pub save_requested: bool,
 }
 
 impl CommentUi {
@@ -108,6 +109,20 @@ impl CommentUi {
 }
 
 impl Pagewing {
+    pub(super) fn set_comments_open(&mut self, context: &egui::Context, open: bool) {
+        self.comments.open = open;
+        // A queued save still needs the focused editor to consume this batch's
+        // final text, even if a later action hides the panel in the same frame.
+        if !open && !self.comments.save_requested {
+            self.comments.focus = false;
+            context.memory_mut(|memory| {
+                for name in ["pagewing-comment-input", "pagewing-comment-filter"] {
+                    memory.surrender_focus(egui::Id::new(name));
+                }
+            });
+        }
+    }
+
     pub(super) fn comment_change_blocked(&mut self) -> bool {
         if self.comments.busy() || self.comments.unsaved() {
             self.comments.open = true;
@@ -231,10 +246,11 @@ impl Pagewing {
     }
 
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
-        if !self.comments.open || self.nav.count == 0 {
+        self.input_buttons.close_comments = None;
+        let save_requested = std::mem::take(&mut self.comments.save_requested);
+        if (!self.comments.open && !save_requested) || self.nav.count == 0 {
             return;
         }
-        let mut open = true;
         let mut selected = None;
         let mut actions = CommentActions::default();
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
@@ -252,13 +268,14 @@ impl Pagewing {
                         ui.horizontal_wrapped(|ui| {
                             ui.heading("Comments");
                             ui.weak(format!("{} total", self.comments.comments.items.len()));
-                            if ui
-                                .small_button("×")
-                                .on_hover_text("Hide comments · Ctrl/Cmd+Shift+M")
-                                .clicked()
-                            {
-                                open = false;
-                            }
+                            self.input_buttons.close_comments = Some(
+                                ui.small_button("×")
+                                    .on_hover_text(format!(
+                                        "Hide comments · {}",
+                                        self.library.shortcuts.label("comments")
+                                    ))
+                                    .id,
+                            );
                         });
                         self.comment_filters(ui);
                         if ui
@@ -314,19 +331,24 @@ impl Pagewing {
                         actions = self.comment_editor(ui);
                     });
             });
-        self.comments.open = open;
         if actions.discard {
             self.comments.editor = None;
         }
         if let Some(index) = selected {
             self.edit_comment(index);
         }
-        if actions.save {
+        // Keyboard confirmation is queued before widgets run. Save only after
+        // the editor has applied text events from this same input batch.
+        if actions.save || save_requested {
             self.save_comment();
         } else if actions.delete {
             self.delete_comment();
         } else if actions.reply {
             self.reply_comment();
+        }
+        if !self.comments.open {
+            self.set_comments_open(context, false);
+            context.request_repaint();
         }
     }
 
@@ -900,7 +922,12 @@ mod tests {
             key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT),
         );
         assert!(app.comments.open);
-        frame(&mut app, &context, key(Key::Enter, Modifiers::COMMAND));
+        app.comments.focus = true;
+        let mut events = vec![Event::Text(" last 📝".into())];
+        events.extend(key(Key::Enter, Modifiers::COMMAND));
+        events.extend(key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT));
+        events.extend(key(Key::J, Modifiers::SHIFT));
+        frame(&mut app, &context, events);
         wait(&mut app, &context, |app| {
             !app.comments.saving
                 && app.comments.loaded
@@ -911,16 +938,19 @@ mod tests {
             app.reading.path, path,
             "saving must keep the same document path"
         );
-        assert_eq!(app.nav.page, 1, "saving preserves the current page");
+        assert_eq!(
+            app.nav.page, 2,
+            "saving preserves navigation after the save request"
+        );
         assert_eq!(app.comments.comments.items.len(), 1);
         assert!(
-            app.comments.open,
-            "saving must keep the comments sidebar visible"
+            !app.comments.open,
+            "a later hide request must keep the comments sidebar closed"
         );
         app.edit_comment(0);
         assert_eq!(
             app.comments.editor.as_ref().unwrap().contents,
-            "中文 comment\nj k / ? should stay in the comment"
+            "中文 comment\nj k / ? should stay in the comment last 📝"
         );
         assert!(!app.comments.unsaved());
         assert_ne!(
@@ -1193,5 +1223,69 @@ mod tests {
             app.comments.unsaved(),
             "hiding filtered comments preserves the editor"
         );
+    }
+
+    #[test]
+    fn hiding_comments_releases_filter_focus_before_later_keys_in_the_same_frame() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("focus.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let context = Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path),
+            Some(0),
+            root.path().join("library.json"),
+        );
+        wait(&mut app, &context, |app| app.comments.loaded);
+        frame(
+            &mut app,
+            &context,
+            key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT),
+        );
+        click_text(&mut app, &context, "Filter text or author…");
+        frame(&mut app, &context, vec![Event::Text("draft filter".into())]);
+        let mut events = key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT);
+        events.extend(key(Key::J, Modifiers::SHIFT));
+        frame(&mut app, &context, events);
+        assert!(!app.comments.open);
+        assert_eq!(
+            app.nav.page, 1,
+            "closing a filter must route the following key to the reader"
+        );
+        assert_eq!(app.comments.view.filter.query, "draft filter");
+        for page in 2..=3 {
+            frame(
+                &mut app,
+                &context,
+                key(Key::M, Modifiers::COMMAND | Modifiers::SHIFT),
+            );
+            context.memory_mut(|memory| {
+                memory.request_focus(egui::Id::new("pagewing-comment-filter"))
+            });
+            frame(&mut app, &context, Vec::new());
+            let id = if page == 2 {
+                app.input_buttons.comments
+            } else {
+                app.input_buttons.close_comments
+            }
+            .unwrap();
+            let point = context.read_response(id).unwrap().rect.center();
+            let mut events = vec![Event::PointerMoved(point)];
+            events.extend([true, false].map(|pressed| Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }));
+            events.extend(key(Key::J, Modifiers::SHIFT));
+            frame(&mut app, &context, events);
+            assert!(
+                !app.comments.open,
+                "both mouse buttons must close before routing keys"
+            );
+            assert_eq!(app.nav.page, page);
+            assert_eq!(app.comments.view.filter.query, "draft filter");
+        }
     }
 }
