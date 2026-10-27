@@ -226,8 +226,11 @@ fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
             continue;
         }
         if let Some(array) = node.get::<Array<'_>>(b"Names") {
-            let mut iter = array.iter::<Object<'_>>();
-            while let (Some(Object::String(key)), Some(value)) = (iter.next(), iter.next()) {
+            let mut iter = array.iter::<Object<'_>>().take(20_000);
+            while let (Some(key), Some(value)) = (iter.next(), iter.next()) {
+                let Object::String(key) = key else {
+                    continue;
+                };
                 named.insert(key.as_bytes().to_vec(), value);
                 if named.len() >= 10_000 {
                     break;
@@ -257,11 +260,17 @@ mod tests {
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
             format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] {page_settings} >>"),
         ];
+        objects_pdf(objects.into_iter().map(String::into_bytes))
+    }
+
+    fn objects_pdf(objects: impl IntoIterator<Item = Vec<u8>>) -> Pdf {
         let mut bytes = b"%PDF-1.4\n".to_vec();
         let mut offsets = vec![0];
-        for (index, object) in objects.iter().enumerate() {
+        for (index, object) in objects.into_iter().enumerate() {
             offsets.push(bytes.len());
-            bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+            bytes.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            bytes.extend(object);
+            bytes.extend_from_slice(b"\nendobj\n");
         }
         let xref = bytes.len();
         bytes.extend_from_slice(
@@ -285,6 +294,52 @@ mod tests {
         DestinationIndex::new(pdf)
             .resolve(catalog.get::<Object<'_>>(b"Target").unwrap())
             .unwrap()
+    }
+
+    #[test]
+    fn invalid_name_tree_keys_do_not_hide_later_destinations_or_loop_forever() {
+        let pdf = objects_pdf([
+            b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> /Target (kept) /BadTarget (broken) >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+            b"<< /Kids [4 0 R] /Names [42 [3 0 R /Fit] (broken) 42 (kept) [3 0 R /XYZ 48 500 2] (alias) (kept) (trailing)] >>".to_vec(),
+        ]);
+        let target = resolve_test(&pdf);
+        assert_eq!(target.page, 0);
+        assert_eq!(target.position, [Some(48.0), Some(300.0)]);
+        assert_eq!(target.zoom, Some(2.0));
+        let index = DestinationIndex::new(&pdf);
+        let names = index.named();
+        assert_eq!(names.len(), 3);
+        assert_eq!(
+            index.resolve(names[b"alias".as_slice()].clone()),
+            Some(target)
+        );
+        assert!(index.resolve(names[b"broken".as_slice()].clone()).is_none());
+        assert!(!names.contains_key(b"trailing".as_slice()));
+    }
+
+    #[test]
+    fn name_tree_leaf_scanning_counts_invalid_pairs_towards_its_limit() {
+        let pairs = "0 0 ".repeat(9999);
+        let pdf = objects_pdf([
+            b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+            format!("<< /Names [{pairs}(last) [3 0 R /Fit] (beyond) [3 0 R /Fit]] >>").into_bytes(),
+        ]);
+        let index = DestinationIndex::new(&pdf);
+        let names = index.named();
+        assert_eq!(names.len(), 1);
+        assert!(names.contains_key(b"last".as_slice()));
+        assert!(!names.contains_key(b"beyond".as_slice()));
+        assert_eq!(
+            index
+                .resolve(names[b"last".as_slice()].clone())
+                .unwrap()
+                .page,
+            0
+        );
     }
 
     #[test]
@@ -394,27 +449,7 @@ mod tests {
             objects.push(format!("<< /Title 36 0 R /Dest [3 0 R /Fit] {next} >>").into_bytes());
         }
         objects.push([b"(".as_slice(), &vec![b'x'; 128 * 1024], b")"].concat());
-        let mut data = b"%PDF-1.4\n".to_vec();
-        let mut offsets = vec![0];
-        for (index, object) in objects.iter().enumerate() {
-            offsets.push(data.len());
-            data.extend(format!("{} 0 obj\n", index + 1).bytes());
-            data.extend(object);
-            data.extend(b"\nendobj\n");
-        }
-        let xref = data.len();
-        data.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).bytes());
-        for offset in &offsets[1..] {
-            data.extend(format!("{offset:010} 00000 n \n").bytes());
-        }
-        data.extend(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-                offsets.len()
-            )
-            .bytes(),
-        );
-        let pdf = Pdf::new(data).unwrap();
+        let pdf = objects_pdf(objects);
         let entries = read(&pdf);
         assert_eq!(entries.len(), 32);
         for entry in &entries {

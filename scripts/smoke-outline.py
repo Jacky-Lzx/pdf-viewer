@@ -21,7 +21,13 @@ def run(binary):
     with tempfile.TemporaryDirectory(prefix="folio-outline-") as directory:
         root = Path(directory)
         document = root / "folio-smoke.pdf"
-        document.write_bytes(make_pdf(nested_outline=True))
+        source = make_pdf(nested_outline=True)
+        original = b"/Names [(search) [11 0 R /Fit]]"
+        malformed = b"/Names[0 0(search)[11 0 R/Fit]]"
+        assert original in source and len(original) == len(malformed)
+        # Keep every xref offset intact while inserting an invalid key/value
+        # before the valid named destination used by a later chapter.
+        document.write_bytes(source.replace(original, malformed, 1))
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
         keyboard = Keyboard()
@@ -137,7 +143,7 @@ def run(binary):
                     keyboard.key(letter.lower(), shift=letter.isupper())
                 keyboard.key(0xFF0D)
                 expect(5, "UTF-16 page-label prefix accepts Unicode case expansion")
-                print("PASS: nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
+                print("PASS: malformed name-pair recovery, nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
