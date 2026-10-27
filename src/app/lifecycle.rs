@@ -135,6 +135,11 @@ impl Pagewing {
     pub(super) fn reopen_closed(&mut self, context: &egui::Context) {
         self.nav.clear_prefix();
         self.mark_action = None;
+        // A draft or in-flight save postpones the document change. Retain
+        // the target until a later shortcut can actually attempt to open it.
+        if self.last_closed.is_some() && self.comment_change_blocked() {
+            return;
+        }
         if let Some(path) = self.last_closed.take() {
             self.open(path, context);
         } else {
@@ -172,6 +177,105 @@ impl Pagewing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocked_reopen_retains_the_target_and_editor_until_the_change_is_allowed() {
+        for saving in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let context = egui::Context::default();
+            let mut app =
+                Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+            let current = directory.path().join("current.pdf");
+            let target = directory.path().join("closed.pdf");
+            app.reading.path = current.clone();
+            app.nav = Navigation::new(1, 0);
+            app.dimensions = vec![[600.0, 800.0]];
+            app.comments.saving = saving;
+            if !saving {
+                app.comments.editor = Some(crate::annotations::Comment {
+                    page: 0,
+                    slot: None,
+                    parent: None,
+                    review: Default::default(),
+                    marked: false,
+                    states: Vec::new(),
+                    kind: "Highlight".into(),
+                    contents: "keep this draft 📝".into(),
+                    author: "Pagewing".into(),
+                    rects: Vec::new(),
+                    has_appearance: false,
+                    truncated: false,
+                    locked: false,
+                });
+            }
+            app.query = "keep search".into();
+            let focus = egui::Id::new("pagewing-comment-input");
+            context.memory_mut(|memory| memory.request_focus(focus));
+            let reopen = |app: &mut Pagewing| {
+                let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+                let mut events: Vec<_> = [true, false]
+                    .into_iter()
+                    .map(|pressed| egui::Event::Key {
+                        key: egui::Key::T,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers,
+                    })
+                    .collect();
+                events.insert(1, egui::Event::Text("T".into()));
+                let _ = context.run(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |context| {
+                        app.keys(context);
+                        egui::CentralPanel::default().show(context, |ui| {
+                            let text = app
+                                .comments
+                                .editor
+                                .as_mut()
+                                .map_or(&mut app.query, |comment| &mut comment.contents);
+                            ui.add(egui::TextEdit::multiline(text).id(focus));
+                        });
+                    },
+                );
+            };
+            reopen(&mut app);
+            assert!(
+                app.message
+                    .as_ref()
+                    .unwrap()
+                    .0
+                    .contains("No recently closed")
+            );
+            assert!(
+                !app.comments.open,
+                "an empty target should not open comments"
+            );
+            app.last_closed = Some(target.clone());
+            reopen(&mut app);
+            assert_eq!(app.last_closed.as_ref(), Some(&target));
+            assert_eq!(app.reading.path, current);
+            assert!(!app.loading);
+            assert!(app.comments.open);
+            assert_eq!(app.query, "keep search");
+            assert!(context.memory(|memory| memory.has_focus(focus)));
+            if !saving {
+                assert_eq!(
+                    app.comments.editor.as_ref().unwrap().contents,
+                    "keep this draft 📝"
+                );
+            }
+            app.comments.saving = false;
+            app.comments.editor = None;
+            reopen(&mut app);
+            assert!(app.loading);
+            assert_eq!(app.reading.path, target);
+            assert!(app.last_closed.is_none());
+        }
+    }
 
     #[test]
     fn closing_releases_document_sized_ui_buffers_and_keeps_reopen_state() {

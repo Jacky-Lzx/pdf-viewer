@@ -21,6 +21,8 @@ def run(binary):
         root = Path(directory)
         document = root / "pagewing-smoke.pdf"
         document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
+        draft_holder = root / "draft-holder.pdf"
+        draft_holder.write_bytes(document.read_bytes())
         encrypted = root / "encrypted.pdf"
         encrypted.write_bytes((SCRIPTS.parent / "tests/fixtures/encrypted.pdf").read_bytes())
         missing = root / "missing.pdf"
@@ -28,7 +30,8 @@ def run(binary):
         config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"sidebar": True, "recent": [
-            {"path": str(encrypted), "page": 1}, {"path": str(missing), "page": 0}
+            {"path": str(encrypted), "page": 1}, {"path": str(missing), "page": 0},
+            {"path": str(draft_holder), "page": 0}
         ]}))
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
@@ -86,6 +89,49 @@ def run(binary):
                 window = wait_for(keyboard.focus, "reader window")
                 wait_for(lambda: book().get("page") == 0, "initial document saved")
                 empty_reopen_preserves_query()
+                keyboard.key("w", ctrl=True)
+                closed()
+                recent("draft-holder")
+                wait_for(lambda: title().startswith("draft-holder.pdf"), "open the draft document while retaining the closed target")
+                wait_for(lambda: json.loads(config_path.read_text())["recent"][0]["path"] == str(draft_holder),
+                         "the draft document finishes loading")
+                keyboard.key("a", ctrl=True)
+
+                def selected_page():
+                    keyboard.key("c", ctrl=True)
+                    return "native PDF reader" in keyboard.clipboard()
+
+                wait_for(selected_page, "text is ready for a new highlight comment")
+                keyboard.key("h", ctrl=True, shift=True)
+                keyboard.key("a", ctrl=True)
+                for character in "draft to keep":
+                    keyboard.key(character)
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "draft to keep"
+                before_save = draft_holder.read_bytes()
+                reopen_shortcut()
+                assert title().startswith("draft-holder.pdf"), "a draft blocks document switching"
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "draft to keep", "blocked reopening preserves the focused draft"
+                assert draft_holder.read_bytes() == before_save
+                keyboard.key(0xFF0D, ctrl=True)
+                wait_for(lambda: draft_holder.read_bytes() != before_save, "save the draft before retrying the retained target")
+
+                def reopen_after_save():
+                    if title().startswith("pagewing-smoke.pdf"):
+                        return True
+                    reopen_shortcut()
+                    return False
+
+                wait_for(reopen_after_save, "the original closed target remains available after saving")
+
+                def restored_page():
+                    keyboard.key("y")
+                    return "native PDF reader" in keyboard.clipboard()
+
+                wait_for(restored_page, "the retained document is loaded and copyable")
                 keyboard.key("3"); keyboard.key("g", shift=True)
                 keyboard.key("w"); keyboard.key("z"); keyboard.key("b")
                 keyboard.key("m"); keyboard.key("a"); keyboard.key("b")
@@ -173,7 +219,7 @@ def run(binary):
                 assert application.wait(timeout=8) == 0
                 assert book()["page"] == 2 and abs(book()["offset"][1] - saved["offset"][1]) < 0.0001
                 assert "jkgdi" not in config_path.read_text()
-                print("PASS: close from search, immediate progress save, same-window welcome, repeated close, shortcut/help/recent reopen, consumed and empty reopen preserves input, same-frame close/reopen, password unlock and missing-file retry, toolbar button, marks/bookmarks and graceful quit")
+                print("PASS: close from search, immediate progress save, same-window welcome, repeated close, shortcut/help/recent reopen, draft-blocked reopen retains its target through save/reload, consumed and empty reopen preserves input, same-frame close/reopen, password unlock and missing-file retry, toolbar button, marks/bookmarks and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
