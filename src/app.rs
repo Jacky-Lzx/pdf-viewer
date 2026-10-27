@@ -785,8 +785,16 @@ impl Folio {
                     if (!wanted && key.page != self.nav.page)
                         || key.rotation != self.reading.rotation
                         || key.night != self.library.night
-                        || !self.cache.can_insert(key, image.pixels.len() * 4)
                     {
+                        continue;
+                    }
+                    if !self.cache.can_insert(key, image.pixels.len() * 4) {
+                        if wanted {
+                            // A larger displayed fallback can temporarily leave
+                            // too little room for prefetch. Retry missing pages
+                            // once the desired visible raster has replaced it.
+                            self.requested = None;
+                        }
                         continue;
                     }
                     if !wanted

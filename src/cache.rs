@@ -1,6 +1,6 @@
 use crate::document::RenderKey;
 use eframe::egui::{TextureHandle, TextureId};
-use std::collections::HashMap;
+use std::{cmp::Reverse, collections::HashMap};
 
 const BUDGET: usize = 96 * 1024 * 1024;
 
@@ -50,9 +50,8 @@ impl TextureCache {
 
     pub fn can_insert(&self, key: RenderKey, bytes: usize) -> bool {
         let pinned = self
-            .protected
-            .filter(|protected| *protected != key)
-            .and_then(|protected| self.entries.get(&protected))
+            .pinned_for_insert(key)
+            .and_then(|pinned| self.entries.get(&pinned))
             .map_or(0, |entry| entry.bytes);
         bytes <= self.budget.saturating_sub(pinned)
     }
@@ -67,6 +66,21 @@ impl TextureCache {
         self.protected = Some(key);
     }
 
+    fn pinned_for_insert(&self, key: RenderKey) -> Option<RenderKey> {
+        let target = self.protected?;
+        // The desired raster may replace a displayed fallback. Other jobs must
+        // preserve whichever texture is currently usable for this view.
+        if target == key {
+            return None;
+        }
+        let pinned = if self.entries.contains_key(&target) {
+            target
+        } else {
+            self.fallback_key(target)?
+        };
+        (pinned != key).then_some(pinned)
+    }
+
     /// Drawing needs only the ID; the cache retains ownership until eviction.
     pub fn get(&mut self, key: &RenderKey) -> Option<TextureId> {
         self.clock += 1;
@@ -77,17 +91,25 @@ impl TextureCache {
     }
 
     pub fn fallback(&mut self, key: RenderKey) -> Option<TextureId> {
-        let best = self
-            .entries
+        let best = self.fallback_key(key)?;
+        self.get(&best)
+    }
+
+    fn fallback_key(&self, key: RenderKey) -> Option<RenderKey> {
+        self.entries
             .keys()
             .filter(|candidate| {
                 candidate.page == key.page
                     && candidate.rotation == key.rotation
                     && candidate.night == key.night
             })
-            .min_by_key(|candidate| candidate.width.abs_diff(key.width))
-            .copied()?;
-        self.get(&best)
+            .min_by_key(|candidate| {
+                (
+                    candidate.width.abs_diff(key.width),
+                    Reverse(candidate.width),
+                )
+            })
+            .copied()
     }
 
     pub fn insert(&mut self, key: RenderKey, texture: TextureHandle) -> bool {
@@ -95,6 +117,7 @@ impl TextureCache {
         if !self.can_insert(key, bytes) {
             return false;
         }
+        let pinned = self.pinned_for_insert(key);
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
@@ -102,7 +125,7 @@ impl TextureCache {
             let Some(oldest) = self
                 .entries
                 .iter()
-                .filter(|(key, _)| Some(**key) != self.protected)
+                .filter(|(key, _)| Some(**key) != pinned)
                 .min_by_key(|(_, entry)| entry.used)
                 .map(|(key, _)| *key)
             else {
@@ -143,6 +166,113 @@ mod tests {
             ColorImage::filled([4, 4], Color32::WHITE),
             TextureOptions::LINEAR,
         )
+    }
+
+    #[test]
+    fn prefetch_preserves_the_displayed_zoom_fallback_until_the_target_replaces_it() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::with_budget(128);
+        let old = key(0);
+        let target = RenderKey { width: 64, ..old };
+        let old_texture = ctx.load_texture(
+            "old zoom",
+            ColorImage::filled([8, 4], Color32::WHITE),
+            TextureOptions::LINEAR,
+        );
+        let old_id = old_texture.id();
+        cache.protect(old);
+        assert!(cache.insert(old, old_texture));
+        cache.protect(target);
+        assert_eq!(cache.fallback(target), Some(old_id));
+        assert!(
+            !cache.can_insert(key(1), 64),
+            "prefetch must leave the displayed fallback usable"
+        );
+        assert!(!cache.insert(key(1), texture(&ctx)));
+        assert_eq!(cache.get(&old), Some(old_id));
+        assert_eq!(
+            ctx.tex_manager().read().meta(old_id).unwrap().retain_count,
+            1
+        );
+
+        // The desired raster can replace that fallback even if both cannot fit.
+        let new_texture = ctx.load_texture(
+            "new zoom",
+            ColorImage::filled([8, 4], Color32::WHITE),
+            TextureOptions::LINEAR,
+        );
+        let new_id = new_texture.id();
+        assert!(cache.can_insert(target, 128));
+        assert!(cache.insert(target, new_texture));
+        assert_eq!(cache.get(&target), Some(new_id));
+        assert!(ctx.tex_manager().read().meta(old_id).is_none());
+        assert_eq!(cache.bytes, 128);
+        assert!(!cache.can_insert(key(1), 64));
+    }
+
+    #[test]
+    fn prefetch_can_retry_after_the_smaller_target_is_available() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::with_budget(192);
+        let old = key(0);
+        let target = RenderKey { width: 64, ..old };
+        let large = || {
+            ctx.load_texture(
+                "large",
+                ColorImage::filled([8, 4], Color32::WHITE),
+                TextureOptions::LINEAR,
+            )
+        };
+        assert!(cache.insert(old, large()));
+        cache.protect(target);
+        assert!(!cache.can_insert(key(1), 128));
+        assert!(!cache.insert(key(1), large()));
+        assert!(cache.insert(target, texture(&ctx)));
+        assert!(cache.can_insert(key(1), 128));
+        assert!(cache.insert(key(1), large()));
+        assert!(cache.contains(&target) && cache.contains(&key(1)));
+        assert!(!cache.contains(&old));
+        assert_eq!(cache.bytes, 192);
+    }
+
+    #[test]
+    fn equidistant_fallbacks_prefer_the_sharper_texture_and_protect_that_same_entry() {
+        let ctx = Context::default();
+        for reverse in [false, true] {
+            let mut cache = TextureCache::with_budget(192);
+            let small = RenderKey {
+                width: 64,
+                ..key(0)
+            };
+            let large = RenderKey {
+                width: 128,
+                ..key(0)
+            };
+            for candidate in if reverse {
+                [large, small]
+            } else {
+                [small, large]
+            } {
+                assert!(cache.insert(candidate, texture(&ctx)));
+            }
+            let sharper = cache.get(&large).unwrap();
+            let target = RenderKey {
+                width: 96,
+                ..key(0)
+            };
+            cache.protect(target);
+            assert_eq!(cache.fallback(target), Some(sharper));
+            cache.get(&small); // The displayed fallback is now older than this entry.
+            let prefetch = ctx.load_texture(
+                "prefetch",
+                ColorImage::filled([8, 4], Color32::WHITE),
+                TextureOptions::LINEAR,
+            );
+            assert!(cache.insert(key(1), prefetch));
+            assert!(!cache.contains(&small));
+            assert_eq!(cache.fallback(target), Some(sharper));
+            assert_eq!(cache.bytes, 192);
+        }
     }
 
     #[test]
