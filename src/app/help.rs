@@ -41,6 +41,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Zoom by a count, preserving the viewport center",
     ),
     ("Alt + wheel / pinch", "Zoom at the pointer"),
+    ("Click zoom percentage", "Set an exact zoom percentage"),
     ("p / w / e", "Fit page / width / height"),
     ("Shift+C", "Toggle continuous scrolling"),
     ("r / Shift+r", "Rotate clockwise / counterclockwise"),
@@ -180,6 +181,7 @@ impl HelpFilter {
                 "Scroll half a screen / align horizontal edges",
             ),
             ("Alt + wheel / pinch", "Zoom at the pointer"),
+            ("Click zoom percentage", "Set an exact zoom percentage"),
             (
                 "Mouse back / forward",
                 "Restore previous / next reading view",
@@ -220,6 +222,7 @@ impl HelpFilter {
 
 impl Pagewing {
     pub(super) fn open_help(&mut self, context: &egui::Context) {
+        self.close_zoom(context);
         self.outline.cancel_input();
         self.nav.clear_prefix();
         self.hints.cancel();

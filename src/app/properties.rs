@@ -8,6 +8,7 @@ impl Pagewing {
             return;
         }
         self.outline.cancel_input();
+        self.close_zoom(context);
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();

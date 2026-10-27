@@ -160,6 +160,8 @@ night = []                 # 停用该动作的快捷键
 
 当前页码与总页数显示在底栏，点击可打开页码跳转对话框。页面导航快捷键只在阅读模式生效，输入搜索词或页码时不会触发页面导航。按 `?` 查看内置帮助。
 
+点击底栏的缩放比例可直接输入百分比，例如 `125` 或 `125%`，按 Enter 或点击 Apply 应用；也可选择 50%、100%、150%、200% 预设。缩放保留视口中心，支持单页、连续和双页模式。超出页面允许范围的比例会限制到实际可用值；错误输入保留在框内，Escape 或 Cancel 放弃修改。
+
 帮助窗口支持按按键或功能说明筛选，例如 `zoom`、`copy link`；多个词需要同时匹配，英文不区分大小写。Copy shortcuts 可复制当前结果，清空筛选后可复制全部快捷键。`Escape` 返回阅读，重新打开帮助会清空上次筛选。
 
 | 按键 | 操作 |
@@ -363,6 +365,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-bookmarks.py targe
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-page-size.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-zoom.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-destinations.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-thumbnails.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-hints.py target/release/pagewing

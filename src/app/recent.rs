@@ -4,6 +4,7 @@ use eframe::egui::{self, Vec2};
 impl Pagewing {
     pub(super) fn toggle_recent(&mut self, context: &egui::Context) {
         self.outline.cancel_input();
+        self.close_zoom(context);
         if self.recent_picker.take().is_some() {
             context.memory_mut(|memory| {
                 memory.surrender_focus(egui::Id::new("pagewing-recent-input"))

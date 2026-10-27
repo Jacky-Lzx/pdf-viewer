@@ -14,6 +14,7 @@ mod spread;
 mod sync;
 mod tiles;
 mod toolbar;
+mod zoom;
 
 use crate::{
     cache::TextureCache,
@@ -114,6 +115,7 @@ pub struct Pagewing {
     goto: String,
     goto_open: bool,
     goto_focus: bool,
+    zoom_input: Option<zoom::ZoomInput>,
     help: bool,
     help_filter: help::HelpFilter,
     input_buttons: shortcuts::InputButtons,
@@ -270,6 +272,7 @@ impl Pagewing {
             goto: String::new(),
             goto_open: false,
             goto_focus: false,
+            zoom_input: None,
             help: false,
             help_filter: help::HelpFilter::default(),
             input_buttons: shortcuts::InputButtons::default(),
@@ -348,6 +351,7 @@ impl Pagewing {
         self.continuous_link_request = None;
         self.info = crate::document_info::DocumentInfo::default();
         self.properties_open = false;
+        self.zoom_input = None;
         self.comments = comments::CommentUi::default();
         self.outline.set_entries(Vec::new());
         self.bookmark_pages.clear();
@@ -704,10 +708,14 @@ impl Pagewing {
     }
 
     fn actual_size(&mut self) {
+        self.zoom_to(1.0);
+    }
+
+    fn zoom_to(&mut self, scale: f32) {
         let Some(dimensions) = self.resolve_view() else {
             return;
         };
-        self.apply_zoom(1.0, dimensions, self.viewport * 0.5);
+        self.apply_zoom(scale, dimensions, self.viewport * 0.5);
     }
 
     fn apply_zoom(&mut self, target: f32, dimensions: [f32; 2], pivot: Vec2) {
@@ -845,6 +853,7 @@ impl Pagewing {
             return;
         }
         self.outline.cancel_input();
+        self.zoom_input = None;
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
@@ -864,6 +873,7 @@ impl Pagewing {
     }
 
     fn find(&mut self) {
+        self.zoom_input = None;
         self.outline.cancel_input();
         let selected = self
             .selection
@@ -1011,6 +1021,7 @@ impl Pagewing {
                     self.automatic_reload = false;
                     self.loading = false;
                     self.error = None;
+                    self.close_zoom(context);
                     self.cache.clear();
                     self.thumbnails.clear();
                     self.requested = None;
@@ -1146,6 +1157,7 @@ impl Pagewing {
                     }
                     if opening && message.contains("Decryption") && !automatic {
                         self.password_open = true;
+                        self.close_zoom(context);
                         self.password_focus = true;
                         self.goto_open = false;
                         self.help = false;
@@ -1211,6 +1223,7 @@ impl Pagewing {
             }
             Some(shortcuts::InputButton::CloseComments) => self.set_comments_open(context, false),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
+            Some(shortcuts::InputButton::Zoom) => self.open_zoom(context),
             Some(shortcuts::InputButton::ReloadChanged) => {
                 if self.file_changed {
                     self.reload();
@@ -1227,6 +1240,7 @@ impl Pagewing {
                 (self.search_open, "pagewing-search-input"),
                 (self.recent_picker.is_some(), "pagewing-recent-input"),
                 (self.goto_open, "pagewing-page-input"),
+                (self.zoom_input.is_some(), "pagewing-zoom-input"),
                 (self.password_open, "pagewing-password-input"),
                 (self.help, "pagewing-help-input"),
                 (
@@ -1246,6 +1260,11 @@ impl Pagewing {
                         "pagewing-search-input" => self.search_focus = true,
                         "pagewing-page-input" => self.goto_focus = true,
                         "pagewing-password-input" => self.password_focus = true,
+                        "pagewing-zoom-input" => {
+                            if let Some(input) = &mut self.zoom_input {
+                                input.focus = true;
+                            }
+                        }
                         _ => {}
                     }
                     break;
@@ -1264,6 +1283,7 @@ impl Pagewing {
                 || (self.help && self.help_filter.focus)
                 || self.outline.focus
                 || self.goto_open
+                || self.zoom_input.is_some()
                 || self.password_open
                 || self.recent_picker.is_some()
                 || (self.comments.open && self.comments.editor.is_some())
@@ -1278,6 +1298,7 @@ impl Pagewing {
                         "pagewing-search-input",
                         "pagewing-recent-input",
                         "pagewing-page-input",
+                        "pagewing-zoom-input",
                         "pagewing-password-input",
                         "pagewing-help-input",
                         "pagewing-outline-input",
@@ -1384,7 +1405,12 @@ impl Pagewing {
                 self.change_search();
                 continue;
             }
-            if !popup_open && key == Key::M && modifiers.command && modifiers.shift {
+            if !popup_open
+                && self.zoom_input.is_none()
+                && key == Key::M
+                && modifiers.command
+                && modifiers.shift
+            {
                 self.set_comments_open(context, !self.comments.open);
                 context.input_mut(|input| {
                     shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
@@ -1392,6 +1418,7 @@ impl Pagewing {
                 continue;
             }
             if !popup_open
+                && self.zoom_input.is_none()
                 && modifiers.command
                 && modifiers.shift
                 && key == Key::H
@@ -1404,11 +1431,26 @@ impl Pagewing {
                 continue;
             }
             if self.comments.open
+                && self.zoom_input.is_none()
                 && modifiers.command
                 && key == Key::Enter
                 && self.comments.editor.is_some()
             {
                 self.comments.save_requested = true;
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
+            if self.zoom_input.is_some() && key == Key::Escape {
+                self.close_zoom(context);
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
+            if let Some(input) = &mut self.zoom_input
+                && key == Key::Enter
+                && modifiers.is_none()
+                && (input.focus || context.memory(|memory| memory.has_focus(zoom::input_id())))
+            {
+                input.confirm = true;
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
@@ -1529,6 +1571,7 @@ impl Pagewing {
                 continue;
             }
             if !self.search_focus
+                && self.zoom_input.is_none()
                 && !self.goto_open
                 && !self.password_open
                 && !self.help
@@ -2898,6 +2941,7 @@ impl Pagewing {
 
     fn dialogs(&mut self, context: &egui::Context) {
         self.recent_dialog(context);
+        self.zoom_dialog(context);
         if self.goto_open {
             egui::Window::new("Go to page")
                 .collapsible(false)

@@ -113,6 +113,7 @@ impl CommentUi {
 impl Pagewing {
     pub(super) fn comment_filter_focused(&self, context: &egui::Context) -> bool {
         self.comments.open
+            && self.zoom_input.is_none()
             && !self.search_focus
             && !self.goto_open
             && !self.password_open

@@ -12,13 +12,18 @@ impl Pagewing {
             self.zoom(1.2);
         }
         let percent = self.scale * 100.0;
-        ui.label(if percent < 0.01 {
+        let label = if percent < 0.01 {
             "<0.01%".to_owned()
         } else if percent < 1.0 {
             format!("{percent:.2}%")
         } else {
             format!("{percent:.0}%")
-        });
+        };
+        self.input_buttons.zoom = Some(
+            ui.add_enabled(!self.loading, egui::Button::new(label).frame(false))
+                .on_hover_text("Set zoom percentage")
+                .id,
+        );
         if ui
             .button("−")
             .on_hover_text(self.library.shortcuts.label("zoom_out"))

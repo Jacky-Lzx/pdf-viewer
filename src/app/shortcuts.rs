@@ -16,6 +16,7 @@ pub(super) enum InputButton {
     Comments,
     CloseComments,
     Page,
+    Zoom,
     ReloadChanged,
     DismissChange,
 }
@@ -27,6 +28,7 @@ pub(super) struct InputButtons {
     pub comments: Option<Id>,
     pub close_comments: Option<Id>,
     pub page: Option<Id>,
+    pub zoom: Option<Id>,
     pub reload_changed: Option<Id>,
     pub dismiss_change: Option<Id>,
 }
@@ -39,6 +41,7 @@ impl InputButtons {
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),
             (self.page, InputButton::Page),
+            (self.zoom, InputButton::Zoom),
             (self.reload_changed, InputButton::ReloadChanged),
             (self.dismiss_change, InputButton::DismissChange),
         ] {

@@ -72,7 +72,7 @@ jobs:
           - shard: 3
             tests: >-
               input-burst relative outline mouse-history link-menu continuous
-              recent password persistence install-linux
+              recent password zoom persistence install-linux
           - shard: 4
             tests: >-
               desktop destinations thumbnails selection selection-scroll
