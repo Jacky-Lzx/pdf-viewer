@@ -7,6 +7,7 @@ mod dialog;
 mod errors;
 mod help;
 mod input_dialogs;
+mod lifecycle;
 mod properties;
 mod recent;
 mod reload;
@@ -297,173 +298,12 @@ impl Pagewing {
         app
     }
 
-    fn open(&mut self, path: PathBuf, context: &egui::Context) {
-        if self.comment_change_blocked() {
-            return;
-        }
-        self.remember();
-        self.clear_document(context);
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
-        self.reading = self
-            .library
-            .recent
-            .iter()
-            .find(|item| item.path == path)
-            .cloned()
-            .unwrap_or(ReadingState {
-                path,
-                ..Default::default()
-            });
-        if !self.library.display.remember_documents {
-            self.reading.page = 0;
-            self.reading.rotation = 0;
-            self.reading.offset = [0.0; 2];
-            self.library.display.apply(&mut self.reading);
-        } else if !self
-            .library
-            .recent
-            .iter()
-            .any(|item| item.path == self.reading.path)
-        {
-            self.library.display.apply(&mut self.reading);
-        }
-        self.reading.rotation %= 4;
-        self.synctex.server =
-            crate::synctex_ipc::Server::bind(&self.reading.path, context.clone()).ok();
-        self.pending_offset = Some(self.reading.offset);
-        self.loading = true;
-        self.worker
-            .open(self.id, self.reading.path.clone(), String::new());
-        context.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{} — Pagewing",
-            self.filename()
-        )));
-    }
-
-    fn clear_document(&mut self, context: &egui::Context) {
-        self.synctex.clear_document();
-        egui::Popup::close_all(context);
-        self.id += 1;
-        self.nav = Navigation::default();
-        self.history = crate::history::ViewHistory::default();
-        self.dimensions.clear();
-        self.continuous_layout = crate::continuous::Layout::default();
-        self.clear_multi_page_buffers();
-        self.continuous_link_request = None;
-        self.info = crate::document_info::DocumentInfo::default();
-        self.properties_open = false;
-        self.zoom_input = None;
-        self.comments = comments::CommentUi::default();
-        self.outline.set_entries(Vec::new());
-        self.bookmark_pages.clear();
-        self.labels = crate::page_labels::PageLabels::default();
-        self.links.clear();
-        self.visible_links.clear();
-        self.hints.cancel();
-        self.selection.cancel();
-        self.mark_action = None;
-        self.cache.clear();
-        self.thumbnails.clear();
-        self.reveal_page = None;
-        self.requested = None;
-        self.render_planner = RenderPlanner::default();
-        self.pan = Vec2::ZERO;
-        self.pending_offset = None;
-        self.pending_focus = None;
-        self.pending_destination = None;
-        self.hits.clear();
-        self.hit_index = None;
-        self.reveal_hit = None;
-        self.pending_search_jump = None;
-        self.query.clear();
-        self.search_due = None;
-        self.search_open = false;
-        self.search_focus = false;
-        self.scanned = 0;
-        self.scan_total = 0;
-        self.search_complete = true;
-        self.search_limited = false;
-        self.revision += 1;
-        self.reading = ReadingState::default();
-        self.overflow = Vec2::ZERO;
-        self.scale = 1.0;
-        self.render_ms = 0.0;
-        self.loading = false;
-        self.reloading = false;
-        self.file_changed = false;
-        self.auto_reload_pending = false;
-        self.automatic_reload = false;
-        self.error = None;
-        self.message = None;
-        self.page_input = None;
-        self.password_input = None;
-        self.help = false;
-        self.recent_picker = None;
-        self.deferred_input.clear();
-        context.memory_mut(|memory| {
-            if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
-            }
-            memory.move_focus(egui::FocusDirection::None);
-        });
-    }
-
-    fn close_document(&mut self, context: &egui::Context) {
-        if self.comment_change_blocked() {
-            return;
-        }
-        if !self.reading.path.as_os_str().is_empty() {
-            self.last_closed = Some(self.reading.path.clone());
-        }
-        self.save();
-        self.clear_document(context);
-        self.dialog = None;
-        self.worker.close();
-        context.send_viewport_cmd(egui::ViewportCommand::Title("Pagewing".into()));
-    }
-
-    fn reopen_closed(&mut self, context: &egui::Context) {
-        self.nav.clear_prefix();
-        self.mark_action = None;
-        if let Some(path) = self.last_closed.take() {
-            self.open(path, context);
-        } else {
-            self.notify("No recently closed document");
-        }
-    }
-
     fn filename(&self) -> String {
         self.reading
             .path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Pagewing".into())
-    }
-
-    fn reload(&mut self) {
-        if self.comment_change_blocked() {
-            return;
-        }
-        if self.reading.path.as_os_str().is_empty() || self.loading {
-            return;
-        }
-        self.auto_reload_pending = false;
-        self.automatic_reload = false;
-        self.remember();
-        self.nav.clear_prefix();
-        self.loading = true;
-        self.reloading = self.nav.count > 0;
-        self.error = None;
-        self.hints.cancel();
-        self.selection.cancel();
-        self.pending_search_jump = None;
-        if self.reloading {
-            self.worker
-                .reload(self.id, self.reading.path.clone(), String::new());
-        } else {
-            self.worker
-                .open(self.id, self.reading.path.clone(), String::new());
-        }
     }
 
     fn page_name(&self, page: usize) -> String {
@@ -908,7 +748,7 @@ impl Pagewing {
                     self.requested = None;
                     self.render_planner = RenderPlanner::default();
                     self.links.clear();
-                    self.visible_links.clear();
+                    self.visible_links = crate::link_visibility::LinkVisibility::default();
                     self.hints.cancel();
                     self.selection.cancel();
                     self.pending_focus = None;
