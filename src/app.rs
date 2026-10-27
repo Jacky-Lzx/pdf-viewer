@@ -10,6 +10,7 @@ mod input_dialogs;
 mod properties;
 mod recent;
 mod reload;
+mod search;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
@@ -460,27 +461,6 @@ impl Pagewing {
         }
     }
 
-    fn restart_search(&mut self) {
-        self.revision += 1;
-        self.hits.clear();
-        self.hit_index = None;
-        self.reveal_hit = None;
-        self.scanned = 0;
-        self.scan_total = self.nav.count;
-        self.search_complete = self.query.trim().is_empty();
-        self.search_limited = false;
-        self.search_due = (!self.search_complete).then_some(Instant::now());
-    }
-
-    fn change_search(&mut self) {
-        self.pending_search_jump = None;
-        self.restart_search();
-        self.worker
-            .search(self.revision, String::new(), self.library.search_options);
-        self.search_due =
-            (!self.search_complete).then_some(Instant::now() + Duration::from_millis(180));
-    }
-
     fn page_name(&self, page: usize) -> String {
         self.labels.display_name(page)
     }
@@ -844,85 +824,6 @@ impl Pagewing {
             .extend(self.reading.bookmarks.iter().copied());
     }
 
-    fn find(&mut self) {
-        self.zoom_input = None;
-        self.outline.cancel_input();
-        let selected = self
-            .selection
-            .selected_text()
-            .map(str::trim)
-            .filter(|text| !text.is_empty() && !text.contains(['\n', '\r']))
-            .map(str::to_owned);
-        self.recent_picker = None;
-        self.nav.clear_prefix();
-        self.hints.cancel();
-        self.selection.cancel();
-        self.mark_action = None;
-        self.help = false;
-        self.properties_open = false;
-        self.page_input = None;
-        self.password_input = None;
-        self.search_open = true;
-        self.search_focus = true;
-        if let Some(query) = selected {
-            self.query = query;
-            self.change_search();
-        }
-    }
-
-    fn next_hit(&mut self, reverse: bool) {
-        self.next_hits(reverse, 1);
-    }
-
-    fn next_hits(&mut self, reverse: bool, count: usize) {
-        let count = count.max(1);
-        if self.hits.is_empty() {
-            self.pending_search_jump =
-                (!self.search_complete || self.search_due.is_some()).then_some((reverse, count));
-            return;
-        }
-        let (start, steps) = match self.hit_index {
-            Some(index) => (index, count),
-            None => match crate::text::initial_match(
-                &self.hits,
-                self.nav.page,
-                reverse,
-                self.scanned,
-                self.search_complete,
-            ) {
-                Some(index) => (index, count - 1),
-                None => {
-                    self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
-                    return;
-                }
-            },
-        };
-        let Some(index) = crate::text::advance_match(
-            start,
-            self.hits.len(),
-            reverse,
-            steps,
-            self.search_complete,
-        ) else {
-            self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
-            return;
-        };
-        self.pending_search_jump = None;
-        self.select_hit(index);
-    }
-
-    fn select_hit(&mut self, index: usize) {
-        let current = self.current_position();
-        self.pending_search_jump = None;
-        self.hit_index = Some(index);
-        self.reveal_hit = Some(index);
-        let page = self.hits[index].page;
-        let rect = self.hits[index].rects.first().copied();
-        self.jump(page);
-        self.history.record(current);
-        self.pending_focus = rect;
-    }
-
     fn events(&mut self, context: &egui::Context) {
         if let Some(Err(error)) = self.state_writer.result() {
             self.notify(format!("Could not save reading progress: {error}"));
@@ -1152,6 +1053,7 @@ impl Pagewing {
                 }
             }
             Some(shortcuts::InputButton::Find) => self.find(),
+            Some(shortcuts::InputButton::Search(action)) => self.search_button(action),
             Some(shortcuts::InputButton::Comments) => {
                 self.set_comments_open(context, !self.comments.open);
             }
@@ -1291,6 +1193,11 @@ impl Pagewing {
             };
             let raw_key = key;
             let raw_modifiers = modifiers;
+            if key == Key::Tab && self.search_open && self.input_buttons.search_has_focus(context) {
+                // Tab traverses the search controls while they own focus.
+                // In the reader it retains its sidebar-toggle binding.
+                continue;
+            }
             // Adapt configured bindings to the existing reader commands, but
             // consume the original physical press so text cannot leak to egui.
             // Sequences and text fields retain their own keyboard vocabulary.
@@ -2119,96 +2026,6 @@ impl Pagewing {
                             }
                         }
                     });
-                });
-            });
-    }
-
-    fn search_bar(&mut self, context: &egui::Context) {
-        if !self.search_open {
-            return;
-        }
-        egui::TopBottomPanel::top("search")
-            .frame(appearance::panel(context, 4))
-            .exact_height(42.0)
-            .show(context, |ui| {
-                toolbar::horizontal_bar(ui, "search-controls", |ui| {
-                    ui.add_space(16.0);
-                    ui.label("Find");
-                    let (response, focused_now) = shortcuts::text_input(
-                        ui,
-                        egui::Id::new("pagewing-search-input"),
-                        &mut self.search_focus,
-                        &mut self.deferred_input,
-                        egui::TextEdit::singleline(&mut self.query)
-                            .desired_width((ui.available_width() - 600.0).clamp(100.0, 280.0))
-                            .hint_text("Search this document…"),
-                    );
-                    let case_changed = ui
-                        .selectable_label(self.library.search_options.match_case, "Aa")
-                        .on_hover_text("Match case · Alt+C")
-                        .clicked();
-                    let word_changed = ui
-                        .selectable_label(self.library.search_options.whole_word, "Word")
-                        .on_hover_text("Whole words · Alt+W")
-                        .clicked();
-                    if case_changed {
-                        self.library.search_options.match_case =
-                            !self.library.search_options.match_case;
-                    }
-                    if word_changed {
-                        self.library.search_options.whole_word =
-                            !self.library.search_options.whole_word;
-                    }
-                    if case_changed || word_changed {
-                        self.dirty = true;
-                        response.request_focus();
-                    }
-                    if response.changed() || case_changed || word_changed {
-                        self.change_search();
-                    }
-                    // egui compares focus with the previous frame. Acquiring
-                    // and releasing it with Enter in one frame is not lost_focus.
-                    if (response.lost_focus() || focused_now)
-                        && let Some(reverse) = ui.input(|input| {
-                            input.events.iter().find_map(|event| match event {
-                                egui::Event::Key {
-                                    key: Key::Enter,
-                                    pressed: true,
-                                    modifiers,
-                                    ..
-                                } => Some(modifiers.shift),
-                                _ => None,
-                            })
-                        })
-                    {
-                        self.next_hit(reverse);
-                    }
-                    if ui.button("Prev").clicked() {
-                        self.next_hit(true);
-                    }
-                    if ui.button("Next").clicked() {
-                        self.next_hit(false);
-                    }
-                    let index = self.hit_index.map(|i| i + 1).unwrap_or(0);
-                    ui.label(format!(
-                        "{index} / {}{} matches",
-                        self.hits.len(),
-                        if self.search_limited { "+" } else { "" }
-                    ));
-                    if !self.search_complete && !self.query.trim().is_empty() {
-                        ui.spinner();
-                        if ui.available_width() > 180.0 {
-                            ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
-                        }
-                    }
-                    if ui.button("Results").clicked() {
-                        self.library.sidebar = true;
-                        self.dirty = true;
-                    }
-                    if ui.button("×").clicked() {
-                        self.search_open = false;
-                        self.pending_search_jump = None;
-                    }
                 });
             });
     }

@@ -13,6 +13,7 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
 pub(super) enum InputButton {
     Help,
     Find,
+    Search(SearchButton),
     Comments,
     CloseComments,
     Page,
@@ -26,10 +27,26 @@ pub(super) enum InputButton {
     CopyConfig,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SearchButton {
+    Case,
+    Word,
+    Previous,
+    Next,
+    Results,
+    Close,
+}
+
 #[derive(Default)]
 pub(super) struct InputButtons {
     pub help: Option<Id>,
     pub find: Option<Id>,
+    pub search_case: Option<Id>,
+    pub search_word: Option<Id>,
+    pub search_previous: Option<Id>,
+    pub search_next: Option<Id>,
+    pub search_results: Option<Id>,
+    pub close_search: Option<Id>,
     pub comments: Option<Id>,
     pub close_comments: Option<Id>,
     pub page: Option<Id>,
@@ -44,10 +61,38 @@ pub(super) struct InputButtons {
 }
 
 impl InputButtons {
+    pub fn search_has_focus(&self, context: &eframe::egui::Context) -> bool {
+        context.memory(|memory| {
+            [
+                self.search_case,
+                self.search_word,
+                self.search_previous,
+                self.search_next,
+                self.search_results,
+                self.close_search,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|id| memory.has_focus(id))
+        })
+    }
+
     pub fn clicked(&self, context: &eframe::egui::Context) -> Option<InputButton> {
         for (id, action) in [
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),
+            (self.search_case, InputButton::Search(SearchButton::Case)),
+            (self.search_word, InputButton::Search(SearchButton::Word)),
+            (
+                self.search_previous,
+                InputButton::Search(SearchButton::Previous),
+            ),
+            (self.search_next, InputButton::Search(SearchButton::Next)),
+            (
+                self.search_results,
+                InputButton::Search(SearchButton::Results),
+            ),
+            (self.close_search, InputButton::Search(SearchButton::Close)),
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),
             (self.page, InputButton::Page),

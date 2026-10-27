@@ -128,6 +128,36 @@ def run(binary):
                 keyboard.key(0xFF0D); time.sleep(0.5); keyboard.key(0xFF1B)
                 keyboard.key("n", shift=True)
                 expect(5, "Word button restores substring matching")
+                # Traverse and activate every search control using only keys.
+                # Option activation restores the query focus without inserting
+                # the activation space or treating Enter as a result jump.
+                first(); keyboard.key("f", ctrl=True)
+                keyboard.key(0xFF09); keyboard.key(" ")
+                assert selected((280, 69)), "Tab+Space must activate Aa"
+                keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                assert selected((326, 69)), "Tab+Enter must activate Word"
+                keyboard.key(0xFF0D)
+                expect(3, "keyboard option buttons retain the exact Rust query")
+                keyboard.key("f", ctrl=True)
+                keyboard.key("c", alt=True); keyboard.key("w", alt=True)
+                keyboard.key(0xFF0D)
+                time.sleep(0.5)
+                keyboard.key("f", ctrl=True)
+                for _ in range(3):
+                    keyboard.key(0xFF09)
+                keyboard.key(" ")
+                expect(2, "Tab+Space on Prev selects exactly one earlier match")
+                keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                expect(3, "Tab+Enter on Next selects exactly one later match")
+                keyboard.key(0xFF09); keyboard.key(" ")
+                wait_for(lambda: json.loads(config_path.read_text())["sidebar"], "keyboard Results button opens sidebar")
+                keyboard.key(0xFF09); keyboard.key(" ")
+                keyboard.key("j", shift=True)
+                expect(4, "keyboard close button returns input to the reader")
+                keyboard.key("f", ctrl=True)
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "Rust", "activation keys leaked into the query"
+                keyboard.key(0xFF1B)
                 first(); find("absent")
                 keyboard.key("n")
                 time.sleep(0.5)
@@ -163,7 +193,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert json.loads(config_path.read_text())["recent"][0]["page"] == 0
-                print("PASS: saved keyboard/button preferences and actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
+                print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches and compact buttons")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
