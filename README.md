@@ -195,6 +195,8 @@ cargo bench --locked --bench search_matching -- 9
 cargo bench --locked --bench pdf_strings -- 9
 # 文件读取，比较普通读取与带取消检查的分块读取
 cargo bench --locked --bench document_bytes -- 9
+# 完整目录筛选，包含匹配、祖先保留、选择和可见行更新
+cargo bench --locked --bench outline_filter -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
 xvfb-run -a python3 scripts/smoke-install-linux.py target/release/folio
 xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio

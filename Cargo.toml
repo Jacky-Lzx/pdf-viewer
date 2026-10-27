@@ -80,3 +80,7 @@ harness = false
 [[bench]]
 name = "document_bytes"
 harness = false
+
+[[bench]]
+name = "outline_filter"
+harness = false

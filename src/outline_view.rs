@@ -129,11 +129,18 @@ impl OutlineView {
         self.visible.clear();
         if self.filtering() {
             let query = caseless::default_case_fold_str(self.query.trim());
-            let words: Vec<_> = query.split_whitespace().collect();
+            let words: Vec<_> = query
+                .split_whitespace()
+                .map(memchr::memmem::Finder::new)
+                .collect();
             let mut keep: Vec<_> = self
                 .folded_titles
                 .iter()
-                .map(|title| words.iter().all(|word| title.contains(word)))
+                .map(|title| {
+                    words
+                        .iter()
+                        .all(|word| word.find(title.as_bytes()).is_some())
+                })
                 .collect();
             // Ancestors provide context, but Enter should initially follow a
             // title match rather than the first retained parent.
