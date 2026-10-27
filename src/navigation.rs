@@ -12,6 +12,29 @@ pub fn percentage_page(pages: usize, percentage: usize) -> usize {
     (pages / 100 * percentage + (pages % 100 * percentage).div_ceil(100)).saturating_sub(1)
 }
 
+/// Resolve an explicitly signed physical page offset, clamped to the document.
+/// Other inputs remain available for absolute page numbers and PDF labels.
+pub fn relative_page(input: &str, current: usize, pages: usize) -> Option<usize> {
+    let input = input.trim();
+    let reverse = match input.as_bytes().first()? {
+        b'+' => false,
+        b'-' => true,
+        _ => return None,
+    };
+    let amount = &input[1..];
+    if pages == 0 || amount.is_empty() || !amount.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let amount = amount.parse::<usize>().ok()?;
+    let last = pages - 1;
+    let current = current.min(last);
+    Some(if reverse {
+        current.saturating_sub(amount)
+    } else {
+        current.saturating_add(amount).min(last)
+    })
+}
+
 /// Find a counted next/previous bookmark in a sorted, unique page list.
 /// Skip the current page, wrap at either end, and avoid intermediate jumps.
 pub fn bookmark_target(
@@ -136,6 +159,56 @@ impl Navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_jumps_use_physical_offsets_preserve_zero_and_clamp_extreme_counts() {
+        for (input, expected) in [
+            ("+1", 3),
+            ("-1", 1),
+            ("+3", 5),
+            ("-3", 0),
+            ("+0", 2),
+            ("-0", 2),
+            (" +02 ", 4),
+            ("-9999999", 0),
+            ("+9999999", 5),
+        ] {
+            assert_eq!(relative_page(input, 2, 6), Some(expected), "{input}");
+        }
+        assert_eq!(relative_page("+1", 100, 6), Some(5));
+        assert_eq!(relative_page("-1", 100, 6), Some(4));
+        let maximum = usize::MAX.to_string();
+        assert_eq!(
+            relative_page(&format!("+{maximum}"), usize::MAX - 2, usize::MAX),
+            Some(usize::MAX - 1)
+        );
+        assert_eq!(
+            relative_page(&format!("-{maximum}"), usize::MAX - 2, usize::MAX),
+            Some(0)
+        );
+        for input in [
+            "",
+            "1",
+            "=+2",
+            "=-2",
+            "A-2",
+            "+",
+            "-",
+            "++2",
+            "--2",
+            "+-2",
+            "-+2",
+            "+ 2",
+            "-2.0",
+            "+２",
+            "+١",
+            "+9999999999999999999999999999999999999999",
+        ] {
+            assert_eq!(relative_page(input, 2, 6), None, "{input}");
+        }
+        assert_eq!(relative_page("+1", 0, 0), None);
+        assert_eq!(relative_page("-1", 0, 0), None);
+    }
 
     #[test]
     fn percentage_navigation_rounds_up_clamps_and_handles_extreme_page_counts() {

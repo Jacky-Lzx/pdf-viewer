@@ -2337,7 +2337,7 @@ impl Folio {
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(context, |ui| {
                     ui.label(format!("Physical page 1–{}", self.nav.count));
-                    ui.weak("Or a PDF label: iv, A-3. Use =1 for label 1.");
+                    ui.weak("Relative: +5, -5. PDF label: iv, A-3; =1 for label 1.");
                     let (response, focused_now) = shortcuts::text_input(
                         ui,
                         egui::Id::new("folio-page-input"),
@@ -2351,11 +2351,19 @@ impl Folio {
                             || ((response.lost_focus() || focused_now)
                                 && ui.input(|input| input.key_pressed(Key::Enter))))
                     {
-                        if let Some(page) = self.labels.resolve_input(&self.goto, self.nav.count) {
+                        let page = crate::navigation::relative_page(
+                            &self.goto,
+                            self.nav.page,
+                            self.nav.count,
+                        )
+                        .or_else(|| self.labels.resolve_input(&self.goto, self.nav.count));
+                        if let Some(page) = page {
                             self.jump(page);
                             self.goto_open = false;
                         } else {
-                            self.notify("Enter a valid page number or PDF page label");
+                            self.notify("Enter a page number, +offset, -offset or PDF page label");
+                            self.goto_focus = true;
+                            context.request_repaint();
                         }
                     }
                 });

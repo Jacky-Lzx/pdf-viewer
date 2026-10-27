@@ -76,6 +76,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("y", "Copy page text"),
     ("o   or   Ctrl/Cmd+o", "Open PDF"),
     (":", "Go to page dialog"),
+    (
+        ":+5 Enter / :-5 Enter",
+        "Jump forward / back five physical pages; clamp at document edges",
+    ),
     ("f, then a label", "Follow a visible PDF link"),
     ("F, then a label", "Copy a visible web-link address"),
     ("F11", "Toggle fullscreen"),
