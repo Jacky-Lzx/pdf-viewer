@@ -3,6 +3,7 @@ use crate::{
     navigation::Fit,
 };
 use eframe::egui::{Rect, Vec2};
+use std::sync::Arc;
 
 pub use crate::document::Tile;
 
@@ -30,7 +31,7 @@ impl std::ops::Deref for RenderPlan {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderView {
     pub fit: Fit,
     pub viewport: [f32; 2],
@@ -38,6 +39,87 @@ pub struct RenderView {
     pub rotation: u8,
     pub night: bool,
     pub backwards: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanMode {
+    Single,
+    Continuous,
+}
+
+#[derive(Clone)]
+pub struct PlannedView {
+    pub plan: Arc<RenderPlan>,
+    pub detailed: bool,
+}
+
+struct CachedView {
+    mode: PlanMode,
+    view: RenderView,
+    visible: Vec<(usize, Rect)>,
+    dimensions: Vec<[f32; 2]>,
+    clip: Rect,
+    budget: usize,
+    result: PlannedView,
+}
+
+/// Keep only the current view's plan. Request retries and texture residency are
+/// deliberately independent: a cached plan may still need to be sent again.
+#[derive(Default)]
+pub struct RenderPlanner {
+    cached: Option<CachedView>,
+}
+
+impl RenderPlanner {
+    /// Visible pages must be in contiguous document order, as in the canvas.
+    /// Only their dimensions and immediate prefetch neighbors affect planning.
+    pub fn plan(
+        &mut self,
+        mode: PlanMode,
+        view: RenderView,
+        visible: &[(usize, Rect)],
+        dimensions: &[[f32; 2]],
+        clip: Rect,
+        budget: usize,
+    ) -> PlannedView {
+        let pages = visible
+            .first()
+            .zip(visible.last())
+            .map_or(0..0, |(first, last)| first.0..last.0 + 1);
+        let relevant = &dimensions
+            [pages.start.saturating_sub(1)..pages.end.saturating_add(1).min(dimensions.len())];
+        if let Some(cached) = &self.cached
+            && cached.mode == mode
+            && cached.view == view
+            && cached.visible == visible
+            && cached.dimensions == relevant
+            && cached.clip == clip
+            && cached.budget == budget
+        {
+            return cached.result.clone();
+        }
+        let detail = view.detail_plan(visible, dimensions, clip, budget);
+        let detailed = detail.is_some();
+        let plan = detail.unwrap_or_else(|| match mode {
+            PlanMode::Single if !pages.is_empty() => view.plan(pages.start, dimensions, budget),
+            PlanMode::Single => RenderPlan::new(),
+            PlanMode::Continuous => view.continuous_plan(pages, dimensions, budget),
+        });
+        let result = PlannedView {
+            plan: Arc::new(plan),
+            detailed,
+        };
+        self.cached = Some(CachedView {
+            mode,
+            view,
+            visible: visible.to_vec(),
+            dimensions: relevant.to_vec(),
+            clip,
+            budget,
+            result: result.clone(),
+        });
+        result
+    }
 }
 
 impl RenderView {
@@ -98,6 +180,7 @@ impl RenderView {
                 let extent = (rect.size() * density).ceil();
                 let start = ((intersection.min - rect.min) * density).max(Vec2::ZERO);
                 let end = ((intersection.max - rect.min) * density).min(extent);
+                let key = self.key(page, dimensions[page]);
                 const SIDE: u32 = 1024;
                 for y in (start.y as u32 / SIDE)..(end.y.ceil() as u32).div_ceil(SIDE) {
                     for x in (start.x as u32 / SIDE)..(end.x.ceil() as u32).div_ceil(SIDE) {
@@ -114,7 +197,7 @@ impl RenderView {
                         bytes += tile.bytes();
                         plan.push(RenderKey {
                             tile: Some(tile),
-                            ..self.key(page, dimensions[page])
+                            ..key
                         });
                     }
                 }
@@ -254,6 +337,184 @@ impl RenderView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_matches_uncached(
+        result: &PlannedView,
+        mode: PlanMode,
+        view: RenderView,
+        visible: &[(usize, Rect)],
+        dimensions: &[[f32; 2]],
+        clip: Rect,
+        budget: usize,
+    ) {
+        let detail = view.detail_plan(visible, dimensions, clip, budget);
+        assert_eq!(result.detailed, detail.is_some());
+        let expected = detail.unwrap_or_else(|| match mode {
+            PlanMode::Single => view.plan(visible[0].0, dimensions, budget),
+            PlanMode::Continuous => view.continuous_plan(
+                visible[0].0..visible.last().unwrap().0 + 1,
+                dimensions,
+                budget,
+            ),
+        });
+        assert_eq!(*result.plan, expected);
+    }
+
+    #[test]
+    fn planner_reuses_the_current_plan_and_tracks_all_view_inputs() {
+        let dimensions = [[600.0, 800.0]; 4];
+        let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(1000.0, 700.0));
+        let rect = Rect::from_min_size(egui_pos(-1777.0, -2321.0), Vec2::new(4800.0, 6400.0));
+        for mode in [PlanMode::Single, PlanMode::Continuous] {
+            let mut planner = RenderPlanner::default();
+            let mut view = view(Fit::Custom(8.0));
+            let mut pages = vec![(1, rect)];
+            let mut clip = clip;
+            let mut budget = 96 * 1024 * 1024;
+            let mut previous: Option<PlannedView> = None;
+            for change in 0..12 {
+                match change {
+                    0 => {}
+                    1 => view.fit = Fit::Custom(4.0),
+                    2 => view.viewport[0] += 100.0,
+                    3 => view.pixels_per_point = 3.0,
+                    4 => view.rotation = 1,
+                    5 => view.night = true,
+                    6 => view.backwards = true,
+                    7 => pages[0].1 = rect.translate(Vec2::new(-1024.0, 0.0)),
+                    8 => clip.max.x -= 100.0,
+                    9 => budget /= 4,
+                    10 => pages[0].0 = 2,
+                    11 => view.fit = Fit::Page,
+                    _ => unreachable!(),
+                }
+                let result = planner.plan(mode, view, &pages, &dimensions, clip, budget);
+                assert_matches_uncached(&result, mode, view, &pages, &dimensions, clip, budget);
+                if let Some(previous) = &previous {
+                    assert!(
+                        !Arc::ptr_eq(&previous.plan, &result.plan),
+                        "change {change}"
+                    );
+                }
+                let again = planner.plan(mode, view, &pages, &dimensions, clip, budget);
+                assert!(Arc::ptr_eq(&result.plan, &again.plan));
+                previous = Some(result);
+            }
+        }
+    }
+
+    #[test]
+    fn planner_tracks_visible_dimensions_neighbors_page_count_and_mode() {
+        let mut dimensions = vec![[600.0, 800.0]; 4];
+        let view = view(Fit::Width);
+        let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(1000.0, 700.0));
+        let pages = [(1, clip), (2, clip.translate(Vec2::new(0.0, 100.0)))];
+        let budget = 96 * 1024 * 1024;
+        let mut planner = RenderPlanner::default();
+        let mut previous = planner.plan(
+            PlanMode::Continuous,
+            view,
+            &pages,
+            &dimensions,
+            clip,
+            budget,
+        );
+        for index in [0, 1, 2, 3] {
+            dimensions[index] = [300.0, 1200.0];
+            let result = planner.plan(
+                PlanMode::Continuous,
+                view,
+                &pages,
+                &dimensions,
+                clip,
+                budget,
+            );
+            assert!(!Arc::ptr_eq(&previous.plan, &result.plan));
+            assert_matches_uncached(
+                &result,
+                PlanMode::Continuous,
+                view,
+                &pages,
+                &dimensions,
+                clip,
+                budget,
+            );
+            previous = result;
+        }
+        dimensions.push([800.0, 600.0]);
+        let result = planner.plan(
+            PlanMode::Continuous,
+            view,
+            &pages,
+            &dimensions,
+            clip,
+            budget,
+        );
+        assert!(Arc::ptr_eq(&previous.plan, &result.plan));
+        dimensions.pop();
+        dimensions.pop(); // Remove the next prefetch neighbor.
+        let result = planner.plan(
+            PlanMode::Continuous,
+            view,
+            &pages,
+            &dimensions,
+            clip,
+            budget,
+        );
+        assert!(!Arc::ptr_eq(&previous.plan, &result.plan));
+        assert_matches_uncached(
+            &result,
+            PlanMode::Continuous,
+            view,
+            &pages,
+            &dimensions,
+            clip,
+            budget,
+        );
+        let pages = &pages[..1];
+        let result = planner.plan(PlanMode::Continuous, view, pages, &dimensions, clip, budget);
+        let single = planner.plan(PlanMode::Single, view, pages, &dimensions, clip, budget);
+        assert!(!Arc::ptr_eq(&result.plan, &single.plan));
+        assert_matches_uncached(
+            &single,
+            PlanMode::Single,
+            view,
+            pages,
+            &dimensions,
+            clip,
+            budget,
+        );
+    }
+
+    #[test]
+    fn planner_replaces_old_views_without_retaining_their_tile_lists() {
+        let dimensions = [[600.0, 800.0]; 4];
+        let clip = Rect::from_min_size(egui_pos(0.0, 0.0), Vec2::new(1000.0, 700.0));
+        let view = view(Fit::Custom(8.0));
+        let mut planner = RenderPlanner::default();
+        let first = planner.plan(
+            PlanMode::Single,
+            view,
+            &[(0, clip)],
+            &dimensions,
+            clip,
+            96 << 20,
+        );
+        let weak = Arc::downgrade(&first.plan);
+        drop(first);
+        planner.plan(
+            PlanMode::Single,
+            view,
+            &[(1, clip)],
+            &dimensions,
+            clip,
+            96 << 20,
+        );
+        assert!(weak.upgrade().is_none());
+        let result = planner.plan(PlanMode::Continuous, view, &[], &[], clip, 96 << 20);
+        assert!(result.plan.is_empty());
+        assert!(!result.detailed);
+    }
 
     #[test]
     fn high_zoom_tiles_cover_the_viewport_at_native_density_within_the_shared_budget() {

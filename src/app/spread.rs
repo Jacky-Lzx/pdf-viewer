@@ -213,6 +213,28 @@ mod tests {
     }
 
     #[test]
+    fn clearing_requests_retries_a_cached_plan_in_every_display_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        for (continuous, facing) in [(false, false), (true, false), (false, true)] {
+            app.set_display_mode(continuous, facing);
+            for _ in 0..3 {
+                let _ = context.run(egui::RawInput::default(), |context| app.canvas(context));
+            }
+            let requested = app.requested.take().unwrap();
+            let _ = context.run(egui::RawInput::default(), |context| app.canvas(context));
+            assert!(std::sync::Arc::ptr_eq(
+                &requested,
+                app.requested.as_ref().unwrap()
+            ));
+            app.clear_document(&context);
+            assert!(app.requested.is_none());
+            app.dimensions = vec![[600.0, 800.0]; 3];
+            app.nav = crate::navigation::Navigation::new(3, 0);
+        }
+    }
+
+    #[test]
     fn search_and_rectangular_destinations_use_the_second_pages_position_before_clamping() {
         let directory = tempfile::tempdir().unwrap();
         let (mut app, _) = reader(directory.path().join("library.json"));

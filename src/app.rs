@@ -20,7 +20,7 @@ use crate::{
     link_hints::LinkHints,
     links::LinkTarget,
     navigation::{Fit, Navigation},
-    render_plan::{RenderPlan, RenderView},
+    render_plan::{PlanMode, RenderPlan, RenderPlanner, RenderView},
     selection::{SelectionUnit, TextSelection},
     state::{self, Library, ReadingMark, ReadingState},
     text::SearchHit,
@@ -29,7 +29,10 @@ use crate::{
 use eframe::egui::{self, Color32, Key, RichText, Vec2};
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver},
+    },
     time::{Duration, Instant},
 };
 
@@ -90,7 +93,8 @@ pub struct Pagewing {
     overflow: Vec2,
     viewport: Vec2,
     scale: f32,
-    requested: Option<RenderPlan>,
+    render_planner: RenderPlanner,
+    requested: Option<Arc<RenderPlan>>,
     render_ms: f64,
     dialog: Option<Receiver<Option<PathBuf>>>,
     deferred_input: Vec<egui::Event>,
@@ -245,6 +249,7 @@ impl Pagewing {
             overflow: Vec2::ZERO,
             viewport: Vec2::splat(600.0),
             scale: 1.0,
+            render_planner: RenderPlanner::default(),
             requested: None,
             render_ms: 0.0,
             dialog: None,
@@ -356,6 +361,7 @@ impl Pagewing {
         self.thumbnails.clear();
         self.reveal_page = None;
         self.requested = None;
+        self.render_planner = RenderPlanner::default();
         self.pan = Vec2::ZERO;
         self.pending_offset = None;
         self.pending_focus = None;
@@ -1008,6 +1014,7 @@ impl Pagewing {
                     self.cache.clear();
                     self.thumbnails.clear();
                     self.requested = None;
+                    self.render_planner = RenderPlanner::default();
                     self.links.clear();
                     self.visible_links.clear();
                     self.hints.cancel();
@@ -2297,15 +2304,15 @@ impl Pagewing {
                     self.reading.offset = offset;
                     self.dirty = true;
                 }
-                let detailed = view.detail_plan(
+                let planned = self.render_planner.plan(
+                    PlanMode::Single,
+                    view,
                     &[(self.nav.page, page_rect)],
                     &self.dimensions,
                     ui.max_rect(),
                     self.cache.budget(),
                 );
-                let plan = detailed.unwrap_or_else(|| {
-                    view.plan(self.nav.page, &self.dimensions, self.cache.budget())
-                });
+                let plan = planned.plan;
                 let key = plan[0];
                 if plan.iter().any(|key| key.tile.is_some()) {
                     self.cache.protect_many(&plan);

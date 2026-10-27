@@ -343,6 +343,8 @@ cargo bench --locked --bench outline_filter -- 9
 cargo bench --locked --bench link_reading -- 9
 # 批注导航与页面绘制索引，比较逐帧重建、全表扫描和缓存命中
 cargo bench --locked --bench comments -- 7
+# 阅读视图渲染规划，比较重复计算、当前视图缓存命中与滚动失效
+cargo bench --locked --bench render_plan -- 9
 # 名称与页码标签树，覆盖共享无效/重复数组及跨节点扫描上限
 cargo bench --locked --bench metadata_trees -- 9
 # 文本缓存命中、少量和批量逐出，包含真实页面费用记账

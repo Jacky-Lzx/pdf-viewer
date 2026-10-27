@@ -119,3 +119,7 @@ harness = false
 [[bench]]
 name = "comments"
 harness = false
+
+[[bench]]
+name = "render_plan"
+harness = false

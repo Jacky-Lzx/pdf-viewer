@@ -1,5 +1,9 @@
 use super::{Pagewing, SELECTION_COLOR, selection_scroll};
-use crate::{navigation::Fit, render_plan::RenderView, selection::SelectionUnit};
+use crate::{
+    navigation::Fit,
+    render_plan::{PlanMode, RenderView},
+    selection::SelectionUnit,
+};
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
 
@@ -124,12 +128,16 @@ impl Pagewing {
             .map(|page| (page, self.continuous_rect(page, rect)))
             .collect();
         let view = self.continuous_view(ui.ctx().pixels_per_point());
-        let detail = view.detail_plan(&pages, &self.dimensions, ui.max_rect(), self.cache.budget());
-        let detailed = detail.is_some();
-        let plan = detail.unwrap_or_else(|| {
-            view.continuous_plan(visible.clone(), &self.dimensions, self.cache.budget())
-        });
-        self.cache.protect_many(if detailed {
+        let planned = self.render_planner.plan(
+            PlanMode::Continuous,
+            view,
+            &pages,
+            &self.dimensions,
+            ui.max_rect(),
+            self.cache.budget(),
+        );
+        let plan = planned.plan;
+        self.cache.protect_many(if planned.detailed {
             &plan
         } else {
             &plan[..visible.len()]
