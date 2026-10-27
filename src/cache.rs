@@ -3,6 +3,7 @@ use eframe::egui::{TextureHandle, TextureId};
 use std::{cmp::Reverse, collections::HashMap};
 
 const BUDGET: usize = 96 * 1024 * 1024;
+const MAX_ENTRIES: usize = 512;
 
 struct Entry {
     texture: TextureHandle,
@@ -121,7 +122,9 @@ impl TextureCache {
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
-        while self.bytes + bytes > self.budget && !self.entries.is_empty() {
+        while (self.bytes + bytes > self.budget || self.entries.len() >= MAX_ENTRIES)
+            && !self.entries.is_empty()
+        {
             let Some(oldest) = self
                 .entries
                 .iter()
@@ -297,6 +300,48 @@ mod tests {
         let second = cache.get(&key(1)).unwrap();
         cache.clear();
         assert!(ctx.tex_manager().read().meta(second).is_none());
+    }
+
+    #[test]
+    fn tiny_texture_count_is_bounded_without_losing_zoom_fallbacks_or_replacements() {
+        let ctx = Context::default();
+        let mut cache = TextureCache::default();
+        let mut ids = Vec::new();
+        for page in 0..512 {
+            let image = texture(&ctx);
+            ids.push(image.id());
+            assert!(cache.insert(key(page), image));
+        }
+        assert!(cache.bytes < cache.budget);
+        let target = RenderKey {
+            width: 64,
+            ..key(0)
+        };
+        cache.protect(target);
+        assert_eq!(cache.fallback_key(target), Some(key(0)));
+        assert!(cache.can_insert(key(512), 64));
+        assert!(cache.insert(key(512), texture(&ctx)));
+        assert_eq!(cache.entries.len(), 512);
+        assert_eq!(cache.bytes, 512 * 64);
+        assert!(cache.contains(&key(0)) && cache.contains(&key(512)));
+        assert!(!cache.contains(&key(1)));
+        assert!(ctx.tex_manager().read().meta(ids[0]).is_some());
+        assert!(ctx.tex_manager().read().meta(ids[1]).is_none());
+
+        // Replacing an existing key at the count limit needs no extra eviction.
+        let old = cache.get(&key(512)).unwrap();
+        assert!(cache.insert(key(512), texture(&ctx)));
+        assert_eq!(cache.entries.len(), 512);
+        assert!(cache.contains(&key(2)));
+        assert!(ctx.tex_manager().read().meta(old).is_none());
+
+        // The desired texture may now replace the old, pinned zoom fallback.
+        assert!(cache.insert(target, texture(&ctx)));
+        assert_eq!(cache.entries.len(), 512);
+        assert_eq!(cache.bytes, 512 * 64);
+        assert!(!cache.contains(&key(0)));
+        assert!(cache.contains(&target) && cache.contains(&key(2)));
+        assert!(ctx.tex_manager().read().meta(ids[0]).is_none());
     }
 
     #[test]
