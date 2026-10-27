@@ -156,6 +156,12 @@ impl Navigation {
         count
     }
 
+    pub fn backspace(&mut self) {
+        self.prefix.pop();
+        self.pending_g = false;
+        self.pending_z = false;
+    }
+
     pub fn clear_prefix(&mut self) {
         self.prefix.clear();
         self.pending_g = false;
@@ -420,5 +426,34 @@ mod tests {
         }
         assert_eq!(nav.take_count(), 9_999_999);
         assert_eq!(nav.take_count(), 1);
+    }
+
+    #[test]
+    fn editing_a_bounded_count_cancels_pending_commands_without_changing_the_view() {
+        let mut nav = Navigation::new(100, 30);
+        nav.step(-1);
+        for pending_z in [false, true] {
+            for digit in "12345678".chars() {
+                nav.digit(digit);
+            }
+            nav.pending_g = !pending_z;
+            nav.pending_z = pending_z;
+            nav.backspace();
+            assert!(!nav.pending_g && !nav.pending_z);
+            nav.digit('9');
+            assert_eq!(nav.take_count(), 1_234_569);
+            assert_eq!((nav.page, nav.count, nav.direction), (29, 100, -1));
+        }
+        for _ in 0..10 {
+            nav.backspace();
+        }
+        nav.digit('0');
+        nav.digit('2');
+        nav.backspace();
+        assert_eq!(nav.take_count(), 1, "zero retains the minimum count");
+        nav.digit('4');
+        nav.digit('2');
+        nav.backspace();
+        assert_eq!(nav.take_count(), 4);
     }
 }

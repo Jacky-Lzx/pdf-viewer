@@ -1318,6 +1318,10 @@ impl Folio {
                 self.nav.clear_prefix();
                 continue;
             }
+            if key == Key::Backspace {
+                self.nav.backspace();
+                continue;
+            }
             if self.nav.pending_z {
                 let count = self.nav.take_count() as f32;
                 if symbol == Some('$') {

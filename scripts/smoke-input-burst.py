@@ -14,7 +14,7 @@ import time
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
-ENTER, ESCAPE = 0xFF0D, 0xFF1B
+ENTER, ESCAPE, BACKSPACE = 0xFF0D, 0xFF1B, 0xFF08
 
 
 def text(value):
@@ -66,11 +66,29 @@ def run(binary):
             try:
                 wait_for(keyboard.focus, "burst-input reader window")
                 expect(paths[0], 0, "initial reading state")
+                burst(text("42") + [(BACKSPACE, {})] + text("G"))
+                expect(paths[0], 3, "Backspace corrects a physical page prefix within the same frame")
+                burst(text("4") + [(BACKSPACE, {})] + text("J"))
+                expect(paths[0], 4, "deleting the entire count restores a single page step")
+                burst(text("gg23") + [(BACKSPACE, {})] + text("J"))
+                expect(paths[0], 2, "an edited count still multiplies page movement")
+                burst(text("41g") + [(BACKSPACE, {})] + text("gg"))
+                expect(paths[0], 3, "editing cancels a pending g while retaining the corrected page prefix")
+                burst(text("gg"))
+                expect(paths[0], 0, "reset before correcting a pending z command")
+                burst(text("32z") + [(BACKSPACE, {})] + text("J"))
+                expect(paths[0], 3, "editing cancels a pending z before the corrected count is consumed")
+                burst(text("G"))
+                expect(paths[0], 5, "reset before correcting a saturated prefix")
+                burst(text("40000000") + [(BACKSPACE, {})] * 6 + [(ENTER, {})])
+                expect(paths[0], 3, "the bounded prefix can be shortened and confirmed with Enter")
+                burst([(BACKSPACE, {})] * 2 + text("gg"))
+                expect(paths[0], 0, "extra Backspace presses with no count leave navigation usable")
                 # Seed a nonempty clipboard so a lost query cannot pass as stale
                 # clipboard content or hang waiting for an empty selection.
                 keyboard.key("y")
                 assert "native PDF reader" in keyboard.clipboard()
-                burst([("/", {})] + text("jkgdi/path"))
+                burst([("/", {})] + text("jkgdi/path3") + [(BACKSPACE, {})])
                 copy_query("jkgdi/path")
                 keyboard.key(ESCAPE)
                 keyboard.key("j", shift=True)
@@ -88,7 +106,7 @@ def run(binary):
                 expect(paths[0], 0, "Shift+Enter uses the key's modifiers even when Shift is released in the same frame")
                 keyboard.key(ESCAPE)
 
-                burst([(':', {"shift": True})] + text("4") + [(ENTER, {})])
+                burst([(':', {"shift": True})] + text("42") + [(BACKSPACE, {}), (ENTER, {})])
                 expect(paths[0], 3, "physical page dialog accepts its opening-frame text and Enter")
                 burst([(':', {"shift": True})] + text("A-2") + [(ENTER, {})])
                 expect(paths[0], 5, "page labels retain uppercase letters without inserting the colon")
@@ -115,7 +133,7 @@ def run(binary):
                 expect(paths[2], 1, "Escape cancels pending input focus before the next navigation key")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: same-frame search/replacement/Enter, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
+                print("PASS: same-frame count correction, pending g/z cancellation, bounded and empty counts, search/page Backspace isolation, search/replacement/Enter, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

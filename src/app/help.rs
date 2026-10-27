@@ -7,6 +7,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("J / K   or   ] / [", "Next / previous page"),
     ("gg / G", "First / last page"),
     ("42G   or   42 Enter", "Go to page 42"),
+    (
+        "Backspace",
+        "Remove the last count digit and cancel an unfinished g/z command",
+    ),
     ("Ctrl+d / Ctrl+u", "Half screen down / up"),
     ("Space / Shift+Space", "Screen down / up"),
     ("50%", "Jump to a percentage of the document's pages"),
