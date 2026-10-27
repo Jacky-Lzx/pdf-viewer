@@ -17,8 +17,8 @@ impl Pagewing {
         self.mark_action = None;
         self.help = false;
         self.properties_open = false;
-        self.goto_open = false;
-        self.password_open = false;
+        self.page_input = None;
+        self.password_input = None;
         self.search_open = false;
         self.pending_search_jump = None;
         self.recent_picker = Some(crate::recent::RecentPicker::new(

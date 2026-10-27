@@ -11,7 +11,7 @@ impl Pagewing {
             || self.comments.busy()
             || self.comments.editor.is_some()
             || self.selection.active
-            || self.password_open
+            || self.password_input.is_some()
             || context.input(|i| i.pointer.any_down())
         {
             return;
@@ -229,7 +229,7 @@ mod tests {
         fs::write(&path, b"incomplete compiler output").unwrap();
         wait(&mut app, &context, |a| !a.loading && a.error.is_some());
         assert_eq!(title(&app), "Edition one");
-        assert!(app.file_changed && !app.auto_reload_pending && !app.password_open);
+        assert!(app.file_changed && !app.auto_reload_pending && app.password_input.is_none());
         let error = app.error.clone();
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
@@ -257,11 +257,11 @@ mod tests {
         let (mut app, context) = open(&path, &root.path().join("library.json"));
         fs::write(&path, include_bytes!("../../tests/fixtures/encrypted.pdf")).unwrap();
         wait(&mut app, &context, |a| !a.loading && a.error.is_some());
-        assert!(!app.password_open);
+        assert!(app.password_input.is_none());
         assert_eq!(title(&app), "Edition one");
         assert!(app.error.as_ref().unwrap().contains("password"));
         app.reload();
-        wait(&mut app, &context, |a| a.password_open);
+        wait(&mut app, &context, |a| a.password_input.is_some());
         assert!(!app.automatic_reload);
     }
 }

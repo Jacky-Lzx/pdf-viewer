@@ -29,12 +29,13 @@ impl Pagewing {
             return;
         }
         self.outline.cancel_input();
+        self.close_password_input(context);
         self.nav.clear_prefix();
         self.hints.cancel();
         self.mark_action = None;
         self.help = false;
         self.properties_open = false;
-        self.goto_open = false;
+        self.page_input = None;
         self.recent_picker = None;
         self.search_focus = false;
         self.pending_search_jump = None;
@@ -349,8 +350,7 @@ mod tests {
         settle(&mut app, &context);
         assert!(app.zoom_input.is_some());
         frame(&mut app, &context, key(Key::Escape));
-        app.goto_open = true;
-        app.goto_focus = true;
+        app.open_goto();
         frame(&mut app, &context, key(Key::X));
         assert!(
             app.zoom_input.is_none(),
@@ -361,7 +361,7 @@ mod tests {
         events.extend(key(Key::Enter));
         frame(&mut app, &context, events);
         settle(&mut app, &context);
-        assert!(!app.goto_open);
+        assert!(app.page_input.is_none());
         assert_eq!(app.reading.fit, Fit::Custom(1.5));
     }
 

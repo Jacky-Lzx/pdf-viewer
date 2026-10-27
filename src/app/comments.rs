@@ -115,8 +115,8 @@ impl Pagewing {
         self.comments.open
             && self.zoom_input.is_none()
             && !self.search_focus
-            && !self.goto_open
-            && !self.password_open
+            && self.page_input.is_none()
+            && self.password_input.is_none()
             && !self.help
             && !self.properties_open
             && self.recent_picker.is_none()

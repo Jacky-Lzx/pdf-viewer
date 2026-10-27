@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise relative page input, view/history preservation and signed PDF labels."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -55,7 +56,7 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
 
             try:
-                wait_for(keyboard.focus, "relative page reader window")
+                window = wait_for(keyboard.focus, "relative page reader window")
                 expect(0, fit="Page")
                 for query, page in [("+2", 2), ("-1", 1), ("A-2", 5), ("-3", 2),
                                     ("2", 1), ("+9999999", 5), ("-9999999", 0)]:
@@ -118,9 +119,23 @@ def run(binary):
                 expect(2, fit="Page")
                 goto("1")
                 expect(0, fit="Page")
+                keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                goto("missing page")
+                time.sleep(0.3)
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "missing page", "minimum-size validation keeps the value editable"
+                sequence("2"); keyboard.key(0xFF0D)
+                expect(1, fit="Page")
+                sequence(":6")
+                keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                keyboard.key("j", shift=True)
+                expect(2, fit="Page")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: relative page offsets, same-frame dialog input/Enter, edge clamping, retained zoom/rotation/scroll/history, zero-offset Forward, count cleanup, invalid input, search isolation and explicit signed/numeric PDF labels")
+                print("PASS: relative page offsets, same-frame dialog input/Enter, edge clamping, retained zoom/rotation/scroll/history, zero-offset Forward, count cleanup, minimum-size validation and Tab/Enter Cancel, search isolation and explicit signed/numeric PDF labels")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

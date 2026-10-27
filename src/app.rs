@@ -5,6 +5,7 @@ mod config;
 mod continuous;
 mod dialog;
 mod help;
+mod input_dialogs;
 mod properties;
 mod recent;
 mod reload;
@@ -113,17 +114,13 @@ pub struct Pagewing {
     scan_total: usize,
     search_complete: bool,
     search_limited: bool,
-    goto: String,
-    goto_open: bool,
-    goto_focus: bool,
+    page_input: Option<input_dialogs::PageInput>,
     zoom_input: Option<zoom::ZoomInput>,
     help: bool,
     help_filter: help::HelpFilter,
     input_buttons: shortcuts::InputButtons,
     recent_picker: Option<crate::recent::RecentPicker>,
-    password: String,
-    password_open: bool,
-    password_focus: bool,
+    password_input: Option<input_dialogs::PasswordInput>,
     saved: Instant,
     dirty: bool,
 }
@@ -270,17 +267,13 @@ impl Pagewing {
             scan_total: 0,
             search_complete: true,
             search_limited: false,
-            goto: String::new(),
-            goto_open: false,
-            goto_focus: false,
+            page_input: None,
             zoom_input: None,
             help: false,
             help_filter: help::HelpFilter::default(),
             input_buttons: shortcuts::InputButtons::default(),
             recent_picker: None,
-            password: String::new(),
-            password_open: false,
-            password_focus: false,
+            password_input: None,
             saved: Instant::now(),
             dirty: false,
         };
@@ -395,12 +388,8 @@ impl Pagewing {
         self.automatic_reload = false;
         self.error = None;
         self.message = None;
-        self.goto.clear();
-        self.goto_open = false;
-        self.goto_focus = false;
-        self.password.clear();
-        self.password_open = false;
-        self.password_focus = false;
+        self.page_input = None;
+        self.password_input = None;
         self.help = false;
         self.recent_picker = None;
         self.deferred_input.clear();
@@ -849,30 +838,6 @@ impl Pagewing {
             .extend(self.reading.bookmarks.iter().copied());
     }
 
-    fn open_goto(&mut self) {
-        if self.nav.count == 0 {
-            return;
-        }
-        self.outline.cancel_input();
-        self.zoom_input = None;
-        self.nav.clear_prefix();
-        self.hints.cancel();
-        self.selection.cancel();
-        self.mark_action = None;
-        self.recent_picker = None;
-        self.properties_open = false;
-        self.help = false;
-        self.password_open = false;
-        self.password_focus = false;
-        self.password.clear();
-        self.search_open = false;
-        self.search_focus = false;
-        self.pending_search_jump = None;
-        self.goto_open = true;
-        self.goto_focus = true;
-        self.goto.clear();
-    }
-
     fn find(&mut self) {
         self.zoom_input = None;
         self.outline.cancel_input();
@@ -889,8 +854,8 @@ impl Pagewing {
         self.mark_action = None;
         self.help = false;
         self.properties_open = false;
-        self.goto_open = false;
-        self.password_open = false;
+        self.page_input = None;
+        self.password_input = None;
         self.search_open = true;
         self.search_focus = true;
         if let Some(query) = selected {
@@ -1157,18 +1122,7 @@ impl Pagewing {
                         }
                     }
                     if opening && message.contains("Decryption") && !automatic {
-                        self.password_open = true;
-                        self.close_zoom(context);
-                        self.password_focus = true;
-                        self.goto_open = false;
-                        self.help = false;
-                        self.properties_open = false;
-                        self.recent_picker = None;
-                        context.memory_mut(|memory| {
-                            if let Some(id) = memory.focused() {
-                                memory.surrender_focus(id);
-                            }
-                        });
+                        self.open_password(context);
                     }
                     self.error = Some(if automatic && message.contains("Decryption") {
                         "PDF changed but needs a password. Press Ctrl/Cmd+R to unlock the new version.".into()
@@ -1240,9 +1194,9 @@ impl Pagewing {
             for (visible, name) in [
                 (self.search_open, "pagewing-search-input"),
                 (self.recent_picker.is_some(), "pagewing-recent-input"),
-                (self.goto_open, "pagewing-page-input"),
+                (self.page_input.is_some(), "pagewing-page-input"),
                 (self.zoom_input.is_some(), "pagewing-zoom-input"),
-                (self.password_open, "pagewing-password-input"),
+                (self.password_input.is_some(), "pagewing-password-input"),
                 (self.help, "pagewing-help-input"),
                 (
                     self.comments.open && self.comments.editor.is_some(),
@@ -1259,8 +1213,16 @@ impl Pagewing {
                     // was gained and released within this very same frame.
                     match name {
                         "pagewing-search-input" => self.search_focus = true,
-                        "pagewing-page-input" => self.goto_focus = true,
-                        "pagewing-password-input" => self.password_focus = true,
+                        "pagewing-page-input" => {
+                            if let Some(input) = &mut self.page_input {
+                                input.focus = true;
+                            }
+                        }
+                        "pagewing-password-input" => {
+                            if let Some(input) = &mut self.password_input {
+                                input.focus = true;
+                            }
+                        }
                         "pagewing-zoom-input" => {
                             if let Some(input) = &mut self.zoom_input {
                                 input.focus = true;
@@ -1283,9 +1245,9 @@ impl Pagewing {
             let typing = (self.search_open && self.search_focus)
                 || (self.help && self.help_filter.focus)
                 || self.outline.focus
-                || self.goto_open
+                || self.page_input.is_some()
                 || self.zoom_input.is_some()
-                || self.password_open
+                || self.password_input.is_some()
                 || self.recent_picker.is_some()
                 || (self.comments.open && self.comments.editor.is_some())
                 || (self.comments.open
@@ -1386,8 +1348,8 @@ impl Pagewing {
                 && !popup_open
                 && !self.help
                 && !self.properties_open
-                && !self.password_open
-                && !self.goto_open
+                && self.password_input.is_none()
+                && self.page_input.is_none()
                 && modifiers.alt
                 && !modifiers.command
                 && !modifiers.shift
@@ -1434,6 +1396,8 @@ impl Pagewing {
             }
             if self.comments.open
                 && self.zoom_input.is_none()
+                && self.page_input.is_none()
+                && self.password_input.is_none()
                 && modifiers.command
                 && key == Key::Enter
                 && self.comments.editor.is_some()
@@ -1456,6 +1420,36 @@ impl Pagewing {
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
+            if self.page_input.is_some() && key == Key::Escape {
+                self.close_page_input(context);
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
+            if self.password_input.is_some() && key == Key::Escape {
+                self.close_password_input(context);
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
+            if let Some(input) = &mut self.page_input
+                && key == Key::Enter
+                && modifiers.is_none()
+                && (input.focus
+                    || context.memory(|memory| memory.has_focus(input_dialogs::page_id())))
+            {
+                input.confirm = true;
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
+            if let Some(input) = &mut self.password_input
+                && key == Key::Enter
+                && modifiers.is_none()
+                && (input.focus
+                    || context.memory(|memory| memory.has_focus(input_dialogs::password_id())))
+            {
+                input.confirm = true;
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
             if key == Key::Escape && self.comments.open {
                 self.set_comments_open(context, false);
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
@@ -1469,13 +1463,11 @@ impl Pagewing {
                 self.help = false;
                 self.properties_open = false;
                 self.recent_picker = None;
-                self.goto_open = false;
+                self.page_input = None;
                 self.search_open = false;
                 self.search_focus = false;
                 self.pending_search_jump = None;
-                self.password_open = false;
-                self.password_focus = false;
-                self.password.clear();
+                self.password_input = None;
                 self.nav.clear_prefix();
                 context.memory_mut(|memory| {
                     if let Some(id) = memory.focused() {
@@ -1588,8 +1580,8 @@ impl Pagewing {
             }
             if !self.search_focus
                 && self.zoom_input.is_none()
-                && !self.goto_open
-                && !self.password_open
+                && self.page_input.is_none()
+                && self.password_input.is_none()
                 && !self.help
                 && (self.outline.focus
                     || context
@@ -1619,7 +1611,7 @@ impl Pagewing {
                 }
                 continue;
             }
-            if typing || self.help || self.password_open || self.goto_open {
+            if typing || self.help || self.password_input.is_some() || self.page_input.is_some() {
                 continue;
             }
             if modifiers.command && key == Key::A && self.nav.count > 0 {
@@ -2958,78 +2950,8 @@ impl Pagewing {
     fn dialogs(&mut self, context: &egui::Context) {
         self.recent_dialog(context);
         self.zoom_dialog(context);
-        if self.goto_open {
-            egui::Window::new("Go to page")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-                .show(context, |ui| {
-                    ui.label(format!("Physical page 1–{}", self.nav.count));
-                    ui.weak("Relative: +5, -5. PDF label: iv, A-3; =1 for label 1.");
-                    let (response, focused_now) = shortcuts::text_input(
-                        ui,
-                        egui::Id::new("pagewing-page-input"),
-                        &mut self.goto_focus,
-                        &mut self.deferred_input,
-                        egui::TextEdit::singleline(&mut self.goto),
-                    );
-                    let go = ui.button("Go").clicked();
-                    if !ui.is_sizing_pass()
-                        && (go
-                            || ((response.lost_focus() || focused_now)
-                                && ui.input(|input| input.key_pressed(Key::Enter))))
-                    {
-                        let page = crate::navigation::relative_page(
-                            &self.goto,
-                            self.nav.page,
-                            self.nav.count,
-                        )
-                        .or_else(|| self.labels.resolve_input(&self.goto, self.nav.count));
-                        if let Some(page) = page {
-                            self.jump(page);
-                            self.goto_open = false;
-                        } else {
-                            self.notify("Enter a page number, +offset, -offset or PDF page label");
-                            self.goto_focus = true;
-                            context.request_repaint();
-                        }
-                    }
-                });
-        }
-        if self.password_open {
-            egui::Window::new("Password required")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-                .show(context, |ui| {
-                    ui.label("This document is encrypted.");
-                    let (response, focused_now) = shortcuts::text_input(
-                        ui,
-                        egui::Id::new("pagewing-password-input"),
-                        &mut self.password_focus,
-                        &mut self.deferred_input,
-                        egui::TextEdit::singleline(&mut self.password).password(true),
-                    );
-                    let unlock = ui.button("Unlock").clicked();
-                    if !ui.is_sizing_pass()
-                        && (unlock
-                            || ((response.lost_focus() || focused_now)
-                                && ui.input(|input| input.key_pressed(Key::Enter))))
-                    {
-                        self.error = None;
-                        self.loading = true;
-                        self.password_open = false;
-                        let password = std::mem::take(&mut self.password);
-                        if self.reloading {
-                            self.worker
-                                .reload(self.id, self.reading.path.clone(), password);
-                        } else {
-                            self.worker
-                                .open(self.id, self.reading.path.clone(), password);
-                        }
-                    }
-                });
-        }
+        self.page_dialog(context);
+        self.password_dialog(context);
         self.help_window(context);
         if let Some(error) = self.configuration_error.clone() {
             egui::TopBottomPanel::bottom("configuration-error").show(context, |ui| {

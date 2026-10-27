@@ -14,10 +14,8 @@ impl Pagewing {
         self.selection.cancel();
         self.mark_action = None;
         self.help = false;
-        self.goto_open = false;
-        self.password_open = false;
-        self.password_focus = false;
-        self.password.clear();
+        self.page_input = None;
+        self.password_input = None;
         self.recent_picker = None;
         self.search_focus = false;
         self.pending_search_jump = None;
