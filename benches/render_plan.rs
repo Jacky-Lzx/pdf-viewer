@@ -11,6 +11,9 @@ mod document_bytes;
 #[path = "../src/navigation.rs"]
 mod navigation;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/page_geometry.rs"]
+mod page_geometry;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/render_plan.rs"]
 mod render_plan;
 
@@ -208,5 +211,63 @@ fn main() {
             "{name}: {} keys, checksum {checksum:016x}; stable rebuild {uncached:.4}, hit {hit:.4}; moving rebuild {moving_raw:.4}, miss {miss:.4}",
             expected.len()
         );
+    }
+    println!(
+        "Visible geometry only: collect + recalculate for paint versus reusable shared rectangles; µs/frame, no planning, PDF, painting or GPU."
+    );
+    for count in [1, 2, 16, 128] {
+        let range = 50..50 + count;
+        let rect = |page: usize, offset: f32| {
+            Rect::from_min_size(
+                pos2(
+                    10.0,
+                    (page as f64 * 64.0 - 3200.0 - f64::from(offset)) as f32,
+                ),
+                Vec2::new(30.0, 40.0),
+            )
+        };
+        let mut geometry = page_geometry::PageGeometry::default();
+        geometry.update(range.clone(), |page| rect(page, 0.0));
+        for offset in [0.0, 37.0] {
+            geometry.update(range.clone(), |page| rect(page, offset));
+            assert_eq!(
+                geometry.pages(),
+                range
+                    .clone()
+                    .map(|page| (page, rect(page, offset)))
+                    .collect::<Vec<_>>()
+            );
+        }
+        let mut raw_offset = 0;
+        let mut shared_offset = 0;
+        let [raw, shared] = measure_pair(
+            passes,
+            || {
+                raw_offset ^= 1;
+                let offset = black_box(raw_offset as f32 * 37.0);
+                let pages: Vec<_> = black_box(range.clone())
+                    .map(|page| (page, rect(page, offset)))
+                    .collect();
+                black_box(pages.as_slice());
+                let painted: f32 = pages
+                    .iter()
+                    .map(|&(page, _)| black_box(rect(page, offset)).top())
+                    .sum();
+                black_box(painted);
+            },
+            || {
+                shared_offset ^= 1;
+                let offset = black_box(shared_offset as f32 * 37.0);
+                geometry.update(black_box(range.clone()), |page| rect(page, offset));
+                black_box(geometry.pages());
+                let painted: f32 = geometry
+                    .pages()
+                    .iter()
+                    .map(|&(_, rect)| black_box(rect).top())
+                    .sum();
+                black_box(painted);
+            },
+        );
+        println!("{count} visible: collect/recalculate {raw:.4}, reuse/share {shared:.4}");
     }
 }

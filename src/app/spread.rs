@@ -79,6 +79,9 @@ impl Pagewing {
         self.resolve_view();
         self.reading.continuous = continuous;
         self.reading.facing = facing;
+        if !continuous && !facing {
+            self.continuous_geometry = crate::page_geometry::PageGeometry::default();
+        }
         self.page_changed();
         self.continuous_link_request = None;
         self.resolve_view();

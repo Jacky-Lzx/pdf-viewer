@@ -81,6 +81,7 @@ pub struct Pagewing {
     selection: TextSelection,
     selection_page: usize,
     continuous_layout: crate::continuous::Layout,
+    continuous_geometry: crate::page_geometry::PageGeometry,
     continuous_link_request: Option<usize>,
     cache: TextureCache,
     thumbnails: crate::thumbnails::Thumbnails,
@@ -234,6 +235,7 @@ impl Pagewing {
             selection: TextSelection::default(),
             selection_page: 0,
             continuous_layout: crate::continuous::Layout::default(),
+            continuous_geometry: crate::page_geometry::PageGeometry::default(),
             continuous_link_request: None,
             cache: TextureCache::default(),
             thumbnails: crate::thumbnails::Thumbnails::default(),
@@ -344,6 +346,7 @@ impl Pagewing {
         self.history = crate::history::ViewHistory::default();
         self.dimensions.clear();
         self.continuous_layout = crate::continuous::Layout::default();
+        self.continuous_geometry = crate::page_geometry::PageGeometry::default();
         self.continuous_link_request = None;
         self.info = crate::document_info::DocumentInfo::default();
         self.properties_open = false;
@@ -920,6 +923,7 @@ impl Pagewing {
                     self.dimensions = dimensions;
                     self.synctex.geometry = sync_geometry;
                     self.continuous_layout = crate::continuous::Layout::default();
+                    self.continuous_geometry = crate::page_geometry::PageGeometry::default();
                     self.continuous_link_request = None;
                     self.info = info;
                     self.comments.reset(reloaded);

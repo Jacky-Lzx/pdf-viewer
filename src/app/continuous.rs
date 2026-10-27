@@ -123,15 +123,14 @@ impl Pagewing {
         self.resolve_view();
         self.continuous_selection(ui, &response, rect);
         let visible = self.visible_pages();
-        let pages: Vec<_> = visible
-            .clone()
-            .map(|page| (page, self.continuous_rect(page, rect)))
-            .collect();
+        let mut geometry = std::mem::take(&mut self.continuous_geometry);
+        geometry.update(visible.clone(), |page| self.continuous_rect(page, rect));
+        let pages = geometry.pages();
         let view = self.continuous_view(ui.ctx().pixels_per_point());
         let planned = self.render_planner.plan(
             PlanMode::Continuous,
             view,
-            &pages,
+            pages,
             &self.dimensions,
             ui.max_rect(),
             self.cache.budget(),
@@ -166,8 +165,10 @@ impl Pagewing {
         let active_scale = self.scale;
         let active_page = self.nav.page;
         let painter = ui.painter_at(ui.max_rect());
-        for (page, key) in visible.zip(plan.iter().filter(|key| key.tile.is_none())) {
-            let page_rect = self.continuous_rect(page, rect);
+        for (&(page, page_rect), key) in pages
+            .iter()
+            .zip(plan.iter().filter(|key| key.tile.is_none()))
+        {
             let dimensions = self.dimensions[page];
             if !self.reading.facing {
                 self.scale = self.continuous_layout.pages[page].scale;
@@ -230,6 +231,7 @@ impl Pagewing {
             }
         }
         self.scale = active_scale;
+        self.continuous_geometry = geometry;
     }
 
     fn continuous_selection(
@@ -326,5 +328,104 @@ impl Pagewing {
             self.dimensions[page],
             self.reading.rotation,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::navigation::Navigation;
+
+    fn frame(app: &mut Pagewing, context: &egui::Context) {
+        let output = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(700.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |context| app.canvas(context),
+        );
+        let mut painted = Vec::new();
+        fn white_rects(shape: &egui::Shape, output: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(shape) if shape.fill == Color32::WHITE => output.push(shape.rect),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        white_rects(shape, output);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for shape in &output.shapes {
+            white_rects(&shape.shape, &mut painted);
+        }
+        for &(page, rect) in app.continuous_geometry.pages() {
+            assert!(
+                painted.contains(&rect),
+                "page {page} must paint the planned rectangle {rect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn frame_geometry_tracks_scroll_spreads_and_releases_when_leaving_the_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.dimensions = vec![
+            [600.0, 120.0],
+            [900.0, 200.0],
+            [400.0, 100.0],
+            [600.0, 800.0],
+        ];
+        app.nav = Navigation::new(4, 0);
+        app.reading.fit = Fit::Custom(1.0);
+        app.set_display_mode(true, false);
+        frame(&mut app, &context);
+        assert_eq!(app.continuous_geometry.pages().len(), 4);
+        let allocation = app.continuous_geometry.pages().as_ptr();
+        let before = app.continuous_geometry.pages()[0].1;
+        app.scroll_continuous(egui::vec2(0.0, 1.0));
+        frame(&mut app, &context);
+        assert_eq!(app.continuous_geometry.pages().as_ptr(), allocation);
+        assert_eq!(
+            app.continuous_geometry.pages()[0].1,
+            before.translate(egui::vec2(0.0, -1.0))
+        );
+        app.set_display_mode(false, true);
+        frame(&mut app, &context);
+        assert_eq!(
+            app.continuous_geometry
+                .pages()
+                .iter()
+                .map(|&(page, _)| page)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        let allocation = app.continuous_geometry.pages().as_ptr();
+        app.jump(3);
+        frame(&mut app, &context);
+        assert_eq!(app.continuous_geometry.pages().as_ptr(), allocation);
+        assert_eq!(
+            app.continuous_geometry
+                .pages()
+                .iter()
+                .map(|&(page, _)| page)
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+        app.set_display_mode(false, false);
+        assert!(app.continuous_geometry.pages().is_empty());
+        frame(&mut app, &context);
+        assert!(app.continuous_geometry.pages().is_empty());
+        app.set_display_mode(true, false);
+        frame(&mut app, &context);
+        assert!(!app.continuous_geometry.pages().is_empty());
+        app.clear_document(&context);
+        assert!(app.continuous_geometry.pages().is_empty());
     }
 }

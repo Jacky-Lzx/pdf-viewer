@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check multi-page drawing, mouse/keyboard scrolling and restored continuous views."""
+"""Check continuous/spread drawing, scrolling, mode changes and restored views."""
 import json
 import os
 from pathlib import Path
@@ -68,7 +68,9 @@ def run(binary):
                 expect(lambda book: book["continuous"] and book["offset"][1] > 0.4,
                        "continuous mode and partial first page")
                 wait_for(lambda: keyboard.pixel((600, 150))[0] > 180
-                         and keyboard.pixel((600, 650))[1] > 150,
+                         and keyboard.pixel((600, 150))[1] < 100
+                         and keyboard.pixel((600, 650))[1] > 150
+                         and keyboard.pixel((600, 650))[0] < 100,
                          "red page tail and green next page are drawn together")
                 sequence("gg")
                 expect(lambda book: book["page"] == 0 and book["offset"][1] == 0,
@@ -101,7 +103,40 @@ def run(binary):
                        "restored document remains scrollable")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: simultaneous mixed-size pages, keyboard/wheel scrolling, edges, marks, mode switching and restart")
+                # Restart into a mixed-size spread. The final unpaired page
+                # changes the geometry count, then K must restore both pages.
+                saved = json.loads(config.read_text())
+                saved["recent"][0].update(page=0, fit="Page", rotation=0, continuous=False,
+                                           facing=True, offset=[0.0, 0.0])
+                config.write_text(json.dumps(saved))
+                application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "restored two-page reader")
+                expect(lambda book: book["facing"] and not book["continuous"] and book["page"] == 0,
+                       "saved two-page mode is restored")
+
+                def spread_visible(rotated=False):
+                    red = keyboard.pixel((300 if rotated else 200, 200))
+                    green = keyboard.pixel((900 if rotated else 800, 200))
+                    return red[0] > 180 and red[1] < 100 and green[1] > 150 and green[0] < 100
+
+                wait_for(spread_visible, "red and green pages share the spread")
+                sequence("J")
+                expect(lambda book: book["facing"] and book["page"] == 2, "spread step reaches the final unpaired page")
+                wait_for(lambda: keyboard.pixel((600, 200))[2] > 180
+                         and keyboard.pixel((600, 200))[0] < 100, "final single blue page is drawn")
+                sequence("K")
+                expect(lambda book: book["page"] == 0, "spread step returns to the first pair")
+                wait_for(spread_visible, "both pages return after the geometry count grows")
+                sequence("r")
+                expect(lambda book: book["rotation"] == 1, "spread rotation is saved")
+                wait_for(lambda: spread_visible(rotated=True), "rotated mixed-size pages remain aligned")
+                sequence("CC")
+                expect(lambda book: not book["continuous"] and not book["facing"], "spread to continuous to single-page mode")
+                wait_for(lambda: keyboard.pixel((600, 200))[0] > 180
+                         and keyboard.pixel((600, 200))[1] < 100, "single-page drawing remains available after releasing shared geometry")
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                print("PASS: simultaneous mixed-size pages, keyboard/wheel scrolling, edges, marks, mode switching, restart, two-page restore, final unpaired page and rotated spreads")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
