@@ -11,6 +11,7 @@ mod geometry;
 mod history;
 mod link_cache;
 mod link_hints;
+mod link_visibility;
 mod links;
 mod navigation;
 mod outline;

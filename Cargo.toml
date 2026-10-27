@@ -72,3 +72,7 @@ harness = false
 [[bench]]
 name = "search_matching"
 harness = false
+
+[[bench]]
+name = "link_visibility"
+harness = false

@@ -161,6 +161,8 @@ cargo bench --locked --bench rotation -- 9 night
 cargo bench --locked --bench texture_pixels -- 9
 # 链接提示匹配基准，比较逐标签扫描与前缀范围计算
 cargo bench --locked --bench link_hints -- 9
+# 链接屏幕区域，比较逐帧重算与复用，并覆盖持续移动的视图
+cargo bench --locked --bench link_visibility -- 9
 # 密集页面拖选定位，分别记录查询、建索引耗时和索引容量
 cargo bench --locked --bench selection -- 9
 # 整词范围查询，比较重复分词与共享边界位图

@@ -48,7 +48,7 @@ pub struct Folio {
     outline: crate::outline_view::OutlineView,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
-    visible_links: Vec<usize>,
+    visible_links: crate::link_visibility::LinkVisibility,
     hints: LinkHints,
     copy_link_hints: bool,
     mark_action: Option<MarkAction>,
@@ -128,7 +128,7 @@ impl Folio {
             outline: crate::outline_view::OutlineView::default(),
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
-            visible_links: Vec::new(),
+            visible_links: crate::link_visibility::LinkVisibility::default(),
             hints: LinkHints::default(),
             copy_link_hints: false,
             mark_action: None,
@@ -731,6 +731,9 @@ impl Folio {
                 }
                 Event::Links { id, page, links } if id == self.id => {
                     self.links.insert(page, links, self.nav.page);
+                    if page == self.nav.page {
+                        self.visible_links.invalidate();
+                    }
                 }
                 Event::Opened {
                     id,
@@ -1226,12 +1229,14 @@ impl Folio {
                         .and_then(|links| {
                             if self.copy_link_hints {
                                 self.visible_links
+                                    .indices
                                     .iter()
                                     .filter_map(|&index| links.get(index))
                                     .filter(|link| matches!(&link.target, LinkTarget::Url(_)))
                                     .nth(index)
                             } else {
                                 self.visible_links
+                                    .indices
                                     .get(index)
                                     .and_then(|&index| links.get(index))
                             }
@@ -1454,13 +1459,14 @@ impl Folio {
                     let count = if self.copy_link_hints {
                         self.links.get(&self.nav.page).map_or(0, |links| {
                             self.visible_links
+                                .indices
                                 .iter()
                                 .filter_map(|&index| links.get(index))
                                 .filter(|link| matches!(&link.target, LinkTarget::Url(_)))
                                 .count()
                         })
                     } else {
-                        self.visible_links.len()
+                        self.visible_links.indices.len()
                     };
                     self.hints.start(count);
                     if !self.hints.active {
@@ -2063,11 +2069,12 @@ impl Folio {
         page_rect: egui::Rect,
         dimensions: [f32; 2],
     ) -> egui::Rect {
-        let rect = crate::geometry::rotate_rect(rect, dimensions, self.reading.rotation);
-        let scale = f64::from(self.scale);
-        egui::Rect::from_min_max(
-            page_rect.min + Vec2::new((rect.x0 * scale) as f32, (rect.y0 * scale) as f32),
-            page_rect.min + Vec2::new((rect.x1 * scale) as f32, (rect.y1 * scale) as f32),
+        crate::link_visibility::screen_rect(
+            rect,
+            page_rect,
+            dimensions,
+            self.reading.rotation,
+            self.scale,
         )
     }
 
@@ -2081,25 +2088,18 @@ impl Folio {
             .get(&self.nav.page)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let mut visible = 0;
-        let mut changed = false;
-        for (index, link) in links.iter().enumerate() {
-            if self
-                .link_rect(link.rect, page_rect, dimensions)
-                .intersects(ui.clip_rect())
-            {
-                if let Some(previous) = self.visible_links.get_mut(visible) {
-                    changed |= *previous != index;
-                    *previous = index;
-                } else {
-                    self.visible_links.push(index);
-                    changed = true;
-                }
-                visible += 1;
-            }
-        }
-        changed |= self.visible_links.len() != visible;
-        self.visible_links.truncate(visible);
+        let changed = self.visible_links.update(
+            crate::link_visibility::LinkView {
+                document: self.id,
+                page: self.nav.page,
+                page_rect,
+                clip: ui.clip_rect(),
+                dimensions,
+                rotation: self.reading.rotation,
+                scale: self.scale,
+            },
+            links.iter().map(|link| link.rect),
+        );
         if changed {
             self.hints.cancel();
         }
@@ -2107,12 +2107,13 @@ impl Folio {
         let mut follow = None;
         let mut copied = false;
         let mut hint_index = 0;
-        for &link_index in &self.visible_links {
+        for (&link_index, &rect) in self
+            .visible_links
+            .indices
+            .iter()
+            .zip(&self.visible_links.rects)
+        {
             let link = &links[link_index];
-            let rect = self
-                .link_rect(link.rect, page_rect, dimensions)
-                .intersect(page_rect)
-                .intersect(ui.clip_rect());
             let response = ui
                 .interact(
                     rect,
