@@ -118,6 +118,8 @@ require('tex-tools').setup({
 设置通过 TOML 文件管理，程序内不再提供 Settings 界面。Linux 和 macOS 均读取 `~/.config/pagewing/config.toml`；若设置了绝对路径的 `XDG_CONFIG_HOME`，则读取 `$XDG_CONFIG_HOME/pagewing/config.toml`。首次打开阅读器时会从已有设置生成配置文件，保留原来的外观、默认视图和快捷键。文件存在后只读取，不会被阅读进度保存覆盖；修改后重启阅读器生效。
 
 ```toml
+#:schema ./config.schema.json
+
 [appearance]
 dark = false
 night = false
@@ -135,6 +137,8 @@ night = []                 # 停用该动作的快捷键
 ```
 
 省略的字段使用内置默认值；省略的快捷键动作继承默认绑定。删除动作的配置行即可恢复其默认快捷键。完整示例见 [config.example.toml](assets/config.example.toml)，动作名与按键格式见[配置参考](docs/configuration.md)。
+
+程序会在配置目录生成并更新 `config.schema.json`。新配置已包含上面的 `#:schema` 注释；已有配置在顶部补上这一行，即可在启用 Taplo 的 Neovim 或 VS Code Even Better TOML 中获得字段、可选值和快捷键动作的补全、悬浮说明及格式校验，支持离线使用。详见[编辑器补全](docs/configuration.md#编辑器补全与校验)。
 
 默认视图用于首次打开的文档；`remember_documents = true` 时，已有文档仍恢复上次的位置和视图。设为 `false` 后，每次从第一页按默认视图打开，书签和命名位置保留；`--page` 仍可指定起始页。外观选项是启动时的默认值，阅读过程中仍可用工具栏或快捷键临时切换；下次启动重新应用配置文件。
 

@@ -2,6 +2,24 @@
 
 配置路径：`~/.config/pagewing/config.toml`（Linux、macOS 一致），或 `$XDG_CONFIG_HOME/pagewing/config.toml`。`XDG_CONFIG_HOME` 必须为绝对路径；空值、相对路径按未设置处理。首次打开阅读器时生成配置；之后修改并重启生效。参考 [完整示例](../assets/config.example.toml)。
 
+## 编辑器补全与校验
+
+Pagewing 附带 [JSON Schema](../assets/config.schema.json)，覆盖所有配置字段和快捷键动作，提供说明、默认值、布局和适配模式的可选值，以及缩放范围校验。所有字段均可省略；拼错的字段或动作会得到提示。
+
+每次打开阅读器时，程序会将内置 schema 放到配置文件旁的 `config.schema.json`，仅在内容变化时原子更新。schema 由程序维护，`config.toml` 仍保留用户的内容和注释。schema 写入失败不影响有效配置的加载。
+
+新生成的配置已在顶部包含以下关联；已有配置需手动补上这一行，然后重新打开编辑器中的文件：
+
+```toml
+#:schema ./config.schema.json
+```
+
+这是 Taplo 支持的 [schema 注释](https://taplo.tamasfe.dev/configuration/directives.html)，路径相对于当前 TOML 文件，使用本地文件，无需网络。Neovim 启用 `taplo` LSP，VS Code 安装 **Even Better TOML** 后，即可获得补全、悬浮说明和校验。复制示例到其他目录时，也应复制 `config.schema.json`，或把注释改为 schema 的绝对路径；尚未启动新版本时可从仓库的 `assets/` 目录复制 schema。
+
+若 Neovim 中 Taplo 已连接但没有补全，可在配置目录创建 `.taplo.toml`，内容为 `include = ["*.toml"]`，再重启 LSP。这让使用默认根目录规则的客户端将配置目录识别为 TOML 工作区，避免独立文件被排除。
+
+schema 校验字段、值类型、枚举和数值范围；快捷键的具体按键名、保留键及动作之间的绑定冲突仍由阅读器检查。
+
 ## 外观与阅读视图
 
 `[appearance]` 的 `dark`（深色界面）、`night`（页面反色）、`sidebar`（侧栏）、`thumbnails`（页面预览）均为布尔值，默认 `false`。这些值在每次启动时应用，阅读过程中仍可临时切换。

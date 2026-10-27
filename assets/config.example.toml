@@ -1,3 +1,4 @@
+#:schema ./config.schema.json
 # Pagewing: ~/.config/pagewing/config.toml (or $XDG_CONFIG_HOME/pagewing/config.toml).
 # Edit and restart the reader. Missing options use built-in defaults.
 

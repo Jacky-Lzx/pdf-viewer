@@ -11,6 +11,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const SCHEMA: &str = include_str!("../assets/config.schema.json");
+const SCHEMA_DIRECTIVE: &str = "#:schema ./config.schema.json\n";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -173,6 +176,21 @@ fn parse(text: &str) -> Result<Config, String> {
     Ok(config)
 }
 
+/// This companion file belongs to the application; config.toml belongs to the user.
+/// Refresh it atomically after upgrades, without touching it on ordinary launches.
+fn write_schema(path: &Path) -> std::io::Result<()> {
+    let schema_path = path.with_file_name("config.schema.json");
+    if std::fs::read(&schema_path).is_ok_and(|bytes| bytes == SCHEMA.as_bytes()) {
+        return Ok(());
+    }
+    let parent = schema_path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(SCHEMA.as_bytes())?;
+    file.persist(schema_path).map_err(|error| error.error)?;
+    Ok(())
+}
+
 /// Create only when absent; normal operation never rewrites comments or edits.
 pub fn load_or_create(path: &Path, library: &Library) -> Result<Config, String> {
     let load = || -> Result<Config, String> {
@@ -190,7 +208,8 @@ pub fn load_or_create(path: &Path, library: &Library) -> Result<Config, String> 
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let mut file =
             tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
-        file.write_all(b"# Pagewing configuration. Edit this file and restart the reader.\n# fit: \"page\", \"width\", \"height\", or a zoom factor (0.05-8.0).\n# Shortcut example: next_page = [\"X\"] under [shortcuts]; [] disables an action.\n\n")
+        file.write_all(SCHEMA_DIRECTIVE.as_bytes())
+            .and_then(|()| file.write_all(b"# Pagewing configuration. Edit this file and restart the reader.\n# fit: \"page\", \"width\", \"height\", or a zoom factor (0.05-8.0).\n# Shortcut example: next_page = [\"X\"] under [shortcuts]; [] disables an action.\n\n"))
             .and_then(|()| file.write_all(text.as_bytes())).map_err(|error| error.to_string())?;
         match file.persist_noclobber(path) {
             Ok(_) => Ok(config),
@@ -200,7 +219,16 @@ pub fn load_or_create(path: &Path, library: &Library) -> Result<Config, String> 
             Err(error) => Err(error.to_string()),
         }
     };
-    load().map_err(|error| {
+    let result = load();
+    // Schema support must not prevent reading a valid, read-only configuration.
+    // Install it even for invalid TOML so the editor can help repair the file.
+    if let Err(error) = write_schema(path) {
+        eprintln!(
+            "Could not update configuration schema {}: {error}",
+            path.with_file_name("config.schema.json").display()
+        );
+    }
+    result.map_err(|error| {
         format!(
             "Could not load configuration {}: {error}. Using built-in defaults.",
             path.display()
@@ -246,6 +274,11 @@ mod tests {
         );
         load_or_create(&path, &library).unwrap();
         let mut text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(SCHEMA_DIRECTIVE));
+        assert_eq!(
+            std::fs::read_to_string(path.with_file_name("config.schema.json")).unwrap(),
+            SCHEMA
+        );
         text.push_str("\n# Keep my comments\n");
         std::fs::write(&path, &text).unwrap();
         let config = load_or_create(&path, &Library::default()).unwrap();
@@ -304,5 +337,94 @@ mod tests {
             assert!(error.contains(&path.display().to_string()), "{error}");
             assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         }
+    }
+
+    #[test]
+    fn schema_refresh_preserves_existing_config_and_unchanged_schema() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let schema = path.with_file_name("config.schema.json");
+        let text = "# My existing preferences\n[appearance]\ndark = true\n";
+        std::fs::write(&path, text).unwrap();
+        std::fs::write(&schema, "outdated schema").unwrap();
+        load_or_create(&path, &Library::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(std::fs::read_to_string(&schema).unwrap(), SCHEMA);
+        let modified = std::fs::metadata(&schema).unwrap().modified().unwrap();
+        load_or_create(&path, &Library::default()).unwrap();
+        assert_eq!(
+            std::fs::metadata(&schema).unwrap().modified().unwrap(),
+            modified
+        );
+
+        // A blocked schema destination must not discard valid preferences.
+        std::fs::remove_file(&schema).unwrap();
+        std::fs::create_dir(&schema).unwrap();
+        let config = load_or_create(&path, &Library::default()).unwrap();
+        assert!(config.appearance.dark);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn schema_covers_config_defaults_and_the_command_catalog() {
+        use serde_json::{Value, json};
+        let schema: Value = serde_json::from_str(SCHEMA).unwrap();
+        let defaults = serde_json::to_value(Config::default()).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(properties.len(), defaults.as_object().unwrap().len());
+        for (section, values) in defaults.as_object().unwrap() {
+            let section_schema = &properties[section];
+            assert_eq!(section_schema["additionalProperties"], false);
+            assert!(section_schema.get("required").is_none());
+            if section == "shortcuts" {
+                continue;
+            }
+            let fields = section_schema["properties"].as_object().unwrap();
+            assert_eq!(fields.len(), values.as_object().unwrap().len());
+            for (name, default) in values.as_object().unwrap() {
+                assert_eq!(&fields[name]["default"], default, "{section}.{name}");
+                assert!(fields[name]["description"].as_str().is_some());
+            }
+        }
+        let actions = schema["properties"]["shortcuts"]["properties"]
+            .as_object()
+            .unwrap();
+        assert_eq!(actions.len(), crate::settings::commands().len());
+        for command in crate::settings::commands() {
+            assert!(
+                actions[command.id]["description"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(command.label)
+            );
+            // Keep these inline: Taplo 0.10 overflows its stack on root
+            // completions when shared shortcut schemas use allOf + $ref.
+            assert_eq!(actions[command.id]["type"], "array");
+            assert_eq!(actions[command.id]["items"]["type"], "string");
+        }
+        let display = &properties["display"]["properties"];
+        for value in display["layout"]["enum"].as_array().unwrap() {
+            serde_json::from_value::<Layout>(value.clone()).unwrap();
+        }
+        for layout in [Layout::Single, Layout::Continuous, Layout::Facing] {
+            assert!(
+                display["layout"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!(layout))
+            );
+        }
+        for value in display["fit"]["anyOf"][0]["enum"].as_array().unwrap() {
+            serde_json::from_value::<FitMode>(value.clone()).unwrap();
+        }
+        assert_eq!(
+            display["fit"]["anyOf"][1]["minimum"].as_f64().unwrap() as f32,
+            MIN_SCALE
+        );
+        assert_eq!(
+            display["fit"]["anyOf"][1]["maximum"].as_f64().unwrap() as f32,
+            MAX_SCALE
+        );
     }
 }

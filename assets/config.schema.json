@@ -1,0 +1,503 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pagewing configuration",
+  "type": "object",
+  "description": "Preferences for the Pagewing PDF reader. Missing fields use built-in defaults. Restart the reader after editing.",
+  "additionalProperties": false,
+  "properties": {
+    "appearance": {
+      "type": "object",
+      "description": "Interface and page appearance at startup.",
+      "additionalProperties": false,
+      "properties": {
+        "dark": {
+          "type": "boolean",
+          "description": "Use a dark interface.",
+          "default": false
+        },
+        "night": {
+          "type": "boolean",
+          "description": "Invert PDF page colors.",
+          "default": false
+        },
+        "sidebar": {
+          "type": "boolean",
+          "description": "Show the sidebar.",
+          "default": false
+        },
+        "thumbnails": {
+          "type": "boolean",
+          "description": "Use page previews in the sidebar.",
+          "default": false
+        }
+      }
+    },
+    "display": {
+      "type": "object",
+      "description": "Default reading view. Saved document views take precedence when remember_documents is true.",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "type": "string",
+          "description": "Page layout: single page, continuous scrolling, or facing pages. Capitalized names are accepted for compatibility.",
+          "enum": [
+            "single",
+            "continuous",
+            "facing",
+            "Single",
+            "Continuous",
+            "Facing"
+          ],
+          "default": "single"
+        },
+        "fit": {
+          "description": "Fit the whole page, width, or height, or set a zoom factor (1.5 = 150%).",
+          "default": "page",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "page",
+                "width",
+                "height"
+              ]
+            },
+            {
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 8.0
+            }
+          ]
+        },
+        "remember_documents": {
+          "type": "boolean",
+          "description": "Restore saved document views. If false, open at page 1 using these display defaults.",
+          "default": true
+        }
+      }
+    },
+    "shortcuts": {
+      "type": "object",
+      "description": "Override all bindings for an action. An empty array disables it; omitted actions inherit defaults. Conflicts and reserved keys are checked by the reader. Use key names with optional Cmd, Ctrl, Alt, Shift modifiers joined by + (for example X, Shift+J, Cmd+Comma). Cmd means Command on macOS and Ctrl on Linux.",
+      "additionalProperties": false,
+      "properties": {
+        "open": {
+          "description": "Open PDF. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "close": {
+          "description": "Close PDF. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "reopen": {
+          "description": "Reopen closed PDF. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "recent": {
+          "description": "Find recent document. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "reload": {
+          "description": "Reload PDF. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "quit": {
+          "description": "Quit. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "find": {
+          "description": "Search document. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "comments": {
+          "description": "Toggle comments. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "add_comment": {
+          "description": "Add highlight comment. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "down": {
+          "description": "Scroll down. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "up": {
+          "description": "Scroll up. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "left": {
+          "description": "Scroll left. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "right": {
+          "description": "Scroll right. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "next_page": {
+          "description": "Next page. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "previous_page": {
+          "description": "Previous page. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "first_page": {
+          "description": "First page. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "last_page": {
+          "description": "Last page / counted page. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "screen_down": {
+          "description": "Screen down. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "screen_up": {
+          "description": "Screen up. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "half_down": {
+          "description": "Half screen down. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "half_up": {
+          "description": "Half screen up. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scroll_down": {
+          "description": "Scroll down without turning pages. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scroll_up": {
+          "description": "Scroll up without turning pages. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "history_back": {
+          "description": "Jump history back. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "history_forward": {
+          "description": "Jump history forward. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "next_bookmark": {
+          "description": "Next bookmark. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "previous_bookmark": {
+          "description": "Previous bookmark. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "zoom_in": {
+          "description": "Zoom in. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "zoom_out": {
+          "description": "Zoom out. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "actual_size": {
+          "description": "Actual size (100%). Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fit_page": {
+          "description": "Fit page. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fit_width": {
+          "description": "Fit width. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fit_height": {
+          "description": "Fit height. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rotate": {
+          "description": "Rotate clockwise. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rotate_back": {
+          "description": "Rotate counterclockwise. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "continuous": {
+          "description": "Toggle continuous scrolling. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "contents": {
+          "description": "Find chapter. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "properties": {
+          "description": "Document information. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "links": {
+          "description": "Follow visible link. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "copy_link": {
+          "description": "Copy visible link address. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "next_match": {
+          "description": "Next search match. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "previous_match": {
+          "description": "Previous search match. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "bookmark": {
+          "description": "Toggle bookmark. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sidebar": {
+          "description": "Toggle sidebar. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "thumbnails": {
+          "description": "Toggle page previews. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "dark": {
+          "description": "Toggle dark interface. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "night": {
+          "description": "Invert page colors. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selection": {
+          "description": "Toggle text selection. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "copy": {
+          "description": "Copy selection / page text. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "goto": {
+          "description": "Go to page dialog. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "help": {
+          "description": "Keyboard shortcuts. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fullscreen": {
+          "description": "Toggle fullscreen. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
