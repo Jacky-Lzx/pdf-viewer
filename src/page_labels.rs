@@ -79,10 +79,7 @@ impl PageLabels {
                         .get::<PdfString<'_>>(b"P")
                         .map(|value| {
                             let bytes = value.as_bytes();
-                            crate::pdf_string::decode(&bytes[..bytes.len().min(1024)])
-                                .chars()
-                                .take(256)
-                                .collect()
+                            crate::pdf_string::decode_prefix(&bytes[..bytes.len().min(1024)], 256).0
                         })
                         .unwrap_or_default();
                     let first = label.get::<u32>(b"St").unwrap_or(1).max(1) as u64;

@@ -20,14 +20,11 @@ pub struct OutlineEntry {
 fn decode_title(bytes: &[u8]) -> String {
     const MAX_BYTES: usize = 16 * 1024;
     const MAX_CHARS: usize = 2048;
-    let mut title = crate::pdf_string::decode(&bytes[..bytes.len().min(MAX_BYTES)]);
-    let end = title.char_indices().nth(MAX_CHARS).map(|(end, _)| end);
-    if let Some(end) = end {
-        title.truncate(end);
-    }
-    if end.is_some() || bytes.len() > MAX_BYTES {
+    let (mut title, truncated) =
+        crate::pdf_string::decode_prefix(&bytes[..bytes.len().min(MAX_BYTES)], MAX_CHARS);
+    if truncated || bytes.len() > MAX_BYTES {
         title.push('…');
-        // Dropping the decoded suffix must also release its reserved storage.
+        // Release spare capacity after adding the truncation marker.
         title.shrink_to_fit();
     }
     title

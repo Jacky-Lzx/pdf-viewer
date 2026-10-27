@@ -11,16 +11,12 @@ const MAX_FIELD_BYTES: usize = 16 * 1024;
 const MAX_FIELD_CHARS: usize = 2048;
 
 fn field(bytes: &[u8]) -> Option<String> {
-    let mut value = crate::pdf_string::decode(&bytes[..bytes.len().min(MAX_FIELD_BYTES)]);
-    let truncated = value
-        .char_indices()
-        .nth(MAX_FIELD_CHARS)
-        .map(|(offset, _)| offset);
-    if let Some(offset) = truncated {
-        value.truncate(offset);
-    }
+    let (value, truncated) = crate::pdf_string::decode_prefix(
+        &bytes[..bytes.len().min(MAX_FIELD_BYTES)],
+        MAX_FIELD_CHARS,
+    );
     let mut value = value.trim().to_owned();
-    if truncated.is_some() || bytes.len() > MAX_FIELD_BYTES {
+    if truncated || bytes.len() > MAX_FIELD_BYTES {
         value.push('…');
     }
     (!value.is_empty()).then_some(value)

@@ -1,4 +1,5 @@
 #[path = "../src/pdf_string.rs"]
+#[allow(dead_code)] // This benchmark measures the complete decoder only.
 mod pdf_string;
 
 use std::{hint::black_box, time::Instant};

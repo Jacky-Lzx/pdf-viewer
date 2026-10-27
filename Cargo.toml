@@ -66,6 +66,10 @@ name = "pdf_strings"
 harness = false
 
 [[bench]]
+name = "pdf_string_prefix"
+harness = false
+
+[[bench]]
 name = "texture_pixels"
 harness = false
 
