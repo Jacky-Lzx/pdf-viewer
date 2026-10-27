@@ -11,10 +11,14 @@ cp target/release/pagewing "$bundle/Contents/MacOS/pagewing"
 cp assets/pagewing-guide.pdf "$bundle/Contents/Resources/pagewing-guide.pdf"
 iconset=target/pagewing.iconset
 mkdir -p "$iconset"
+# macOS scales the whole canvas in the Dock; inset the artwork to match other apps.
+# Regenerate the macOS asset from the shared vector with:
+# rsvg-convert -w 824 -h 824 --page-width 1024 --page-height 1024 \
+#     --left 100 --top 100 assets/icon.svg -o assets/icon-macos.png
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" assets/icon-1024.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+    sips -z "$size" "$size" assets/icon-macos.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
-    sips -z "$double" "$double" assets/icon-1024.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+    sips -z "$double" "$double" assets/icon-macos.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns -o "$bundle/Contents/Resources/Pagewing.icns" "$iconset"
 cat > "$bundle/Contents/Info.plist" <<'PLIST'

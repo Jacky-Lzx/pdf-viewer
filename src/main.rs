@@ -76,6 +76,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         command => return headless(command).map_err(Into::into),
     };
+    // eframe replaces the macOS Dock icon at runtime, so use the same padded
+    // artwork as the app bundle rather than the full-bleed cross-platform icon.
+    #[cfg(target_os = "macos")]
+    let icon_png = include_bytes!("../assets/icon-macos.png").as_slice();
+    #[cfg(not(target_os = "macos"))]
+    let icon_png = include_bytes!("../assets/icon.png").as_slice();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_active(
@@ -85,9 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .with_inner_size([1180.0, 820.0])
             .with_min_inner_size([240.0, 240.0])
-            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!(
-                "../assets/icon.png"
-            ))?)
+            .with_icon(eframe::icon_data::from_png_bytes(icon_png)?)
             .with_drag_and_drop(true),
         ..Default::default()
     };
