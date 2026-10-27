@@ -169,6 +169,8 @@ cargo bench --locked --bench word_selection -- 9
 cargo bench --locked --bench search_index -- 9
 # 搜索摘要，比较临时字符串拼接与直接截取上下文
 cargo bench --locked --bench search_snippet -- 9
+# 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
+cargo bench --locked --bench search_matching -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径
 cargo bench --locked --bench pdf_strings -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst 和 Python 3）

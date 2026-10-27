@@ -800,6 +800,7 @@ dependencies = [
  "directories",
  "eframe",
  "hayro",
+ "memchr",
  "png",
  "rfd",
  "serde",

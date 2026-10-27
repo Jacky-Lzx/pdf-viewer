@@ -1,6 +1,11 @@
+// Explicit paths also let standalone search benchmarks reuse this module.
+#[path = "text/boundaries.rs"]
 mod boundaries;
+#[path = "text/search_index.rs"]
 mod search_index;
+#[path = "text/snippet.rs"]
 mod snippet;
+#[path = "text/span.rs"]
 mod span;
 pub use span::TextSpan;
 
@@ -27,7 +32,7 @@ pub struct SearchOptions {
 }
 
 pub struct SearchQuery {
-    needle: String,
+    matcher: memchr::memmem::Finder<'static>,
     options: SearchOptions,
 }
 
@@ -40,11 +45,14 @@ impl SearchQuery {
         } else {
             caseless::default_case_fold_str(&query)
         };
-        Self { needle, options }
+        Self {
+            matcher: memchr::memmem::Finder::new(needle.as_bytes()).into_owned(),
+            options,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.needle.is_empty()
+        self.matcher.needle().is_empty()
     }
 }
 
@@ -269,6 +277,27 @@ impl PageText {
         cursor: &mut SearchCursor,
         limit: usize,
     ) -> SearchBatch {
+        if let [byte] = query.matcher.needle() {
+            // Specialize once per batch; keep the byte iterator's scan state
+            // without checking the matcher kind for each dense one-letter hit.
+            self.search_batch_using(page, query, cursor, limit, |bytes, base| {
+                memchr::memchr_iter(*byte, &bytes[base..])
+            })
+        } else {
+            self.search_batch_using(page, query, cursor, limit, |bytes, base| {
+                query.matcher.find_iter(&bytes[base..])
+            })
+        }
+    }
+
+    fn search_batch_using<'haystack, I: Iterator<Item = usize>>(
+        &'haystack self,
+        page: usize,
+        query: &SearchQuery,
+        cursor: &mut SearchCursor,
+        limit: usize,
+        matches_for: impl Fn(&'haystack [u8], usize) -> I,
+    ) -> SearchBatch {
         if query.is_empty() {
             return SearchBatch {
                 hits: Vec::new(),
@@ -283,19 +312,23 @@ impl PageText {
                 .get_or_init(|| WordBoundaries::new(&self.text))
         });
         let haystack = index.map_or(self.text.as_str(), |index| &index.folded);
+        let bytes = haystack.as_bytes();
         let mut base = cursor.offset;
-        let mut matches = haystack[base..].match_indices(query.needle.as_str());
+        // The same prepared UTF-8 needle serves every page, batch and rejected
+        // whole-word restart. Nonempty valid UTF-8 matches stay on boundaries.
+        let matched_len = query.matcher.needle().len();
+        let mut matches = matches_for(bytes, base);
         let mut hits = Vec::new();
         let mut candidates = 0;
         // Bound both emitted hits and rejected whole-word candidates per job.
         while hits.len() < limit && candidates < 4096 {
-            let Some((relative, matched)) = matches.next() else {
+            let Some(relative) = matches.next() else {
                 cursor.offset = haystack.len();
                 break;
             };
             candidates += 1;
             let offset = base + relative;
-            let matched_end = offset + matched.len();
+            let matched_end = offset + matched_len;
             cursor.offset = matched_end;
             // A partial case-fold expansion is not an entire word (s != ß).
             let partial_expansion = boundaries.is_some()
@@ -314,7 +347,7 @@ impl PageText {
                 // Rejected candidates may overlap a later valid phrase.
                 base = offset + haystack[offset..].chars().next().unwrap().len_utf8();
                 cursor.offset = base;
-                matches = haystack[base..].match_indices(query.needle.as_str());
+                matches = matches_for(bytes, base);
                 continue;
             }
             if cursor.previous == Some((start, end)) {
@@ -610,9 +643,76 @@ mod tests {
     }
 
     #[test]
+    fn prepared_matcher_preserves_utf8_nul_and_long_needle_offsets_across_pages_and_batches() {
+        let pages: Vec<_> = [
+            "中文 😀 café\0👩‍💻 aaaaa 阅读器\n".repeat(13),
+            String::new(),
+            format!("{}尾 {}", "a".repeat(401), "中文 😀 café\0👩‍💻 ".repeat(7)),
+        ]
+        .into_iter()
+        .map(|value| PageText {
+            spans: value
+                .char_indices()
+                .enumerate()
+                .map(|(glyph, (start, ch))| TextSpan {
+                    range: start..start + ch.len_utf8(),
+                    rect: Rect::new(glyph as f64 * 8.0, 0.0, glyph as f64 * 8.0 + 6.0, 10.0),
+                })
+                .collect(),
+            text: value,
+            ..Default::default()
+        })
+        .collect();
+        for needle in [
+            "中文",
+            "😀",
+            "é",
+            "\0",
+            "👩‍💻",
+            "café\0👩‍💻",
+            "aaaaa",
+            &"a".repeat(65),
+            "absent",
+        ] {
+            let query = SearchQuery::new(
+                needle.into(),
+                SearchOptions {
+                    match_case: true,
+                    whole_word: false,
+                },
+            );
+            for (number, page) in pages.iter().enumerate() {
+                let reference: Vec<_> = page
+                    .text
+                    .match_indices(needle)
+                    .map(|(start, matched)| {
+                        (
+                            page.rects_for_range(start..start + matched.len()),
+                            snippet::snippet(&page.text, start),
+                        )
+                    })
+                    .collect();
+                let mut cursor = SearchCursor::default();
+                let mut actual = Vec::new();
+                loop {
+                    let batch = page.search_batch(number, &query, &mut cursor, 3);
+                    for hit in batch.hits {
+                        assert_eq!(hit.page, number);
+                        actual.push((hit.rects, hit.snippet));
+                    }
+                    if batch.complete {
+                        break;
+                    }
+                }
+                assert_eq!(actual, reference, "{needle:?}, page {number}");
+            }
+        }
+    }
+
+    #[test]
     fn prepared_query_reuses_unicode_folding_and_empty_search_stays_lazy() {
         let query = SearchQuery::new("STRASSE".into(), SearchOptions::default());
-        assert_eq!(query.needle, "strasse");
+        assert_eq!(query.matcher.needle(), b"strasse");
         for value in ["Straße", "STRASSE", "strasse"] {
             let page = PageText {
                 text: value.into(),
