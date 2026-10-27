@@ -226,8 +226,7 @@ fn named_destinations<'a>(pdf: &'a Pdf, catalog: &Dict<'a>) -> HashMap<Vec<u8>, 
             continue;
         }
         if let Some(array) = node.get::<Array<'_>>(b"Names") {
-            let mut iter = array.iter::<Object<'_>>().take(20_000);
-            while let (Some(key), Some(value)) = (iter.next(), iter.next()) {
+            for (key, value) in crate::pdf_objects::pairs(pdf, &array, 10_000) {
                 let Object::String(key) = key else {
                     continue;
                 };
@@ -328,6 +327,30 @@ mod tests {
             b"<< /Names [(kept) [3 0 R /Fit]] >>".to_vec(),
         ]);
         assert_eq!(resolve_test(&pdf).page, 0);
+    }
+
+    #[test]
+    fn unresolved_name_pairs_preserve_alignment_and_later_indirect_targets() {
+        let pdf = objects_pdf([
+            b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> /Target (kept) >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+            b"<< /Names [999 0 R 0 (missing) 999 0 R 5 0 R 6 0 R (alias) (kept) (trailing)] >>"
+                .to_vec(),
+            b"(kept)".to_vec(),
+            b"[3 0 R /Fit]".to_vec(),
+        ]);
+        assert_eq!(resolve_test(&pdf).page, 0);
+        let index = DestinationIndex::new(&pdf);
+        let names = index.named();
+        assert_eq!(names.len(), 2);
+        assert_eq!(
+            index
+                .resolve(names[b"alias".as_slice()].clone())
+                .unwrap()
+                .page,
+            0
+        );
     }
 
     #[test]

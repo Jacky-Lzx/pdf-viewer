@@ -48,8 +48,7 @@ impl PageLabels {
                 continue;
             }
             if let Some(nums) = node.get::<Array<'_>>(b"Nums") {
-                let mut items = nums.iter::<Object<'_>>().take(20_000);
-                while let (Some(index), Some(value)) = (items.next(), items.next()) {
+                for (index, value) in crate::pdf_objects::pairs(pdf, &nums, 10_000) {
                     let Object::Dict(label) = value else {
                         continue;
                     };
@@ -347,6 +346,22 @@ mod tests {
         modified[offset..offset + kids.len()].copy_from_slice(b"/Kids [24 0 R 24 0 R]");
         let pdf = Pdf::new(modified).unwrap();
         assert!(PageLabels::read(&pdf).ranges.is_empty());
+    }
+
+    #[test]
+    fn unresolved_label_pairs_do_not_hide_later_ranges() {
+        let source = include_bytes!("../assets/folio-guide.pdf");
+        let marker = b"/Nums [2 << /S /D >> 4 ";
+        let mut bytes = source.to_vec();
+        let offset = bytes
+            .windows(marker.len())
+            .position(|value| value == marker)
+            .unwrap();
+        bytes[offset..offset + marker.len()].copy_from_slice(b"/Nums [2 999 0 R     4 ");
+        let pdf = Pdf::new(bytes).unwrap();
+        let labels = PageLabels::read(&pdf);
+        assert_eq!(labels.label(4).as_deref(), Some("A-1"));
+        assert_eq!(labels.resolve_input("A-2", 6), Some(5));
     }
 
     #[test]
