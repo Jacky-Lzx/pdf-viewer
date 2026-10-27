@@ -3,7 +3,7 @@ use hayro::{
     hayro_interpret::util::TransformExt,
     hayro_syntax::{
         Pdf,
-        object::{Array, Dict, MaybeRef, Name, Object, Rect as PdfRect, String as PdfString},
+        object::{Array, Dict, Name, Object, Rect as PdfRect, String as PdfString},
         page::Page,
     },
     kurbo::Rect,
@@ -46,16 +46,7 @@ impl<'a> LinkReader<'a> {
             return Vec::new();
         };
         let transform = page.initial_transform(true).to_kurbo();
-        // Typed iteration stops at bad items. Count raw entries before resolving
-        // them so malformed annotations cannot hide later links or evade the cap.
-        annotations
-            .raw_iter()
-            .take(crate::link_hints::MAX_LINKS)
-            .filter_map(|annotation| match annotation {
-                MaybeRef::Ref(reference) => self.pdf.xref().get::<Dict<'_>>(reference.into()),
-                MaybeRef::NotRef(Object::Dict(annotation)) => Some(annotation),
-                _ => None,
-            })
+        crate::pdf_objects::dictionaries(self.pdf, &annotations, crate::link_hints::MAX_LINKS)
             .filter_map(|annotation| {
                 if annotation.get::<Name<'_>>(b"Subtype")?.as_ref() != b"Link" {
                     return None;

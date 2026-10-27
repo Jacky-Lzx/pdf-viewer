@@ -100,8 +100,7 @@ impl PageLabels {
             if let Some(kids) = node.get::<Array<'_>>(b"Kids") {
                 let available = 10_000_usize.saturating_sub(stack.len());
                 stack.extend(
-                    kids.iter::<Dict<'_>>()
-                        .take(available)
+                    crate::pdf_objects::dictionaries(pdf, &kids, available)
                         .map(|kid| (kid, depth + 1)),
                 );
             }
@@ -348,6 +347,26 @@ mod tests {
         modified[offset..offset + kids.len()].copy_from_slice(b"/Kids [24 0 R 24 0 R]");
         let pdf = Pdf::new(modified).unwrap();
         assert!(PageLabels::read(&pdf).ranges.is_empty());
+    }
+
+    #[test]
+    fn invalid_number_tree_children_do_not_hide_later_label_ranges() {
+        let source = include_bytes!("../assets/folio-guide.pdf");
+        let marker = b"/Kids [25 0 R 26 0 R]";
+        for invalid in ["null", "0", "false", "()", "[]", "/Bad", "999 0 R"] {
+            let mut bytes = source.to_vec();
+            let offset = bytes
+                .windows(marker.len())
+                .position(|value| value == marker)
+                .unwrap();
+            let replacement = format!("/Kids [{invalid:<7}26 0 R]");
+            assert_eq!(replacement.len(), marker.len());
+            bytes[offset..offset + marker.len()].copy_from_slice(replacement.as_bytes());
+            let pdf = Pdf::new(bytes).unwrap();
+            let labels = PageLabels::read(&pdf);
+            assert_eq!(labels.label(4).as_deref(), Some("A-1"), "{invalid}");
+            assert_eq!(labels.resolve_input("A-2", 6), Some(5), "{invalid}");
+        }
     }
 
     #[test]

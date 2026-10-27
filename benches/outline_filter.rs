@@ -14,6 +14,9 @@ mod outline;
 #[path = "../src/outline_view.rs"]
 mod outline_view;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/pdf_objects.rs"]
+mod pdf_objects;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/pdf_string.rs"]
 mod pdf_string;
 

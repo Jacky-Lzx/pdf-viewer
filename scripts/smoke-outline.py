@@ -27,6 +27,11 @@ def run(binary):
         assert original in source and len(original) == len(malformed)
         # Keep every xref offset intact while inserting an invalid key/value
         # before the valid named destination used by a later chapter.
+        source = source.replace(original, malformed, 1)
+        original = b"/Kids [25 0 R 26 0 R]"
+        malformed = b"/Kids [null   26 0 R]"
+        assert original in source and len(original) == len(malformed)
+        # A bad first number-tree child must not hide the later A- label range.
         document.write_bytes(source.replace(original, malformed, 1))
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config_path = root / "config/folio/library.json"
@@ -143,7 +148,7 @@ def run(binary):
                     keyboard.key(letter.lower(), shift=letter.isupper())
                 keyboard.key(0xFF0D)
                 expect(5, "UTF-16 page-label prefix accepts Unicode case expansion")
-                print("PASS: malformed name-pair recovery, nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
+                print("PASS: malformed name-pair/number-tree child recovery, nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

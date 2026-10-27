@@ -19,6 +19,7 @@ mod outline;
 mod outline_view;
 mod output;
 mod page_labels;
+mod pdf_objects;
 mod pdf_string;
 mod recent;
 mod render_plan;

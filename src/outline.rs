@@ -65,7 +65,7 @@ impl<'a> DestinationIndex<'a> {
             self.pdf
                 .xref()
                 .get::<Dict<'a>>(self.pdf.xref().root_id())
-                .map(|catalog| named_destinations(&catalog))
+                .map(|catalog| named_destinations(self.pdf, &catalog))
                 .unwrap_or_default()
         })
     }
@@ -203,7 +203,7 @@ pub fn read(pdf: &Pdf) -> Vec<OutlineEntry> {
     entries
 }
 
-fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
+fn named_destinations<'a>(pdf: &'a Pdf, catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
     let mut named = HashMap::new();
     if let Some(dict) = catalog.get::<Dict<'_>>(b"Dests") {
         for key in dict.keys().take(10_000) {
@@ -238,10 +238,9 @@ fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Object<'a>> {
             }
         }
         if let Some(kids) = node.get::<Array<'_>>(b"Kids") {
+            let available = 10_000_usize.saturating_sub(stack.len());
             stack.extend(
-                kids.iter::<Dict<'_>>()
-                    .take(10_000)
-                    .map(|kid| (kid, depth + 1)),
+                crate::pdf_objects::dictionaries(pdf, &kids, available).map(|kid| (kid, depth + 1)),
             );
         }
     }
@@ -317,6 +316,36 @@ mod tests {
         );
         assert!(index.resolve(names[b"broken".as_slice()].clone()).is_none());
         assert!(!names.contains_key(b"trailing".as_slice()));
+    }
+
+    #[test]
+    fn invalid_name_tree_children_do_not_hide_later_nodes() {
+        let pdf = objects_pdf([
+            b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> /Target (kept) >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+            b"<< /Kids [null 999 0 R 5 0 R 4 0 R] >>".to_vec(),
+            b"<< /Names [(kept) [3 0 R /Fit]] >>".to_vec(),
+        ]);
+        assert_eq!(resolve_test(&pdf).page, 0);
+    }
+
+    #[test]
+    fn name_tree_pending_nodes_remain_bounded_across_branches() {
+        let repeated = "5 0 R ".repeat(9999);
+        let pdf = objects_pdf([
+            b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] >>".to_vec(),
+            format!("<< /Kids [{repeated}6 0 R] >>").into_bytes(),
+            b"<< >>".to_vec(),
+            b"<< /Kids [7 0 R 8 0 R] >>".to_vec(),
+            b"<< /Names [(kept) [3 0 R /Fit]] >>".to_vec(),
+            b"<< /Names [(beyond) [3 0 R /Fit]] >>".to_vec(),
+        ]);
+        let index = DestinationIndex::new(&pdf);
+        assert!(index.named().contains_key(b"kept".as_slice()));
+        assert!(!index.named().contains_key(b"beyond".as_slice()));
     }
 
     #[test]
