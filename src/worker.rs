@@ -1186,12 +1186,25 @@ mod tests {
         );
         let bytes = all.memory_bytes();
         let rects = all.rects_for_range(0..all.text.len());
+        let mut selection = crate::selection::TextSelection::default();
+        selection.select_all();
+        selection.set_text(Arc::clone(&all));
+        assert!(selection.needs_preparation());
+        selection.clear_range();
+        assert!(
+            selection.needs_preparation(),
+            "a margin click must not lose the deferred inspection"
+        );
         worker.inspect(0);
         let interactive = match receive(&worker) {
             Event::PageText { page: 0, text, .. } => text,
             _ => panic!("Expected interactive text"),
         };
         assert!(Arc::ptr_eq(&all, &interactive));
+        assert!(
+            !selection.needs_preparation(),
+            "shared text sees the prepared index without another inspection"
+        );
         assert!(interactive.memory_bytes() > bytes);
         assert_eq!(
             interactive.rects_for_range(0..interactive.text.len()),

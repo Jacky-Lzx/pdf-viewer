@@ -1,6 +1,7 @@
 mod help;
 mod properties;
 mod recent;
+mod selection_scroll;
 mod shortcuts;
 mod sidebar;
 
@@ -1791,13 +1792,8 @@ impl Folio {
                     self.overflow = (size - rect.size()).max(Vec2::ZERO);
                     self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
                 }
-                let offset = self.current_offset();
-                if self.reading.offset != offset {
-                    self.reading.offset = offset;
-                    self.dirty = true;
-                }
                 let origin = rect.min + (rect.size() - size).max(Vec2::ZERO) * 0.5 - self.pan;
-                let page_rect = egui::Rect::from_min_size(origin, size);
+                let mut page_rect = egui::Rect::from_min_size(origin, size);
                 if self.selection.active {
                     if response.hovered() || response.dragged() {
                         context.set_cursor_icon(if self.selection.ready() {
@@ -1806,7 +1802,7 @@ impl Folio {
                             egui::CursorIcon::Progress
                         });
                     }
-                    let point = |position: egui::Pos2| {
+                    let point = |position: egui::Pos2, page_rect: egui::Rect| {
                         let relative = position - page_rect.min;
                         crate::geometry::unrotate_point(
                             hayro::kurbo::Point::new(
@@ -1822,32 +1818,55 @@ impl Folio {
                         let pressed = ui
                             .input(|input| input.pointer.press_origin())
                             .or(response.interact_pointer_pos());
-                        if let Some(position) =
-                            pressed.filter(|position| page_rect.contains(*position))
-                        {
-                            if self.selection.is_all() {
-                                self.worker.inspect(self.nav.page);
-                            }
-                            if clicked {
-                                let unit = if response.triple_clicked() {
-                                    SelectionUnit::Line
-                                } else if response.double_clicked() {
-                                    SelectionUnit::Word
-                                } else {
-                                    SelectionUnit::Glyph
-                                };
-                                self.selection.select(point(position), unit);
+                        if let Some(position) = pressed {
+                            if !page_rect.contains(position) {
+                                self.selection.clear_range();
                             } else {
-                                self.selection.begin(point(position));
+                                if self.selection.needs_preparation() {
+                                    self.worker.inspect(self.nav.page);
+                                }
+                                if clicked {
+                                    let unit = if response.triple_clicked() {
+                                        SelectionUnit::Line
+                                    } else if response.double_clicked() {
+                                        SelectionUnit::Word
+                                    } else {
+                                        SelectionUnit::Glyph
+                                    };
+                                    self.selection.select(point(position, page_rect), unit);
+                                } else {
+                                    self.selection.begin(point(position, page_rect));
+                                }
                             }
+                        }
+                    }
+                    if response.dragged_by(egui::PointerButton::Primary)
+                        && self.selection.has_anchor()
+                        && let Some(position) = response.interact_pointer_pos()
+                    {
+                        let delta = selection_scroll::delta(
+                            ui.max_rect(),
+                            position,
+                            ui.input(|input| input.unstable_dt),
+                        );
+                        let next = (self.pan + delta).clamp(Vec2::ZERO, self.overflow);
+                        if next != self.pan {
+                            page_rect = page_rect.translate(self.pan - next);
+                            self.pan = next;
+                            context.request_repaint_after(Duration::from_millis(16));
                         }
                     }
                     if (response.dragged_by(egui::PointerButton::Primary)
                         || response.drag_stopped_by(egui::PointerButton::Primary))
                         && let Some(position) = response.interact_pointer_pos()
                     {
-                        self.selection.extend(point(position));
+                        self.selection.extend(point(position, page_rect));
                     }
+                }
+                let offset = self.current_offset();
+                if self.reading.offset != offset {
+                    self.reading.offset = offset;
+                    self.dirty = true;
                 }
                 let key = view.key(self.nav.page, dimensions);
                 self.cache.protect(key);

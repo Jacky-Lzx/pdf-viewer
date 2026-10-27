@@ -59,7 +59,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl/Cmd+a", "Select all text on the current page"),
     (
         "Double / triple click in v",
-        "Select word / line; drag to extend in the same units",
+        "Select word / line; drag in those units, auto-scroll at edges",
     ),
     ("Ctrl/Cmd+r", "Reload PDF and keep reading position"),
     ("s, then y", "Document information, copy details"),

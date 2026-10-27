@@ -43,6 +43,26 @@ impl TextSelection {
         self.all
     }
 
+    pub fn has_anchor(&self) -> bool {
+        self.anchor.is_some()
+    }
+
+    pub fn needs_preparation(&self) -> bool {
+        self.text
+            .as_ref()
+            .is_none_or(|text| !text.selection_prepared())
+    }
+
+    pub fn clear_range(&mut self) {
+        self.anchor = None;
+        self.anchor_span = None;
+        self.head = None;
+        self.range = None;
+        self.unit = SelectionUnit::Glyph;
+        self.all = false;
+        self.rects.clear();
+    }
+
     pub fn select_all(&mut self) {
         if self.all {
             return;
@@ -194,6 +214,23 @@ mod tests {
         selection.set_text(text());
         assert_eq!(selection.rects, full);
         same_storage(&selection);
+    }
+
+    #[test]
+    fn clearing_a_margin_selection_keeps_text_but_removes_its_drag_anchor() {
+        let mut selection = TextSelection::default();
+        selection.start();
+        selection.set_text(text());
+        selection.select(Point::new(5.0, 5.0), SelectionUnit::Word);
+        assert!(selection.has_anchor());
+        selection.clear_range();
+        assert!(selection.active && selection.ready());
+        assert!(!selection.has_anchor() && !selection.is_all());
+        assert!(selection.rects.is_empty());
+        selection.extend(Point::new(55.0, 25.0));
+        assert!(selection.selected_text().is_none());
+        selection.begin(Point::new(5.0, 5.0));
+        assert_eq!(selection.selected_text(), Some("R"));
     }
 
     #[test]

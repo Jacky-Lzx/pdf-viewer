@@ -140,6 +140,10 @@ pub fn advance_match(
 }
 
 impl PageText {
+    pub fn selection_prepared(&self) -> bool {
+        self.spans.len() < 256 || self.selection_index.get().is_some()
+    }
+
     pub fn prepare_selection(&self) {
         if self.spans.len() >= 256 {
             self.word_boundaries

@@ -40,6 +40,7 @@ jobs:
           xvfb-run -a python3 scripts/smoke-link-menu.py target/release/folio
           xvfb-run -a python3 scripts/smoke-link-copy.py target/release/folio
           xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/folio
           xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
           xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
           xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
