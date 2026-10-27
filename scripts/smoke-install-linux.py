@@ -156,6 +156,14 @@ def run(binary):
                 assert "A little room to read" in keyboard.clipboard(), "reader stays usable after upgrade"
                 keyboard.key("q", ctrl=True)
                 wait_for(lambda: process_for(installed) is None, "installed app quit")
+            except Exception:
+                log.flush(); log.seek(0)
+                print(f"Desktop launch log:\n{log.read()}", file=sys.stderr)
+                print((data / "applications/folio.desktop").read_text(), file=sys.stderr)
+                if pid:
+                    subprocess.run(["ps", "-p", str(pid), "-o", "pid,stat,args"],
+                                   stdout=sys.stderr, check=False)
+                raise
             finally:
                 if pid and process_for(installed) == pid:
                     os.kill(pid, signal.SIGTERM)

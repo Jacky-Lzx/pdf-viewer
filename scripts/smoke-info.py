@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check document information without a display or persistent reader state."""
+import errno
 import os
 from pathlib import Path
 import runpy
@@ -54,9 +55,17 @@ def run(binary):
         assert title == long_title[:2048] + "…", title
         if os.name == "posix":
             raw_path = os.fsencode(root) + b"/raw-\xff.pdf"
-            with open(raw_path, "wb") as output:
-                output.write(source)
-            assert "Pages: 6\n" in invoke(["--info", os.fsdecode(raw_path)])
+            try:
+                with open(raw_path, "wb") as output:
+                    output.write(source)
+            except OSError as error:
+                # APFS rejects invalid UTF-8 names even though macOS is POSIX.
+                # Keep testing Unicode paths and all remaining CLI behavior.
+                if error.errno != errno.EILSEQ:
+                    raise
+                print("SKIP: filesystem rejects non-UTF-8 filenames")
+            else:
+                assert "Pages: 6\n" in invoke(["--info", os.fsdecode(raw_path)])
 
         missing = root / "missing.pdf"
         invoke(["--info"], "Missing PDF path")
