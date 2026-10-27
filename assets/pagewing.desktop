@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Folio
+Name=Pagewing
 Comment=A keyboard-driven PDF reader
-Exec=folio -- %f
-Icon=folio
+Exec=pagewing -- %f
+Icon=pagewing
 Terminal=false
 Categories=Office;Viewer;
 MimeType=application/pdf;

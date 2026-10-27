@@ -18,13 +18,13 @@ SENTENCE = "A native PDF reader, written in Rust."
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-selection-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-selection-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        shutil.copyfile(SCRIPTS.parent / "assets/folio-guide.pdf", document)
+        document = root / "pagewing-smoke.pdf"
+        shutil.copyfile(SCRIPTS.parent / "assets/pagewing-guide.pdf", document)
         page_text = [subprocess.run([str(binary), "--text", str(document), str(page)], check=True, capture_output=True).stdout.decode("utf-8").removesuffix("\n") for page in (1, 2)]
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -163,4 +163,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

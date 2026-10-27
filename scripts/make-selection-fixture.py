@@ -11,7 +11,7 @@ def make_pdf():
 12 dict begin
 begincmap
 /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
-/CMapName /FolioLong def
+/CMapName /PagewingLong def
 /CMapType 2 def
 1 begincodespacerange
 <00> <ff>

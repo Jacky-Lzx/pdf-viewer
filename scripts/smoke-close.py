@@ -17,15 +17,15 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-close-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-close-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+        document = root / "pagewing-smoke.pdf"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
         encrypted = root / "encrypted.pdf"
         encrypted.write_bytes((SCRIPTS.parent / "tests/fixtures/encrypted.pdf").read_bytes())
         missing = root / "missing.pdf"
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"sidebar": True, "recent": [
             {"path": str(encrypted), "page": 1}, {"path": str(missing), "page": 0}
@@ -57,11 +57,11 @@ def run(binary):
                 keyboard.key(0xFF0D, delay=0)
 
             def closed():
-                wait_for(lambda: title() == "Folio", "closing returns to welcome in the same window")
+                wait_for(lambda: title() == "Pagewing", "closing returns to welcome in the same window")
                 assert application.poll() is None
 
             def reopened():
-                wait_for(lambda: title().startswith("folio-smoke.pdf"), "recent document reopens")
+                wait_for(lambda: title().startswith("pagewing-smoke.pdf"), "recent document reopens")
                 time.sleep(0.5)
                 keyboard.key("y")
                 assert "Make yourself at home." in keyboard.clipboard(), "the saved page and actual PDF must be restored"
@@ -123,7 +123,7 @@ def run(binary):
                 application.send_signal(signal.SIGSTOP)
                 try:
                     keyboard.key("w", ctrl=True, delay=0)
-                    recent("folio-smoke")
+                    recent("pagewing-smoke")
                 finally:
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.8)
@@ -146,7 +146,7 @@ def run(binary):
                 assert "Encrypted document page 2." in keyboard.clipboard(), "reopened encrypted document must unlock at its saved page"
                 keyboard.key("w", ctrl=True)
                 closed()
-                recent("folio-smoke")
+                recent("pagewing-smoke")
                 reopened()
                 keyboard.key("w", ctrl=True)
                 closed()
@@ -163,7 +163,7 @@ def run(binary):
                 assert "native PDF reader" in keyboard.clipboard(), "a closed failed load can be retried after the file is restored"
                 keyboard.key("w", ctrl=True)
                 closed()
-                recent("folio-smoke")
+                recent("pagewing-smoke")
                 reopened()
                 keyboard.click((210, 28))
                 closed()
@@ -188,4 +188,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

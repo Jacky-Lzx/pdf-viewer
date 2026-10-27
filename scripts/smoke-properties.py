@@ -23,21 +23,21 @@ def metadata_pdf(source, title):
     title = (b"\xfe\xff" + title.encode("utf-16-be")).hex().encode()
     data = source + b"\n"
     offset = len(data)
-    data += str(size).encode() + b" 0 obj\n<< /Title <" + title + b"> /Author (Author\x84Name) /Subject (Reading) /Creator (Folio smoke) /Keywords ( ) >>\nendobj\n"
+    data += str(size).encode() + b" 0 obj\n<< /Title <" + title + b"> /Author (Author\x84Name) /Subject (Reading) /Creator (Pagewing smoke) /Keywords ( ) >>\nendobj\n"
     xref = len(data)
     data += f"xref\n{size} 1\n{offset:010} 00000 n \ntrailer\n<< /Size {size + 1} /Root 1 0 R /Info {size} 0 R /Prev {previous} >>\nstartxref\n{xref}\n%%EOF\n".encode()
     return data
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-properties-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-properties-") as directory:
         root = Path(directory)
-        source = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
-        document, clean = root / "folio-smoke.pdf", root / "clean.pdf"
+        source = (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes()
+        document, clean = root / "pagewing-smoke.pdf", root / "clean.pdf"
         document.write_bytes(metadata_pdf(source, "中文 😀 reading"))
         clean.write_bytes(source)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"recent": [{"path": str(clean), "page": 3}]}))
         keyboard = Keyboard()
@@ -80,7 +80,7 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
                 text = keyboard.clipboard()
-                for row in [f"File: {document}", "Format: PDF 1.4", f"Size: {document.stat().st_size} bytes", "Pages: 6", "Page size: 600.0 × 800.0 pt", "Title: 中文 😀 reading", "Author: Author—Name", "Creator: Folio smoke"]:
+                for row in [f"File: {document}", "Format: PDF 1.4", f"Size: {document.stat().st_size} bytes", "Pages: 6", "Page size: 600.0 × 800.0 pt", "Title: 中文 😀 reading", "Author: Author—Name", "Creator: Pagewing smoke"]:
                     assert row in text, (row, text)
                 assert "Keywords:" not in text
                 assert book()["page"] == 0 and book().get("rotation", 0) == 0
@@ -111,7 +111,7 @@ def run(binary):
                 assert f"File: {clean}" in text and "Title:" not in text and "Author:" not in text
                 keyboard.key("w", ctrl=True)
                 time.sleep(0.3)
-                recent("folio-smoke")
+                recent("pagewing-smoke")
                 expect(document, 2)
                 time.sleep(0.4)
                 keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
@@ -138,4 +138,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

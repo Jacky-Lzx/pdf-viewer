@@ -12,13 +12,13 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 5 0 R >>
 endobj
 5 0 obj
-<< /Length 20319 >>
+<< /Length 20322 >>
 stream
 /CIDInit /ProcSet findresource begin
 12 dict begin
 begincmap
 /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
-/CMapName /FolioLong def
+/CMapName /PagewingLong def
 /CMapType 2 def
 1 begincodespacerange
 <00> <ff>
@@ -46,9 +46,9 @@ xref
 0000000115 00000 n 
 0000000241 00000 n 
 0000000328 00000 n 
-0000020699 00000 n 
+0000020702 00000 n 
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-20781
+20784
 %%EOF

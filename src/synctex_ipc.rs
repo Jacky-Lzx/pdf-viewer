@@ -29,7 +29,7 @@ pub struct Request {
 fn socket_path(pdf: &Path) -> io::Result<PathBuf> {
     // A short, stable path also fits macOS's 104-byte sockaddr_un.sun_path.
     let uid = unsafe { libc::geteuid() };
-    let directory = PathBuf::from(format!("/tmp/folio-synctex-{uid}"));
+    let directory = PathBuf::from(format!("/tmp/pagewing-synctex-{uid}"));
     match fs::DirBuilder::new().mode(0o700).create(&directory) {
         Ok(()) => (),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),

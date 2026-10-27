@@ -17,10 +17,10 @@ make_pdf = runpy.run_path(str(SCRIPTS / "make-sample.py"))["make_pdf"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-link-copy-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-link-copy-") as directory:
         root = Path(directory)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         application = None
         with open(root / "application.log", "w+") as log:
@@ -53,7 +53,7 @@ def run(binary):
 
             def launch(name, data):
                 nonlocal application
-                document = root / name / "folio-smoke.pdf"
+                document = root / name / "pagewing-smoke.pdf"
                 document.parent.mkdir()
                 document.write_bytes(data)
                 application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -92,7 +92,7 @@ def run(binary):
                 expect(0, 1)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                application = launch("mixed", (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+                application = launch("mixed", (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
                 sequence("Fa", burst=True)
                 copied("https://www.rust-lang.org/")
                 expect(0)
@@ -111,7 +111,7 @@ def run(binary):
                 expect(2)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                damaged = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
+                damaged = (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes()
                 for original, replacement in [
                     (b"/Annots [<< /Type /Annot ", b"/Annots [null 999 0 R << "),
                     (b">> << /Type /Annot ", b">> null 999 0 R << "),
@@ -143,4 +143,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

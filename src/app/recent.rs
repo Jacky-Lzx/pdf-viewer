@@ -1,12 +1,13 @@
-use super::Folio;
+use super::Pagewing;
 use eframe::egui::{self, Vec2};
 
-impl Folio {
+impl Pagewing {
     pub(super) fn toggle_recent(&mut self, context: &egui::Context) {
         self.outline.cancel_input();
         if self.recent_picker.take().is_some() {
-            context
-                .memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-recent-input")));
+            context.memory_mut(|memory| {
+                memory.surrender_focus(egui::Id::new("pagewing-recent-input"))
+            });
             return;
         }
         self.nav.clear_prefix();
@@ -40,7 +41,7 @@ impl Folio {
             .show(context, |ui| {
                 let (input, _) = super::shortcuts::text_input(
                     ui,
-                    egui::Id::new("folio-recent-input"),
+                    egui::Id::new("pagewing-recent-input"),
                     &mut picker.focus,
                     &mut self.deferred_input,
                     egui::TextEdit::singleline(&mut picker.query)
@@ -62,7 +63,7 @@ impl Folio {
                 ));
                 let reveal = std::mem::take(&mut picker.reveal);
                 egui::ScrollArea::vertical()
-                    .id_salt("folio-recent-results")
+                    .id_salt("pagewing-recent-results")
                     .max_height((context.content_rect().height() - 250.0).clamp(80.0, 280.0))
                     .show(ui, |ui| {
                         if picker.len() == 0 {
@@ -113,8 +114,9 @@ impl Folio {
         } else if open && !cancelled {
             self.recent_picker = Some(picker);
         } else {
-            context
-                .memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-recent-input")));
+            context.memory_mut(|memory| {
+                memory.surrender_focus(egui::Id::new("pagewing-recent-input"))
+            });
         }
     }
 }

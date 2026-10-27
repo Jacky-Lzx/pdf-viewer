@@ -28,58 +28,58 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --locked --release
       - name: Headless document information
-        run: python3 scripts/smoke-info.py target/release/folio
+        run: python3 scripts/smoke-info.py target/release/pagewing
       - name: Native desktop smoke test
         if: runner.os == 'Linux'
         run: |
-          xvfb-run -a python3 scripts/smoke-install-linux.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-long-title.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-continuous.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-link-menu.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-link-copy.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-paths.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-close.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-file-watch.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-help.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-password.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-percentage.py target/release/folio
-          xvfb-run -a python3 scripts/smoke-relative.py target/release/folio
+          xvfb-run -a python3 scripts/smoke-install-linux.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-desktop.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-cli.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-outline.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-long-title.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-page-size.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-continuous.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-fit-height.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-destinations.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-link-hints.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-link-menu.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-link-copy.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-selection.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-search-load.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-search-options.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-search-dense.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-persistence.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-paths.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-recent.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-close.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-properties.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-file-watch.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-help.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-input-burst.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-password.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-vim-view.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-percentage.py target/release/pagewing
+          xvfb-run -a python3 scripts/smoke-relative.py target/release/pagewing
       - name: Exercise renderer and text extraction
         shell: bash
         run: |
-          target/release/folio --render assets/folio-guide.pdf target/guide.png 1 1200
-          target/release/folio --text assets/folio-guide.pdf 1
-          target/release/folio --benchmark assets/folio-guide.pdf 2
+          target/release/pagewing --render assets/pagewing-guide.pdf target/guide.png 1 1200
+          target/release/pagewing --text assets/pagewing-guide.pdf 1
+          target/release/pagewing --benchmark assets/pagewing-guide.pdf 2
       - name: Bundle macOS application
         if: runner.os == 'macOS'
         run: bash scripts/bundle-macos.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: folio-${{ runner.os }}-${{ runner.arch }}
+          name: pagewing-${{ runner.os }}-${{ runner.arch }}
           path: |
-            target/release/folio
-            target/Folio.app
+            target/release/pagewing
+            target/Pagewing.app
             target/guide.png

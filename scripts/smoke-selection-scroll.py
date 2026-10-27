@@ -17,13 +17,13 @@ ESCAPE = 0xFF1B
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-selection-scroll-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-selection-scroll-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+        document = root / "pagewing-smoke.pdf"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         keyboard.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         keyboard.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
@@ -92,7 +92,7 @@ def run(binary):
                 keyboard.key("c", ctrl=True)
                 copied = keyboard.clipboard()
                 assert copied.startswith("native PDF reader"), copied
-                assert "FOLIO /" in copied, copied
+                assert "PAGEWING /" in copied, copied
 
                 # Extend a fresh drag from the footer all the way back up.
                 time.sleep(0.4)
@@ -101,7 +101,7 @@ def run(binary):
                        "reverse drag scrolls back to the first text")
                 keyboard.key("y")
                 copied = keyboard.clipboard()
-                assert copied.startswith("WELCOME TO FOLIO"), copied
+                assert copied.startswith("WELCOME TO PAGEWING"), copied
                 assert "native PDF reader" in copied, copied
 
                 # Reading rotation makes horizontal overflow scrollable too.
@@ -141,4 +141,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

@@ -34,7 +34,7 @@ def launch(entry, document, environment, log):
 def fake_application(path, generation):
     path.write_text("#!/usr/bin/env python3\nimport json,os,sys\n"
                     f"json.dump({{'generation': {generation}, 'args': sys.argv[1:]}}, "
-                    "open(os.environ['FOLIO_INSTALL_CAPTURE'], 'w'))\n")
+                    "open(os.environ['PAGEWING_INSTALL_CAPTURE'], 'w'))\n")
     path.chmod(0o755)
 
 
@@ -60,12 +60,12 @@ def run(binary):
     assert shutil.which("gio"), "Install libglib2.0-bin for the GIO launcher"
     validator = shutil.which("desktop-file-validate")
     assert validator, "Install desktop-file-utils for Desktop Entry validation"
-    with tempfile.TemporaryDirectory(prefix="folio-install-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-install-") as directory:
         root = Path(directory)
         source = root / "fixture-program"
-        environment = dict(os.environ, FOLIO_BINARY=str(source),
+        environment = dict(os.environ, PAGEWING_BINARY=str(source),
                            XDG_CONFIG_HOME=str(root / "config"))
-        sentinel = root / "config/folio/keep-reading-progress"
+        sentinel = root / "config/pagewing/keep-reading-progress"
         sentinel.parent.mkdir(parents=True)
         sentinel.write_text("keep")
         invalid = root / "must-not-create"
@@ -89,16 +89,16 @@ def run(binary):
                 prefix = root / prefix_name
                 data = root / f"data {case}" / special if explicit_data else prefix / "share"
                 capture = root / f"{case}.json"
-                current = dict(environment, FOLIO_INSTALL_CAPTURE=str(capture))
+                current = dict(environment, PAGEWING_INSTALL_CAPTURE=str(capture))
                 if explicit_data:
                     current["XDG_DATA_HOME"] = str(data)
                 else:
                     current.pop("XDG_DATA_HOME", None)
                 document = root / ("-文档 %u " + os.fsdecode(b"native-\xff.pdf"))
                 document.write_bytes(b"argument fixture")
-                installed = prefix / "bin/folio"
-                entry = data / "applications/folio.desktop"
-                icon = data / "icons/hicolor/scalable/apps/folio.svg"
+                installed = prefix / "bin/pagewing"
+                entry = data / "applications/pagewing.desktop"
+                icon = data / "icons/hicolor/scalable/apps/pagewing.svg"
                 # Relative --prefix is resolved against the caller, not the repository.
                 arguments = ["--prefix", prefix_name]
                 install(arguments, current, cwd=root)
@@ -131,18 +131,18 @@ def run(binary):
             # Exercise the installed Rust binary through the same GIO desktop launcher.
             prefix = root / "native 中文 space %f"
             data = root / "native data"
-            current = dict(environment, FOLIO_BINARY=str(binary), XDG_DATA_HOME=str(data),
+            current = dict(environment, PAGEWING_BINARY=str(binary), XDG_DATA_HOME=str(data),
                            LIBGL_ALWAYS_SOFTWARE="1")
-            document = root / "文档 path/-folio-smoke.pdf"
+            document = root / "文档 path/-pagewing-smoke.pdf"
             document.parent.mkdir()
-            document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+            document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
             arguments = ["--prefix", str(prefix)]
             install(arguments, current)
-            installed = prefix / "bin/folio"
+            installed = prefix / "bin/pagewing"
             keyboard = Keyboard()
             pid = None
             try:
-                launch(data / "applications/folio.desktop", document, current, log)
+                launch(data / "applications/pagewing.desktop", document, current, log)
                 pid = wait_for(lambda: process_for(installed), "installed native process")
                 wait_for(keyboard.focus, "desktop-opened PDF window")
                 keyboard.key("y")
@@ -159,7 +159,7 @@ def run(binary):
             except Exception:
                 log.flush(); log.seek(0)
                 print(f"Desktop launch log:\n{log.read()}", file=sys.stderr)
-                print((data / "applications/folio.desktop").read_text(), file=sys.stderr)
+                print((data / "applications/pagewing.desktop").read_text(), file=sys.stderr)
                 if pid:
                     subprocess.run(["ps", "-p", str(pid), "-o", "pid,stat,args"],
                                    stdout=sys.stderr, check=False)
@@ -170,7 +170,7 @@ def run(binary):
                 keyboard.x11.XCloseDisplay(keyboard.display)
                 install([*arguments, "--uninstall"], current)
             assert sentinel.read_text() == "keep"
-            assert (root / "config/folio/library.json").exists(), "uninstall must preserve actual reading state"
+            assert (root / "config/pagewing/library.json").exists(), "uninstall must preserve actual reading state"
         print("PASS: Desktop Entry validation, user/custom and relative prefixes, XDG paths, "
               "Unicode/space/quote/backslash/percent/control characters, exact native filename arguments, "
               "atomic upgrades, reinstall while reading, native PDF launch and Vim navigation, "
@@ -178,4 +178,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

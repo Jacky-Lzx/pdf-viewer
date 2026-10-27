@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn real_number_tree_resolves_labels_and_malformed_cycles_terminate() {
-        let bytes = include_bytes!("../assets/folio-guide.pdf");
+        let bytes = include_bytes!("../assets/pagewing-guide.pdf");
         let pdf = Pdf::new(bytes.to_vec()).unwrap();
         let labels = PageLabels::read(&pdf);
         assert_eq!(
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn unresolved_label_pairs_do_not_hide_later_ranges() {
-        let source = include_bytes!("../assets/folio-guide.pdf");
+        let source = include_bytes!("../assets/pagewing-guide.pdf");
         let marker = b"/Nums [2 << /S /D >> 4 ";
         let mut bytes = source.to_vec();
         let offset = bytes
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn invalid_number_tree_children_do_not_hide_later_label_ranges() {
-        let source = include_bytes!("../assets/folio-guide.pdf");
+        let source = include_bytes!("../assets/pagewing-guide.pdf");
         let marker = b"/Kids [25 0 R 26 0 R]";
         for invalid in ["null", "0", "false", "()", "[]", "/Bad", "999 0 R"] {
             let mut bytes = source.to_vec();

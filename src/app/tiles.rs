@@ -1,8 +1,8 @@
-use super::Folio;
+use super::Pagewing;
 use crate::render_plan::RenderPlan;
 use eframe::egui::{self, Color32, Vec2};
 
-impl Folio {
+impl Pagewing {
     pub(super) fn paint_tiles(
         &mut self,
         painter: &egui::Painter,

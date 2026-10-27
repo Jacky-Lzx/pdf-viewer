@@ -219,7 +219,7 @@ impl Worker {
         let (tx, events) = mpsc::sync_channel(4);
         let state = shared.clone();
         std::thread::Builder::new()
-            .name("folio-render".into())
+            .name("pagewing-render".into())
             .spawn(move || {
                 let mut active: Option<(Pdf, u64, FileWatch)> = None;
                 loop {
@@ -797,7 +797,7 @@ mod tests {
     }
 
     fn sample() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/folio-guide.pdf")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/pagewing-guide.pdf")
     }
 
     fn dense_sample(count: usize) -> tempfile::NamedTempFile {

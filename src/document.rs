@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn cancellable_loading_preserves_documents_passwords_and_read_errors() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let path = root.join("assets/folio-guide.pdf");
+        let path = root.join("assets/pagewing-guide.pdf");
         let ordinary = load(&path, "").unwrap();
         let interactive = load_cancellable(&path, "", || false).unwrap().unwrap();
         assert_eq!(ordinary.data().as_ref(), interactive.data().as_ref());
@@ -364,7 +364,7 @@ mod tests {
     }
 
     fn sample() -> Pdf {
-        Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap()
+        Pdf::new(include_bytes!("../assets/pagewing-guide.pdf").to_vec()).unwrap()
     }
 
     #[test]

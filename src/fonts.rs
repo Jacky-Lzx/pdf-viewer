@@ -4,7 +4,7 @@ use std::{path::Path, sync::Arc};
 pub fn install(context: egui::Context) {
     // Read large system font collections without delaying the first frame.
     let _ = std::thread::Builder::new()
-        .name("folio-fonts".into())
+        .name("pagewing-fonts".into())
         .spawn(move || {
             let Some(bytes) = system_font() else {
                 return;
@@ -39,7 +39,7 @@ fn read_font(path: &Path, require_cjk: bool) -> Option<Vec<u8>> {
 }
 
 fn system_font() -> Option<Vec<u8>> {
-    if let Some(path) = std::env::var_os("FOLIO_FONT")
+    if let Some(path) = std::env::var_os("PAGEWING_FONT")
         && let Some(bytes) = read_font(Path::new(&path), false)
     {
         return Some(bytes);

@@ -1,7 +1,7 @@
-use super::Folio;
+use super::Pagewing;
 use eframe::egui;
 
-impl Folio {
+impl Pagewing {
     /// The worker debounces disk writes. Consume each change once, and defer
     /// while an editor or gesture still owns the current document snapshot.
     pub(super) fn reload_if_changed(&mut self, context: &egui::Context) {
@@ -34,7 +34,7 @@ mod tests {
 
     fn pdf(title: &str) -> Vec<u8> {
         let mut document =
-            lopdf::Document::load_mem(include_bytes!("../../assets/folio-guide.pdf")).unwrap();
+            lopdf::Document::load_mem(include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
         let info = document
             .add_object(lopdf::dictionary! { "Title" => lopdf::Object::string_literal(title) });
         document.trailer.set("Info", info);
@@ -43,12 +43,12 @@ mod tests {
         bytes
     }
 
-    fn frame(app: &mut Folio, context: &Context) -> egui::FullOutput {
+    fn frame(app: &mut Pagewing, context: &Context) -> egui::FullOutput {
         frame_events(app, context, Vec::new())
     }
 
     fn frame_events(
-        app: &mut Folio,
+        app: &mut Pagewing,
         context: &Context,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
@@ -99,7 +99,7 @@ mod tests {
         });
     }
 
-    fn wait(app: &mut Folio, context: &Context, ready: impl Fn(&Folio) -> bool) {
+    fn wait(app: &mut Pagewing, context: &Context, ready: impl Fn(&Pagewing) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(6);
         while !ready(app) {
             assert!(
@@ -112,7 +112,7 @@ mod tests {
         }
     }
 
-    fn title(app: &Folio) -> &str {
+    fn title(app: &Pagewing) -> &str {
         app.info
             .fields
             .iter()
@@ -121,10 +121,10 @@ mod tests {
             .unwrap_or("")
     }
 
-    fn open(path: &Path, config: &Path) -> (Folio, Context) {
+    fn open(path: &Path, config: &Path) -> (Pagewing, Context) {
         fs::write(path, pdf("Edition one")).unwrap();
         let context = Context::default();
-        let mut app = Folio::with_context(&context, Some(path.into()), None, config.into());
+        let mut app = Pagewing::with_context(&context, Some(path.into()), None, config.into());
         wait(&mut app, &context, |a| !a.loading && a.comments.loaded);
         (app, context)
     }
@@ -146,7 +146,7 @@ mod tests {
             frame(&mut app, &context);
             let before = app.current_position();
             let focus = context.memory(|m| m.focused());
-            assert_eq!(focus, Some(egui::Id::new("folio-search-input")));
+            assert_eq!(focus, Some(egui::Id::new("pagewing-search-input")));
             let stamp = fs::metadata(&path).unwrap();
             let replacement = root.path().join("replacement.pdf");
             fs::write(&replacement, pdf("Edition two")).unwrap();

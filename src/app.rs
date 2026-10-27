@@ -40,7 +40,7 @@ enum MarkAction {
     Jump,
 }
 
-pub struct Folio {
+pub struct Pagewing {
     worker: Worker,
     state_writer: crate::state_writer::StateWriter,
     library: Library,
@@ -114,7 +114,7 @@ pub struct Folio {
     dirty: bool,
 }
 
-impl Folio {
+impl Pagewing {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
@@ -242,7 +242,7 @@ impl Folio {
         self.worker
             .open(self.id, self.reading.path.clone(), String::new());
         context.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{} — Folio",
+            "{} — Pagewing",
             self.filename()
         )));
     }
@@ -327,7 +327,7 @@ impl Folio {
         self.clear_document(context);
         self.dialog = None;
         self.worker.close();
-        context.send_viewport_cmd(egui::ViewportCommand::Title("Folio".into()));
+        context.send_viewport_cmd(egui::ViewportCommand::Title("Pagewing".into()));
     }
 
     fn reopen_closed(&mut self, context: &egui::Context) {
@@ -345,7 +345,7 @@ impl Folio {
             .path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Folio".into())
+            .unwrap_or_else(|| "Pagewing".into())
     }
 
     fn reload(&mut self) {
@@ -1077,27 +1077,27 @@ impl Folio {
         }
         if context.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary)) {
             for (visible, name) in [
-                (self.search_open, "folio-search-input"),
-                (self.recent_picker.is_some(), "folio-recent-input"),
-                (self.goto_open, "folio-page-input"),
-                (self.password_open, "folio-password-input"),
-                (self.help, "folio-help-input"),
+                (self.search_open, "pagewing-search-input"),
+                (self.recent_picker.is_some(), "pagewing-recent-input"),
+                (self.goto_open, "pagewing-page-input"),
+                (self.password_open, "pagewing-password-input"),
+                (self.help, "pagewing-help-input"),
                 (
                     self.comments.open && self.comments.editor.is_some(),
-                    "folio-comment-input",
+                    "pagewing-comment-input",
                 ),
                 (
                     self.library.sidebar && self.nav.count > 0 && !self.outline.is_empty(),
-                    "folio-outline-input",
+                    "pagewing-outline-input",
                 ),
             ] {
                 if visible && shortcuts::focus_clicked_input(context, egui::Id::new(name)) {
                     // These dialogs also need to recognize Enter when focus
                     // was gained and released within this very same frame.
                     match name {
-                        "folio-search-input" => self.search_focus = true,
-                        "folio-page-input" => self.goto_focus = true,
-                        "folio-password-input" => self.password_focus = true,
+                        "pagewing-search-input" => self.search_focus = true,
+                        "pagewing-page-input" => self.goto_focus = true,
+                        "pagewing-password-input" => self.password_focus = true,
                         _ => {}
                     }
                     break;
@@ -1121,13 +1121,13 @@ impl Folio {
                 || (self.comments.open && self.comments.editor.is_some())
                 || context.memory(|memory| {
                     [
-                        "folio-search-input",
-                        "folio-recent-input",
-                        "folio-page-input",
-                        "folio-password-input",
-                        "folio-help-input",
-                        "folio-outline-input",
-                        "folio-comment-input",
+                        "pagewing-search-input",
+                        "pagewing-recent-input",
+                        "pagewing-page-input",
+                        "pagewing-password-input",
+                        "pagewing-help-input",
+                        "pagewing-outline-input",
+                        "pagewing-comment-input",
                     ]
                     .iter()
                     .any(|name| memory.has_focus(egui::Id::new(name)))
@@ -1233,7 +1233,7 @@ impl Folio {
                 self.comments.open = false;
                 self.comments.focus = false;
                 context.memory_mut(|memory| {
-                    memory.surrender_focus(egui::Id::new("folio-comment-input"))
+                    memory.surrender_focus(egui::Id::new("pagewing-comment-input"))
                 });
                 context.input_mut(|input| input.consume_key(modifiers, key));
                 continue;
@@ -1323,7 +1323,7 @@ impl Folio {
                 && !self.help
                 && (self.outline.focus
                     || context
-                        .memory(|memory| memory.has_focus(egui::Id::new("folio-outline-input"))))
+                        .memory(|memory| memory.has_focus(egui::Id::new("pagewing-outline-input"))))
             {
                 if key == Key::Enter {
                     self.outline.confirm = true;
@@ -1741,9 +1741,9 @@ impl Folio {
                 let compact = ui.available_width() < 1100.0;
                 toolbar::horizontal_bar(ui, "reader-controls", |ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("F").size(28.0).strong().color(ACCENT));
+                    ui.label(RichText::new("P").size(28.0).strong().color(ACCENT));
                     if !compact {
-                        ui.label(RichText::new("folio").size(21.0).strong());
+                        ui.label(RichText::new("Pagewing").size(21.0).strong());
                     }
                     ui.add_space(16.0);
                     if ui
@@ -1891,7 +1891,7 @@ impl Folio {
                     ui.label("Find");
                     let (response, focused_now) = shortcuts::text_input(
                         ui,
-                        egui::Id::new("folio-search-input"),
+                        egui::Id::new("pagewing-search-input"),
                         &mut self.search_focus,
                         &mut self.deferred_input,
                         egui::TextEdit::singleline(&mut self.query)
@@ -2437,7 +2437,7 @@ impl Folio {
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space((ui.available_height() * 0.18).max(30.0));
-                    ui.label(RichText::new("F").size(72.0).strong().color(ACCENT));
+                    ui.label(RichText::new("P").size(72.0).strong().color(ACCENT));
                     ui.add_space(8.0);
                     ui.heading(RichText::new("A little room to read.").size(30.0));
                     ui.add_space(12.0);
@@ -2593,7 +2593,7 @@ impl Folio {
                     ui.weak("Relative: +5, -5. PDF label: iv, A-3; =1 for label 1.");
                     let (response, focused_now) = shortcuts::text_input(
                         ui,
-                        egui::Id::new("folio-page-input"),
+                        egui::Id::new("pagewing-page-input"),
                         &mut self.goto_focus,
                         &mut self.deferred_input,
                         egui::TextEdit::singleline(&mut self.goto),
@@ -2630,7 +2630,7 @@ impl Folio {
                     ui.label("This document is encrypted.");
                     let (response, focused_now) = shortcuts::text_input(
                         ui,
-                        egui::Id::new("folio-password-input"),
+                        egui::Id::new("pagewing-password-input"),
                         &mut self.password_focus,
                         &mut self.deferred_input,
                         egui::TextEdit::singleline(&mut self.password).password(true),
@@ -2685,7 +2685,7 @@ impl Folio {
     }
 }
 
-impl eframe::App for Folio {
+impl eframe::App for Pagewing {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
         let popup_view = (
             self.id,

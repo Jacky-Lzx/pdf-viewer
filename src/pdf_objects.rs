@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn unresolved_pairs_consume_the_budget_and_trailing_keys_are_ignored() {
-        let mut bytes = include_bytes!("../assets/folio-guide.pdf").to_vec();
+        let mut bytes = include_bytes!("../assets/pagewing-guide.pdf").to_vec();
         for (original, replacement) in [
             (
                 b"/Nums [2 << /S /D >> 4 ".as_slice(),
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn invalid_entries_consume_the_scan_budget_and_valid_references_still_resolve() {
-        let mut bytes = include_bytes!("../assets/folio-guide.pdf").to_vec();
+        let mut bytes = include_bytes!("../assets/pagewing-guide.pdf").to_vec();
         let marker = b"/Annots [<< /Type /Annot ";
         let offset = bytes
             .windows(marker.len())

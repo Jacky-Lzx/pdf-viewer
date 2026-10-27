@@ -1,5 +1,5 @@
 [package]
-name = "folio"
+name = "pagewing"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
@@ -35,7 +35,7 @@ opt-level = 2
 opt-level = 2
 
 [[bin]]
-name = "folio"
+name = "pagewing"
 path = "src/main.rs"
 
 [[bench]]

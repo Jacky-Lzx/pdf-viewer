@@ -37,13 +37,13 @@ def fixture():
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-continuous-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-continuous-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
+        document = root / "pagewing-smoke.pdf"
         document.write_bytes(fixture())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config = root / "config/folio/library.json"
+        config = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -115,4 +115,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

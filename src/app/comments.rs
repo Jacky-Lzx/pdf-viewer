@@ -1,4 +1,4 @@
-use super::{Folio, shortcuts};
+use super::{Pagewing, shortcuts};
 use crate::annotations::{Comment, Comments};
 use eframe::egui::{self, Color32, Vec2};
 
@@ -24,7 +24,7 @@ impl CommentUi {
     }
 }
 
-impl Folio {
+impl Pagewing {
     pub(super) fn comment_change_blocked(&mut self) -> bool {
         if self.comments.busy() || self.comments.unsaved() {
             self.comments.open = true;
@@ -55,7 +55,7 @@ impl Folio {
             slot: None,
             kind: "Highlight".into(),
             contents: String::new(),
-            author: "Folio".into(),
+            author: "Pagewing".into(),
             rects: self.selection.rects.clone(),
             has_appearance: false,
             truncated: false,
@@ -128,7 +128,7 @@ impl Folio {
         let mut save = false;
         let mut delete = false;
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
-        egui::SidePanel::right("folio-comments-sidebar")
+        egui::SidePanel::right("pagewing-comments-sidebar")
             .default_width(320.0_f32.min(maximum))
             .width_range(220.0_f32.min(maximum)..=maximum)
             .resizable(true)
@@ -170,7 +170,7 @@ impl Folio {
                     ui.available_height()
                 };
                 egui::ScrollArea::vertical()
-                    .id_salt("folio-comment-list")
+                    .id_salt("pagewing-comment-list")
                     .auto_shrink([false, false])
                     .max_height(list_height)
                     .show(ui, |ui| {
@@ -208,7 +208,7 @@ impl Folio {
                     });
                 if self.comments.editor.is_some() {
                     egui::ScrollArea::vertical()
-                        .id_salt("folio-comment-editor")
+                        .id_salt("pagewing-comment-editor")
                         .show(ui, |ui| {
                             ui.separator();
                             let busy = self.comments.busy();
@@ -229,7 +229,7 @@ impl Folio {
                                 ui.add_enabled_ui(!busy && !read_only, |ui| {
                                     shortcuts::text_input(
                                         ui,
-                                        egui::Id::new("folio-comment-input"),
+                                        egui::Id::new("pagewing-comment-input"),
                                         &mut self.comments.focus,
                                         &mut self.deferred_input,
                                         egui::TextEdit::multiline(&mut comment.contents)
@@ -352,12 +352,12 @@ mod tests {
     use egui::{Context, Event, Key, Modifiers, RawInput};
     use std::time::{Duration, Instant};
 
-    fn frame(app: &mut Folio, context: &Context, events: Vec<Event>) -> egui::FullOutput {
+    fn frame(app: &mut Pagewing, context: &Context, events: Vec<Event>) -> egui::FullOutput {
         frame_size(app, context, events, Vec2::new(1180.0, 820.0))
     }
 
     fn frame_size(
-        app: &mut Folio,
+        app: &mut Pagewing,
         context: &Context,
         events: Vec<Event>,
         size: Vec2,
@@ -405,7 +405,7 @@ mod tests {
         ]
     }
 
-    fn wait(app: &mut Folio, context: &Context, condition: impl Fn(&Folio) -> bool) {
+    fn wait(app: &mut Pagewing, context: &Context, condition: impl Fn(&Pagewing) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !condition(app) {
             assert!(Instant::now() < deadline, "UI worker did not finish");
@@ -418,9 +418,9 @@ mod tests {
     fn select_add_type_save_and_reread_comments_through_the_ui_worker() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.pdf");
-        std::fs::write(&path, include_bytes!("../../assets/folio-guide.pdf")).unwrap();
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
         let context = Context::default();
-        let mut app = Folio::with_context(
+        let mut app = Pagewing::with_context(
             &context,
             Some(path.clone()),
             Some(1),
@@ -519,7 +519,7 @@ mod tests {
         assert!(!app.comments.unsaved());
         assert_ne!(
             std::fs::read(&path).unwrap(),
-            include_bytes!("../../assets/folio-guide.pdf")
+            include_bytes!("../../assets/pagewing-guide.pdf")
         );
         assert!(!root.path().join("source-annotated.pdf").exists());
         // Failed deletion must leave the selected comment available for retry.
@@ -586,7 +586,7 @@ mod tests {
     fn right_sidebar_shows_full_comments_from_all_pages_and_clicking_reveals_the_page() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("comments.pdf");
-        std::fs::write(&path, include_bytes!("../../assets/folio-guide.pdf")).unwrap();
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
         let long = format!("{}END OF FULL COMMENT", "A longer comment. ".repeat(9));
         for (page, contents) in [(0, long.clone()), (4, "Comment on another page".to_owned())] {
             let pdf = crate::document::load(&path, "").unwrap();
@@ -597,7 +597,7 @@ mod tests {
                     slot: None,
                     kind: "Highlight".into(),
                     contents,
-                    author: "Folio".into(),
+                    author: "Pagewing".into(),
                     rects: vec![hayro::kurbo::Rect::new(50.0, 80.0, 150.0, 100.0)],
                     has_appearance: false,
                     truncated: false,
@@ -608,7 +608,7 @@ mod tests {
             .unwrap();
         }
         let context = Context::default();
-        let mut app = Folio::with_context(
+        let mut app = Pagewing::with_context(
             &context,
             Some(path),
             Some(0),

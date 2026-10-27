@@ -1,9 +1,9 @@
-use super::{Folio, SELECTION_COLOR, selection_scroll};
+use super::{Pagewing, SELECTION_COLOR, selection_scroll};
 use crate::{navigation::Fit, render_plan::RenderView, selection::SelectionUnit};
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
 
-impl Folio {
+impl Pagewing {
     fn continuous_view(&self, pixels_per_point: f32) -> RenderView {
         RenderView {
             fit: self.reading.fit,

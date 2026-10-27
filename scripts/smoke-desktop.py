@@ -59,7 +59,7 @@ class Keyboard:
         self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         self.xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
 
-    def focus(self, title="folio-smoke.pdf"):
+    def focus(self, title="pagewing-smoke.pdf"):
         root, parent = ctypes.c_ulong(), ctypes.c_ulong()
         children, count = ctypes.POINTER(ctypes.c_ulong)(), ctypes.c_uint()
         self.x11.XQueryTree(self.display, self.x11.XDefaultRootWindow(self.display), ctypes.byref(root), ctypes.byref(parent), ctypes.byref(children), ctypes.byref(count))
@@ -174,7 +174,7 @@ class Keyboard:
         x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         window = x11.XCreateSimpleWindow(self.display, x11.XDefaultRootWindow(self.display), 0, 0, 1, 1, 0, 0, 0)
         atom = lambda name: x11.XInternAtom(self.display, name, 0)
-        property_atom = atom(b"FOLIO_SMOKE_CLIPBOARD")
+        property_atom = atom(b"PAGEWING_SMOKE_CLIPBOARD")
         try:
             clipboard = atom(b"CLIPBOARD")
             # A burst can reach this client before the reader has copied text.
@@ -200,13 +200,13 @@ class Keyboard:
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-smoke-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-smoke-") as directory:
         root = Path(directory)
-        fixture = Path(__file__).resolve().parent.parent / "assets/folio-guide.pdf"
-        document = root / "阅读指南-folio-smoke.pdf"
+        fixture = Path(__file__).resolve().parent.parent / "assets/pagewing-guide.pdf"
+        document = root / "阅读指南-pagewing-smoke.pdf"
         shutil.copyfile(fixture, document)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         log = open(root / "application.log", "w+")
         application = None
@@ -373,4 +373,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

@@ -16,12 +16,12 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-percentage-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-percentage-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+        document = root / "pagewing-smoke.pdf"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -99,7 +99,7 @@ def run(binary):
                 expect(4)
                 keyboard.key("w", ctrl=True)
                 keyboard.key("p", ctrl=True)
-                sequence("folio-smoke")
+                sequence("pagewing-smoke")
                 keyboard.key(0xFF0D)
                 time.sleep(0.4)
                 expect(4)
@@ -119,4 +119,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

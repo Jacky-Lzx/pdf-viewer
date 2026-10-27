@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn pdf_links_resolve_targets_and_flip_y_coordinates() {
-        let pdf = Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap();
+        let pdf = Pdf::new(include_bytes!("../assets/pagewing-guide.pdf").to_vec()).unwrap();
         let reader = LinkReader::new(&pdf);
         assert!(reader.destinations.get().is_none());
         assert!(reader.read(&pdf.pages()[1]).is_empty());
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn web_links_do_not_initialize_the_document_destination_index() {
-        let mut bytes = include_bytes!("../assets/folio-guide.pdf").to_vec();
+        let mut bytes = include_bytes!("../assets/pagewing-guide.pdf").to_vec();
         let offset = bytes
             .windows(7)
             .position(|value| value == b"/Dest [")
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn invalid_annotations_and_missing_references_do_not_hide_later_links() {
-        let source = include_bytes!("../assets/folio-guide.pdf");
+        let source = include_bytes!("../assets/pagewing-guide.pdf");
         for marker in [
             b"/Annots [<< /Type /Annot ".as_slice(),
             b">> << /Type /Annot ",
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn non_web_uri_actions_are_not_exposed_as_links() {
-        let mut bytes = include_bytes!("../assets/folio-guide.pdf").to_vec();
+        let mut bytes = include_bytes!("../assets/pagewing-guide.pdf").to_vec();
         let offset = bytes
             .windows(8)
             .position(|value| value == b"https://")

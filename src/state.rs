@@ -104,7 +104,26 @@ pub struct Library {
 
 impl Library {
     pub fn load(path: &Path) -> Self {
+        let legacy = (path == config_path()).then(|| {
+            directories::ProjectDirs::from("dev", "folio", "Folio")
+                .map(|dirs| dirs.config_dir().join("library.json"))
+                .unwrap_or_else(|| PathBuf::from(".folio-library.json"))
+        });
+        Self::load_with_fallback(path, legacy.as_deref())
+    }
+
+    fn load_with_fallback(path: &Path, legacy: Option<&Path>) -> Self {
         std::fs::read(path)
+            .or_else(|error| {
+                // Import the old library only until Pagewing has saved its own state.
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && let Some(legacy) = legacy
+                {
+                    std::fs::read(legacy)
+                } else {
+                    Err(error)
+                }
+            })
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default()
@@ -128,14 +147,63 @@ impl Library {
 }
 
 pub fn config_path() -> PathBuf {
-    directories::ProjectDirs::from("dev", "folio", "Folio")
+    directories::ProjectDirs::from("dev", "pagewing", "Pagewing")
         .map(|dirs| dirs.config_dir().join("library.json"))
-        .unwrap_or_else(|| PathBuf::from(".folio-library.json"))
+        .unwrap_or_else(|| PathBuf::from(".pagewing-library.json"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renamed_app_imports_legacy_library_without_modifying_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("folio/library.json");
+        let current = dir.path().join("pagewing/library.json");
+        let mut library = Library::default();
+        library.remember(ReadingState {
+            path: "paper.pdf".into(),
+            page: 7,
+            bookmarks: [2, 7].into(),
+            ..Default::default()
+        });
+        library.save(&legacy).unwrap();
+        let original = std::fs::read(&legacy).unwrap();
+
+        let restored = Library::load_with_fallback(&current, Some(&legacy));
+        assert_eq!(restored.recent[0].page, 7);
+        assert_eq!(restored.recent[0].bookmarks, [2, 7].into());
+        restored.save(&current).unwrap();
+        assert_eq!(Library::load(&current).recent[0].page, 7);
+        assert_eq!(std::fs::read(&legacy).unwrap(), original);
+    }
+
+    #[test]
+    fn current_library_takes_precedence_over_legacy_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("folio/library.json");
+        let current = dir.path().join("pagewing/library.json");
+        let mut library = Library::default();
+        library.remember(ReadingState {
+            path: "old.pdf".into(),
+            ..Default::default()
+        });
+        library.save(&legacy).unwrap();
+        Library::default().save(&current).unwrap();
+
+        assert!(
+            Library::load_with_fallback(&current, Some(&legacy))
+                .recent
+                .is_empty()
+        );
+        std::fs::write(&current, b"invalid json").unwrap();
+        assert!(
+            Library::load_with_fallback(&current, Some(&legacy))
+                .recent
+                .is_empty()
+        );
+    }
 
     #[test]
     fn library_roundtrip_preserves_unicode_paths_and_bookmarks() {

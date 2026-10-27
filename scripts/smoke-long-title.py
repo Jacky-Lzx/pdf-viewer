@@ -17,7 +17,7 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def make_pdf():
-    source = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
+    source = (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes()
     title = "Straße — " + "中文😀𝄞" * 12000 + " after-title-limit"
     encoded = b"\xfe\xff" + title.encode("utf-16-be")
     replacement = b"/Title <" + encoded.hex().encode() + b">"
@@ -41,11 +41,11 @@ def make_pdf():
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-long-title-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-long-title-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
+        document = root / "pagewing-smoke.pdf"
         document.write_bytes(make_pdf())
-        config = root / "config/folio/library.json"
+        config = root / "config/pagewing/library.json"
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         keyboard = Keyboard()
@@ -109,4 +109,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

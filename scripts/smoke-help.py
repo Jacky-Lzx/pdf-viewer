@@ -18,13 +18,13 @@ TAB, ENTER, ESCAPE = 0xFF09, 0xFF0D, 0xFF1B
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-help-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-help-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+        document = root / "pagewing-smoke.pdf"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -66,7 +66,7 @@ def run(binary):
                 keyboard.key(ENTER)
                 def copied():
                     result = keyboard.clipboard()
-                    return result if result.startswith("Folio keyboard shortcuts\n\n") and all(row in result for row in required) and all(row not in result for row in excluded) else None
+                    return result if result.startswith("Pagewing keyboard shortcuts\n\n") and all(row in result for row in required) and all(row not in result for row in excluded) else None
                 try:
                     return wait_for(copied, "filtered shortcut rows copied with Tab/Enter")
                 except AssertionError:
@@ -138,4 +138,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

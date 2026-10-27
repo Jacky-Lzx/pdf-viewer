@@ -1,8 +1,8 @@
-use super::Folio;
+use super::Pagewing;
 use eframe::egui::{self, Vec2};
 use std::fmt::Write;
 
-impl Folio {
+impl Pagewing {
     pub(super) fn show_properties(&mut self, context: &egui::Context) {
         if self.nav.count == 0 {
             return;

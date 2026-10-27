@@ -34,8 +34,8 @@ def rc4(key, value):
 
 def make_pdf(password="jkgdi"):
     padded = (password.encode("latin-1") + PADDING)[:32]
-    owner = rc4(md5((b"folio-owner" + PADDING)[:32])[:5], padded)
-    identifier = md5(b"Folio deterministic encrypted test document")
+    owner = rc4(md5((b"pagewing-owner" + PADDING)[:32])[:5], padded)
+    identifier = md5(b"Pagewing deterministic encrypted test document")
     permissions = -4
     key = md5(padded + owner + struct.pack("<i", permissions) + identifier)[:5]
     user = rc4(key, PADDING)
@@ -67,6 +67,6 @@ def make_pdf(password="jkgdi"):
 
 
 if __name__ == "__main__":
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/folio-encrypted.pdf")
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/pagewing-encrypted.pdf")
     path.write_bytes(make_pdf())
     print(path)

@@ -15,7 +15,7 @@
 三轮平均从约 3.8 ms/页降至约 2.5 ms/页，耗时降低约 34%。这个测试包含解析后的每次页面渲染与像素输出，不包含 GPU 纹理上传和窗口绘制；文档、字体与字形缓存跨页复用。
 
 ```sh
-target/release/folio --benchmark assets/folio-guide.pdf 20
+target/release/pagewing --benchmark assets/pagewing-guide.pdf 20
 ```
 
 ## 实际长文档

@@ -1,4 +1,4 @@
-use super::Folio;
+use super::Pagewing;
 use crate::{
     synctex::{self, Options, PageGeometry, Target},
     synctex_ipc::{Request, Server},
@@ -36,7 +36,7 @@ impl SyncUi {
     }
 }
 
-impl Folio {
+impl Pagewing {
     pub fn configure_synctex(&mut self, request: Request, context: &egui::Context) {
         if let Some(editor) = request.options.editor {
             self.synctex.options.editor = Some(editor);
@@ -130,13 +130,13 @@ impl Folio {
         };
         let options = self.synctex.options.clone();
         let editor = options.editor.clone().or_else(|| {
-            std::env::var("FOLIO_EDITOR")
+            std::env::var("PAGEWING_EDITOR")
                 .ok()
                 .and_then(|s| synctex::editor_command(&s).ok())
         });
         if editor.is_none() && options.position_command.is_none() {
             self.notify(
-                "Set --inverse-search 'code --goto %f:%l:%c' or FOLIO_EDITOR to jump to source",
+                "Set --inverse-search 'code --goto %f:%l:%c' or PAGEWING_EDITOR to jump to source",
             );
             return;
         }
@@ -207,7 +207,7 @@ mod tests {
     use egui::{Event, Modifiers, Pos2, RawInput, Vec2};
     use std::{fs, path::Path, process::Command};
 
-    fn frame(app: &mut Folio, context: &egui::Context, events: Vec<Event>) {
+    fn frame(app: &mut Pagewing, context: &egui::Context, events: Vec<Event>) {
         let _ = context.run(
             RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -226,7 +226,7 @@ mod tests {
         );
     }
 
-    fn wait(app: &mut Folio, context: &egui::Context, ready: impl Fn(&Folio) -> bool) {
+    fn wait(app: &mut Pagewing, context: &egui::Context, ready: impl Fn(&Pagewing) -> bool) {
         let until = Instant::now() + Duration::from_secs(8);
         while !ready(app) {
             assert!(
@@ -243,9 +243,9 @@ mod tests {
     fn forward_request_waits_for_load_and_reuses_window_via_ipc() {
         let directory = tempfile::tempdir().unwrap();
         let pdf = directory.path().join("book.pdf");
-        fs::copy("assets/folio-guide.pdf", &pdf).unwrap();
+        fs::copy("assets/pagewing-guide.pdf", &pdf).unwrap();
         let context = egui::Context::default();
-        let mut app = Folio::with_context(
+        let mut app = Pagewing::with_context(
             &context,
             Some(pdf.clone()),
             None,
@@ -281,7 +281,7 @@ mod tests {
         let context = egui::Context::default();
         let directory = tempfile::tempdir().unwrap();
         let mut app =
-            Folio::with_context(&context, None, None, directory.path().join("library.json"));
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
         let output = context.run(RawInput::default(), |context| {
             app.configure_synctex(
                 Request {
@@ -318,7 +318,7 @@ mod tests {
     #[ignore = "requires pdflatex, synctex and python3"]
     fn real_tex_forward_reverse_through_egui() {
         let directory = tempfile::Builder::new()
-            .prefix("folio synctex 中文 ")
+            .prefix("pagewing synctex 中文 ")
             .tempdir()
             .unwrap();
         let root = directory.path();
@@ -349,7 +349,7 @@ mod tests {
         let target = synctex::forward(&pdf, &source, &Options::default()).unwrap();
         assert_eq!(target.page, 1);
         let context = egui::Context::default();
-        let mut app = Folio::with_context(&context, Some(pdf), None, root.join("library.json"));
+        let mut app = Pagewing::with_context(&context, Some(pdf), None, root.join("library.json"));
         let capture = root.join("editor.json");
         let editor = vec!["python3".into(), "-c".into(), "import sys,json,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))".into(), capture.to_str().unwrap().into(), "%f".into(), "%l".into(), "%c".into()];
         for continuous in [false, true] {

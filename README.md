@@ -1,29 +1,29 @@
-<img src="assets/icon.svg" width="64" height="64" alt="Folio">
+<img src="assets/icon.svg" width="64" height="64" alt="Pagewing">
 
-# Folio
+# Pagewing
 
 用 Rust 编写的原生 PDF 阅读器，支持 Linux（Wayland / X11）和 macOS。使用 eframe / egui 构建界面，hayro 在后台进行纯 Rust PDF 渲染，无需安装 PDFium 或 Poppler。
 
-<img src="assets/screenshot.png" width="1000" alt="Folio：目录筛选、缩略图、中文文件名和 Vim 链接提示">
+<img src="assets/screenshot.png" width="1000" alt="Pagewing：章节目录、页面缩略图和 Vim 链接提示">
 
 ## 运行
 
 需要 Rust **1.92 或更新版本**。
 
 ```sh
-cargo run --release -- assets/folio-guide.pdf
+cargo run --release -- assets/pagewing-guide.pdf
 # 打开空白阅读器，然后选择或拖入自己的文档
 cargo run --release
 # 安装命令行程序
 cargo install --path . --locked
-folio /path/to/book.pdf
+pagewing /path/to/book.pdf
 # 从指定的物理页开始阅读
-folio --page 12 /path/to/book.pdf
+pagewing --page 12 /path/to/book.pdf
 # 文件名以 - 开头时，用 -- 结束选项解析
-folio -- '-notes.pdf'
-folio --version
+pagewing -- '-notes.pdf'
+pagewing --version
 # 在终端查看页数、格式、大小及文档元数据
-folio --info /path/to/book.pdf
+pagewing --info /path/to/book.pdf
 ```
 
 Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcommon。Ubuntu / Debian 可安装：
@@ -32,24 +32,24 @@ Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcom
 sudo apt install build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev
 ```
 
-NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Folio.app`。
+NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Pagewing.app`。
 
-Linux 可安装为当前用户的桌面应用，随后从应用菜单或 PDF 的“打开方式”选择 Folio：
+Linux 可安装为当前用户的桌面应用，随后从应用菜单或 PDF 的“打开方式”选择 Pagewing：
 
 ```sh
 cargo build --release --locked
 bash scripts/install-linux.sh
 # 自定义程序安装目录
-bash scripts/install-linux.sh --prefix /path/to/folio
+bash scripts/install-linux.sh --prefix /path/to/pagewing
 # 卸载默认安装，保留阅读进度
 bash scripts/install-linux.sh --uninstall
 # 自定义安装使用相同的 prefix 和 XDG_DATA_HOME 卸载
-bash scripts/install-linux.sh --prefix /path/to/folio --uninstall
+bash scripts/install-linux.sh --prefix /path/to/pagewing --uninstall
 ```
 
-默认二进制安装到 `~/.local/bin/folio`；桌面文件和图标使用 `$XDG_DATA_HOME`，未设置时使用 `PREFIX/share`（默认 `~/.local/share`）。桌面入口使用完整路径，支持安装目录中的空格、中文及特殊字符。再次运行脚本会原子替换二进制，已有窗口可以继续阅读；终端中使用 `folio` 时需将安装目录的 `bin` 加入 `PATH`。安装脚本不改变默认 PDF 应用。
+默认二进制安装到 `~/.local/bin/pagewing`；桌面文件和图标使用 `$XDG_DATA_HOME`，未设置时使用 `PREFIX/share`（默认 `~/.local/share`）。桌面入口使用完整路径，支持安装目录中的空格、中文及特殊字符。再次运行脚本会原子替换二进制，已有窗口可以继续阅读；终端中使用 `pagewing` 时需将安装目录的 `bin` 加入 `PATH`。安装脚本不改变默认 PDF 应用。
 
-中文文件名、目录和搜索框会自动使用系统中文字体。Linux 可安装 `fonts-noto-cjk`；macOS 使用系统字体。也可以设置 `FOLIO_FONT=/path/to/font.otf` 指定回退字体，字体在后台加载。
+中文文件名、目录和搜索框会自动使用系统中文字体。Linux 可安装 `fonts-noto-cjk`；macOS 使用系统字体。也可以设置 `PAGEWING_FONT=/path/to/font.otf` 指定回退字体，字体在后台加载。
 
 命令行一次打开一份文档。文本导出和图像导出的页码从 1 开始，图像宽度为 1–16384 像素，基准轮数为 1–1000；缺少参数、数值越界或参数过多时，会在读取 PDF 前报告错误。Linux 和 macOS 的非 UTF-8 文件路径按原始路径保留。
 
@@ -57,45 +57,45 @@ PNG 导出在读取和渲染前检查输出是否指向源 PDF；同路径、相
 
 命令行文本、帮助和测量结果可接入管道；下游提前关闭时正常退出，不打印 Broken pipe 崩溃。其他标准输出写入错误仍会报告并返回失败。
 
-`folio --info document.pdf` 输出文件路径、PDF 版本、字节数、页数及可用的标题、作者等元数据，无需图形会话或页面渲染，不写入阅读状态。空元数据字段省略；超长字段按文档信息窗口相同的规则截断。需要密码的 PDF 会报告加载错误。
+`pagewing --info document.pdf` 输出文件路径、PDF 版本、字节数、页数及可用的标题、作者等元数据，无需图形会话或页面渲染，不写入阅读状态。空元数据字段省略；超长字段按文档信息窗口相同的规则截断。需要密码的 PDF 会报告加载错误。
 
 非 UTF-8 路径同样支持最近文档、阅读进度、书签和命名位置的保存与恢复；界面显示的替代字符不会改变实际文件路径。
 
-`folio --page 12 [--] document.pdf` 从第 12 个物理页打开，页码从 1 开始，超过文档页数时打开末页。指定页会覆盖上次页码和页内滚动，保留已保存的缩放、旋转、书签与命名位置；加密文档在解锁后定位。普通启动继续恢复上次阅读位置。
+`pagewing --page 12 [--] document.pdf` 从第 12 个物理页打开，页码从 1 开始，超过文档页数时打开末页。指定页会覆盖上次页码和页内滚动，保留已保存的缩放、旋转、书签与命名位置；加密文档在解锁后定位。普通启动继续恢复上次阅读位置。
 
 文档被编辑器或编译工具更新后，会在文件变化稳定约一秒后自动刷新，保留当前页码、缩放、旋转和阅读位置，不切换窗口焦点。批注编辑或保存、文本选择及鼠标操作期间暂缓刷新，结束操作后再加载；隐藏批注面板仍会保留草稿并暂缓刷新。文件尚未写完或暂时被移走时，加载失败仍可继续阅读旧内容，下一次文件变化后会自动重试。需要重新输入密码时保留旧内容，按 `Ctrl/Cmd+r` 手动解锁新版 PDF。页面顶部的 Reload / Dismiss 可立即重试或忽略当前变化，后续更新仍会检测。
 
 ## SyncTeX 双向搜索
 
-需要安装 TeX Live / MacTeX，并用 `-synctex=1` 编译，生成 PDF 及对应的 `.synctex.gz`（也支持未压缩的 `.synctex`）。Folio 调用 `synctex` 查询；可用 `FOLIO_SYNCTEX=/path/to/synctex` 指定程序。
+需要安装 TeX Live / MacTeX，并用 `-synctex=1` 编译，生成 PDF 及对应的 `.synctex.gz`（也支持未压缩的 `.synctex`）。Pagewing 调用 `synctex` 查询；可用 `PAGEWING_SYNCTEX=/path/to/synctex` 指定程序。
 
 ```sh
 # 正向搜索：源码第 42 行、第 1 列 → PDF，列不确定时传 0
-folio --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
+pagewing --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
 # 配置反向搜索：在页面上 Ctrl+单击（macOS：Cmd+单击）跳回编辑器
-folio --inverse-search 'code --goto "%f:%l:%c"' /path/to/build/main.pdf
+pagewing --inverse-search 'code --goto "%f:%l:%c"' /path/to/build/main.pdf
 # 可与正向搜索一起传入
-folio --inverse-search 'nvim --server /tmp/nvim.sock --remote-silent +%l %f' \
+pagewing --inverse-search 'nvim --server /tmp/nvim.sock --remote-silent +%l %f' \
   --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
 # SyncTeX 文件与 PDF 不在同一目录时
-folio --synctex-directory /path/to/aux \
+pagewing --synctex-directory /path/to/aux \
   --forward-search 42 1 /path/to/main.tex /path/to/build/main.pdf
 ```
 
-正向搜索会复用同一 PDF 已打开的 Folio 窗口，重新加载编译结果、定位并短暂高亮目标；没有窗口时打开新窗口。反向搜索支持单页、连续滚动、缩放和旋转，选择模式中先按 `Escape` 退出。未保存的 comment 会阻止正向搜索重载，请先保存或放弃草稿。
+正向搜索会复用同一 PDF 已打开的 Pagewing 窗口，重新加载编译结果、定位并短暂高亮目标；没有窗口时打开新窗口。反向搜索支持单页、连续滚动、缩放和旋转，选择模式中先按 `Escape` 退出。未保存的 comment 会阻止正向搜索重载，请先保存或放弃草稿。
 
-编辑器命令中的 `%f`、`%l`、`%c` 分别是完整源码路径、从 1 开始的行列，`%%` 表示百分号；SyncTeX 未提供列时使用 1。命令按引号拆分后直接启动程序，路径中的空格和特殊字符会作为参数保留，不执行 shell 管道或重定向。编辑器程序需在 `PATH` 中或使用完整路径。`--inverse-search` 的配置在当前窗口中保留；也可设置环境变量 `FOLIO_EDITOR='code --goto "%f:%l:%c"'` 为默认命令。编辑器复用同一窗口时，省略 `--inverse-search` 会保留该窗口已有配置。文件名以 `-` 开头时，在 PDF 路径前加 `--`。
+编辑器命令中的 `%f`、`%l`、`%c` 分别是完整源码路径、从 1 开始的行列，`%%` 表示百分号；SyncTeX 未提供列时使用 1。命令按引号拆分后直接启动程序，路径中的空格和特殊字符会作为参数保留，不执行 shell 管道或重定向。编辑器程序需在 `PATH` 中或使用完整路径。`--inverse-search` 的配置在当前窗口中保留；也可设置环境变量 `PAGEWING_EDITOR='code --goto "%f:%l:%c"'` 为默认命令。编辑器复用同一窗口时，省略 `--inverse-search` 会保留该窗口已有配置。文件名以 `-` 开头时，在 PDF 路径前加 `--`。
 
 ### TeXquill / Neovim 接入
 
-使用支持 Folio 的 tex-tools.nvim，选择 `lsp = 'texquill'` 和 `viewer.method = 'folio'`，并将 `viewer.executable` 指向 Folio 二进制。`TexToolsForwardSearch` 会调用当前 TeXquill 会话，将结果直接交给 Folio；Cmd/Ctrl+单击由同一 Neovim 会话调用 `latex.inverseSearch` 后跳转。`TexToolsView` 同样自动配置回调，`viewer.focus = false` 保持编辑器焦点。需先保存并成功编译；LSP 继续负责根文件、产物目录和过期检查。
+使用支持 Pagewing 的 tex-tools.nvim，选择 `lsp = 'texquill'` 和 `viewer.method = 'pagewing'`，并将 `viewer.executable` 指向 Pagewing 二进制。`TexToolsForwardSearch` 会调用当前 TeXquill 会话，将结果直接交给 Pagewing；Cmd/Ctrl+单击由同一 Neovim 会话调用 `latex.inverseSearch` 后跳转。`TexToolsView` 同样自动配置回调，`viewer.focus = false` 保持编辑器焦点。需先保存并成功编译；LSP 继续负责根文件、产物目录和过期检查。
 
 ```lua
 require('tex-tools').setup({
   lsp = 'texquill',
   viewer = {
-    method = 'folio',
-    executable = '/path/to/folio',
+    method = 'pagewing',
+    executable = '/path/to/pagewing',
     focus = false,
   },
 })
@@ -254,7 +254,7 @@ require('tex-tools').setup({
 - 没有输入或后台结果时，界面不持续重绘。
 - 阅读进度在独立后台线程序列化并原子替换配置文件，队列只保留最新待写快照；写入失败后显示提示并重试，正常退出会等待最新状态写完。
 
-阅读状态保存在系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/folio/library.json`（默认 `~/.config/folio/library.json`），macOS 为 `~/Library/Application Support/dev.folio.Folio/library.json`。密码不持久化。
+阅读状态保存在系统应用配置目录：Linux 为 `$XDG_CONFIG_HOME/pagewing/library.json`（默认 `~/.config/pagewing/library.json`），macOS 为 `~/Library/Application Support/dev.pagewing.Pagewing/library.json`。首次启动且新配置尚不存在时，会读取原 Folio 的阅读状态；后续保存写入 Pagewing 目录，原文件保留。密码不持久化。
 
 ## 验证与性能测量
 
@@ -262,10 +262,10 @@ require('tex-tools').setup({
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run --release -- --render assets/folio-guide.pdf /tmp/page.png 1 1200
-cargo run --release -- --text assets/folio-guide.pdf 1
-cargo run --release -- --info assets/folio-guide.pdf
-cargo run --release -- --benchmark assets/folio-guide.pdf 5
+cargo run --release -- --render assets/pagewing-guide.pdf /tmp/page.png 1 1200
+cargo run --release -- --text assets/pagewing-guide.pdf 1
+cargo run --release -- --info assets/pagewing-guide.pdf
+cargo run --release -- --benchmark assets/pagewing-guide.pdf 5
 # 像素旋转专项基准，交替比较原实现与当前实现
 cargo bench --locked --bench rotation -- 9
 # 夜间反色与旋转：对比原两遍处理和合并处理
@@ -305,41 +305,41 @@ cargo bench --locked --bench text_cache -- 9
 # 页面与预览纹理缓存，包含 egui 对象释放和可见纹理保护
 cargo bench --locked --bench texture_cache -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
-xvfb-run -a python3 scripts/smoke-install-linux.py target/release/folio
-xvfb-run -a python3 scripts/smoke-desktop.py target/release/folio
-xvfb-run -a python3 scripts/smoke-cli.py target/release/folio
-xvfb-run -a python3 scripts/smoke-outline.py target/release/folio
-xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/folio
-xvfb-run -a python3 scripts/smoke-long-title.py target/release/folio
-xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/folio
-xvfb-run -a python3 scripts/smoke-page-size.py target/release/folio
-xvfb-run -a python3 scripts/smoke-continuous.py target/release/folio
-xvfb-run -a python3 scripts/smoke-fit-height.py target/release/folio
-xvfb-run -a python3 scripts/smoke-destinations.py target/release/folio
-xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/folio
-xvfb-run -a python3 scripts/smoke-link-hints.py target/release/folio
-xvfb-run -a python3 scripts/smoke-link-menu.py target/release/folio
-xvfb-run -a python3 scripts/smoke-link-copy.py target/release/folio
-xvfb-run -a python3 scripts/smoke-selection.py target/release/folio
-xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/folio
-xvfb-run -a python3 scripts/smoke-search-load.py target/release/folio
-xvfb-run -a python3 scripts/smoke-search-options.py target/release/folio
-xvfb-run -a python3 scripts/smoke-search-dense.py target/release/folio
-xvfb-run -a python3 scripts/smoke-persistence.py target/release/folio
-xvfb-run -a python3 scripts/smoke-paths.py target/release/folio
-xvfb-run -a python3 scripts/smoke-recent.py target/release/folio
-xvfb-run -a python3 scripts/smoke-close.py target/release/folio
-xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/folio
-xvfb-run -a python3 scripts/smoke-properties.py target/release/folio
-xvfb-run -a python3 scripts/smoke-file-watch.py target/release/folio
-xvfb-run -a python3 scripts/smoke-help.py target/release/folio
-xvfb-run -a python3 scripts/smoke-input-burst.py target/release/folio
-xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/folio
-xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/folio
-xvfb-run -a python3 scripts/smoke-password.py target/release/folio
-xvfb-run -a python3 scripts/smoke-vim-view.py target/release/folio
-xvfb-run -a python3 scripts/smoke-percentage.py target/release/folio
-xvfb-run -a python3 scripts/smoke-relative.py target/release/folio
+xvfb-run -a python3 scripts/smoke-install-linux.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-desktop.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-cli.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-outline.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-outline-keyboard.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-long-title.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-bookmarks.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-page-size.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-continuous.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-fit-height.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-destinations.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-thumbnails.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-link-hints.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-link-menu.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-link-copy.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-selection.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-selection-scroll.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-search-load.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-search-options.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-search-dense.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-persistence.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-paths.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-recent.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-close.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-load-cancel.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-properties.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-file-watch.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-help.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-input-burst.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-mouse-input.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-mouse-history.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-password.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-vim-view.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-percentage.py target/release/pagewing
+xvfb-run -a python3 scripts/smoke-relative.py target/release/pagewing
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

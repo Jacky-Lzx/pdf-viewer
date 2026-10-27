@@ -17,12 +17,12 @@ metadata_pdf = runpy.run_path(str(SCRIPTS / "smoke-properties.py"))["metadata_pd
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-file-watch-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-file-watch-") as directory:
         root = Path(directory)
-        source = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
-        document = root / "folio-smoke.pdf"
+        source = (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes()
+        document = root / "pagewing-smoke.pdf"
         document.write_bytes(metadata_pdf(source, "Edition one"))
-        config = root / "config/folio/library.json"
+        config = root / "config/pagewing/library.json"
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({"dark": False, "sidebar": False, "recent": [{
             "path": str(document), "page": 2, "fit": {"Custom": 1.8},
@@ -125,4 +125,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

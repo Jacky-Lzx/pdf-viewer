@@ -21,7 +21,7 @@ fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
-    let pdf = Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap();
+    let pdf = Pdf::new(include_bytes!("../assets/pagewing-guide.pdf").to_vec()).unwrap();
     let caches = [RenderCache::new(), RenderCache::new()];
     let render = |current: usize, width, turns, night| -> ColorImage {
         if current == 0 {

@@ -14,15 +14,15 @@ encrypted_pdf = runpy.run_path(str(SCRIPTS / "make-encrypted.py"))["make_pdf"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-info-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-info-") as directory:
         root = Path(directory)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"))
-        mac_state = Path.home() / "Library/Application Support/dev.folio.Folio/library.json"
+        mac_state = Path.home() / "Library/Application Support/dev.pagewing.Pagewing/library.json"
         mac_before = mac_state.read_bytes() if sys.platform == "darwin" and mac_state.exists() else None
-        for name in ("DISPLAY", "WAYLAND_DISPLAY", "FOLIO_FONT"):
+        for name in ("DISPLAY", "WAYLAND_DISPLAY", "PAGEWING_FONT"):
             environment.pop(name, None)
-        source = (SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes()
+        source = (SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes()
         document = root / "-中文 notes.pdf"
         document.write_bytes(metadata_pdf(source, "中文 😀 reading"))
         before = document.read_bytes()
@@ -40,7 +40,7 @@ def run(binary):
         text = invoke(["--info", document.name])
         assert text.splitlines() == [
             f"File: {document.name}", "Format: PDF 1.4", f"Size: {len(before)} bytes", "Pages: 6",
-            "Title: 中文 😀 reading", "Author: Author—Name", "Subject: Reading", "Creator: Folio smoke",
+            "Title: 中文 😀 reading", "Author: Author—Name", "Subject: Reading", "Creator: Pagewing smoke",
         ], text
         assert document.read_bytes() == before
         clean = root / "clean.pdf"
@@ -98,4 +98,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

@@ -24,13 +24,13 @@ def text(value):
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-input-burst-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-input-burst-") as directory:
         root = Path(directory)
-        paths = [root / name for name in ("folio-smoke.pdf", "plan-a.pdf", "plan-z.pdf")]
+        paths = [root / name for name in ("pagewing-smoke.pdf", "plan-a.pdf", "plan-z.pdf")]
         for path in paths:
-            shutil.copyfile(SCRIPTS.parent / "assets/folio-guide.pdf", path)
+            shutil.copyfile(SCRIPTS.parent / "assets/pagewing-guide.pdf", path)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"recent": [{"path": str(path), "page": index * 2} for index, path in enumerate(paths)]}))
         keyboard = Keyboard()
@@ -159,4 +159,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

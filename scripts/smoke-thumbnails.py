@@ -17,16 +17,16 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-thumbnails-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-thumbnails-") as directory:
         root = Path(directory)
         fixture = runpy.run_path(str(SCRIPTS / "make-sample.py"))
         fixture["PAGES"][:] = (fixture["PAGES"] * 14)[:80]
         # Preserve xref offsets while removing chapters, keeping controls near the top.
         data = re.sub(rb"/Outlines \d+ 0 R", lambda match: b" " * len(match.group()), bytes(fixture["make_pdf"]()), count=1)
-        document = root / "folio-smoke.pdf"
+        document = root / "pagewing-smoke.pdf"
         document.write_bytes(data)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         application = None
         with open(root / "application.log", "w+") as log:
@@ -137,4 +137,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

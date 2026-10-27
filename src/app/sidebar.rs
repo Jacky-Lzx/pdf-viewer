@@ -1,8 +1,8 @@
-use super::{ACCENT, Folio, MarkAction};
+use super::{ACCENT, MarkAction, Pagewing};
 use crate::navigation::Fit;
 use eframe::egui::{self, Color32, RichText, Vec2};
 
-impl Folio {
+impl Pagewing {
     pub(super) fn focus_contents(&mut self) {
         if self.outline.is_empty() {
             self.notify("This document has no chapter outline");
@@ -57,7 +57,7 @@ impl Folio {
                     .clicked();
                 let (response, _) = super::shortcuts::text_input(
                     ui,
-                    egui::Id::new("folio-outline-input"),
+                    egui::Id::new("pagewing-outline-input"),
                     &mut self.outline.focus,
                     &mut self.deferred_input,
                     egui::TextEdit::singleline(&mut self.outline.query)

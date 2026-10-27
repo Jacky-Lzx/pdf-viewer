@@ -16,25 +16,25 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-paths-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-paths-") as directory:
         root = Path(directory)
         # These directories have identical lossy display text but distinct bytes.
-        paths = [root / os.fsdecode(b"docs-\xff") / "folio-smoke.pdf",
-                 root / os.fsdecode(b"docs-\xfe") / "folio-smoke.pdf",
+        paths = [root / os.fsdecode(b"docs-\xff") / "pagewing-smoke.pdf",
+                 root / os.fsdecode(b"docs-\xfe") / "pagewing-smoke.pdf",
                  root / "ordinary.pdf"]
         for path in paths:
             path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(SCRIPTS.parent / "assets/folio-guide.pdf", path)
+            shutil.copyfile(SCRIPTS.parent / "assets/pagewing-guide.pdf", path)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         application = None
         with open(root / "application.log", "w+") as log:
             def launch(path=None):
                 process = subprocess.Popen([str(binary)] + ([str(path)] if path else []),
                                            env=environment, stdout=log, stderr=log)
-                wait_for(lambda: keyboard.focus(path.name if path else "Folio"), "path reader window")
+                wait_for(lambda: keyboard.focus(path.name if path else "Pagewing"), "path reader window")
                 return process
 
             def saved(path, page, rotation, mark=None):
@@ -119,4 +119,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

@@ -16,12 +16,12 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-load-cancel-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-load-cancel-") as directory:
         root = Path(directory)
-        slow, document = root / "unfinished.pdf", root / "folio-smoke.pdf"
+        slow, document = root / "unfinished.pdf", root / "pagewing-smoke.pdf"
         os.mkfifo(slow)
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
-        config = root / "config/folio/library.json"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
+        config = root / "config/pagewing/library.json"
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({"dark": False, "sidebar": False,
                                       "recent": [{"path": str(document), "page": 2}]}))
@@ -56,7 +56,7 @@ def run(binary):
                 assert keyboard.pixel((350, 100))[0] < 245, "slow input must still be loading"
                 keyboard.key("w", ctrl=True)
                 keyboard.key("p", ctrl=True)
-                for character in "folio-smoke":
+                for character in "pagewing-smoke":
                     keyboard.key(character, delay=0)
                 keyboard.key(0xFF0D)
                 wait_for(keyboard.focus, "replacement PDF selected")
@@ -101,4 +101,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

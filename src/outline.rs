@@ -498,7 +498,7 @@ mod tests {
     }
     #[test]
     fn outline_resolves_direct_action_and_named_destinations() {
-        let pdf = Pdf::new(include_bytes!("../assets/folio-guide.pdf").to_vec()).unwrap();
+        let pdf = Pdf::new(include_bytes!("../assets/pagewing-guide.pdf").to_vec()).unwrap();
         let outline = read(&pdf);
         assert_eq!(outline.len(), 6);
         assert_eq!(
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn malformed_cyclic_outline_terminates() {
-        let bytes = include_bytes!("../assets/folio-guide.pdf");
+        let bytes = include_bytes!("../assets/pagewing-guide.pdf");
         let mut modified = bytes.to_vec();
         let offset = modified
             .windows(b"/Next 19 0 R".len())

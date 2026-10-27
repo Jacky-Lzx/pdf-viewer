@@ -8,7 +8,7 @@ def pdf_string(text):
 
 
 PAGES = [
-    ("A little room to read.", "WELCOME TO FOLIO", [
+    ("A little room to read.", "WELCOME TO PAGEWING", [
         "A native PDF reader, written in Rust.",
         "Designed for Linux and macOS. Made for your keyboard.",
         "", "Press j and k to scroll. Press J and K to turn pages.",
@@ -32,7 +32,7 @@ PAGES = [
         "r / Shift+r       Rotate in either direction.",
         "d                 Switch the interface theme.",
         "i                 Invert the page for night reading.",
-        "", "Folio remembers your page, scroll, zoom and rotation.",
+        "", "Pagewing remembers your page, scroll, zoom and rotation.",
     ]),
     ("A thought worth keeping.", "SEARCH AND BOOKMARKS", [
         "/                 Search the document.",
@@ -46,7 +46,7 @@ PAGES = [
         "Search is case-insensitive and understands Unicode text.",
     ]),
     ("Keep the flow.", "UNDER THE HOOD", [
-        "Folio renders PDFs with hayro, a pure Rust PDF engine.",
+        "Pagewing renders PDFs with hayro, a pure Rust PDF engine.",
         "Rendering and search run on a background worker.",
         "Nearby pages are prepared before you need them.",
         "A bounded cache keeps recently viewed pages ready.",
@@ -95,7 +95,7 @@ def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hin
         for row, line in enumerate(lines):
             text(48, 555 - row * 28, 12, line)
         ops.append("0.82 0.83 0.80 RG 0.5 w 48 80 m 552 80 l S")
-        text(48, 55, 10, "FOLIO / A KEYBOARD-DRIVEN PDF READER", color="0.42 0.46 0.43")
+        text(48, 55, 10, "PAGEWING / A KEYBOARD-DRIVEN PDF READER", color="0.42 0.46 0.43")
         label = ["i", "ii", "1", "2"][index] if index < 4 else f"A-{index - 3}"
         text(535, 55, 10, label)
         stream = "\n".join(ops).encode()
@@ -146,6 +146,6 @@ def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hin
 
 
 if __name__ == "__main__":
-    destination = Path(__file__).resolve().parent.parent / "assets" / "folio-guide.pdf"
+    destination = Path(__file__).resolve().parent.parent / "assets" / "pagewing-guide.pdf"
     destination.write_bytes(make_pdf())
     print(destination)

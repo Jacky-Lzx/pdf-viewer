@@ -9,7 +9,7 @@ Install the release binary and a Linux PDF desktop entry for the current user.
 The default prefix is ~/.local. Desktop files and icons use XDG_DATA_HOME,
 or PREFIX/share when XDG_DATA_HOME is unset. No default PDF app is changed.
 
-Build first with cargo build --release. FOLIO_BINARY can select another binary.
+Build first with cargo build --release. PAGEWING_BINARY can select another binary.
 Use the same prefix and XDG_DATA_HOME to uninstall; reading progress is kept.
 HELP
 }
@@ -46,9 +46,9 @@ if [[ "$data" != /* ]]; then
     echo 'XDG_DATA_HOME must be an absolute directory.' >&2
     exit 1
 fi
-binary="$prefix/bin/folio"
-desktop="$data/applications/folio.desktop"
-icon="$data/icons/hicolor/scalable/apps/folio.svg"
+binary="$prefix/bin/pagewing"
+desktop="$data/applications/pagewing.desktop"
+icon="$data/icons/hicolor/scalable/apps/pagewing.svg"
 
 refresh_desktop_database() {
     if command -v update-desktop-database >/dev/null 2>&1; then
@@ -63,12 +63,12 @@ if $uninstall; then
     if [[ -d "$data/applications" ]]; then
         refresh_desktop_database
     fi
-    echo 'Removed Folio binary, desktop entry and icon. Reading progress was kept.'
+    echo 'Removed Pagewing binary, desktop entry and icon. Reading progress was kept.'
     exit 0
 fi
 
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-source_binary="${FOLIO_BINARY:-"$repository/target/release/folio"}"
+source_binary="${PAGEWING_BINARY:-"$repository/target/release/pagewing"}"
 if [[ ! -f "$source_binary" || ! -x "$source_binary" ]]; then
     printf 'No executable at %s. Run cargo build --release first.\n' "$source_binary" >&2
     exit 1
@@ -130,7 +130,7 @@ while IFS= read -r line; do
         Icon=*) printf 'Icon=%s\n' "$(desktop_string "$icon")" ;;
         *) printf '%s\n' "$line" ;;
     esac
-done < "$repository/assets/folio.desktop" > "$stage"
+done < "$repository/assets/pagewing.desktop" > "$stage"
 chmod 644 "$stage"
 mv -fT -- "$stage" "$desktop"
 refresh_desktop_database

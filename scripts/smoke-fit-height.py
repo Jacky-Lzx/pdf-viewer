@@ -16,15 +16,15 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-fit-height-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-fit-height-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
+        document = root / "pagewing-smoke.pdf"
         # Equal-length substitution preserves all xref offsets. Remaining pages
         # retain their portrait dimensions to exercise mixed-size navigation.
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes().replace(
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes().replace(
             b"/MediaBox [0 0 600 800]", b"/MediaBox [0 0 900 200]", 1))
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -48,7 +48,7 @@ def run(binary):
 
             def reopen():
                 keyboard.key("p", ctrl=True)
-                for letter in "folio-smoke":
+                for letter in "pagewing-smoke":
                     keyboard.key(letter, delay=0)
                 keyboard.key(0xFF0D)
 
@@ -114,4 +114,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

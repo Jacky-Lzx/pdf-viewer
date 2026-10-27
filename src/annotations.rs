@@ -263,7 +263,7 @@ fn write(pdf: &Pdf, comment: &Comment, source: &Path, operation: Operation) -> R
         let appearance_id = update.new_document.add_object(stream);
         let id = update.new_document.add_object(dictionary! {
             "Type" => "Annot", "Subtype" => "Highlight", "Rect" => bbox(), "QuadPoints" => quads,
-            "Contents" => lopdf::text_string(&comment.contents), "T" => lopdf::text_string("Folio"),
+            "Contents" => lopdf::text_string(&comment.contents), "T" => lopdf::text_string("Pagewing"),
             "C" => array(vec![1.0, 0.85, 0.0]), "CA" => 0.35f32, "F" => 4,
             "AP" => dictionary! { "N" => appearance_id }, "P" => page_id,
         });
@@ -375,7 +375,7 @@ mod tests {
             slot: None,
             kind: "Highlight".into(),
             contents: "中文批注 📝\nSecond line".into(),
-            author: "Folio".into(),
+            author: "Pagewing".into(),
             rects: vec![
                 Rect::new(75.0, 90.0, 210.0, 104.0),
                 Rect::new(75.0, 110.0, 240.0, 124.0),
@@ -388,7 +388,7 @@ mod tests {
 
     fn source(root: &Path) -> (std::path::PathBuf, Pdf) {
         let path = root.join("source.pdf");
-        std::fs::write(&path, include_bytes!("../assets/folio-guide.pdf")).unwrap();
+        std::fs::write(&path, include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
         let pdf = crate::document::load(&path, "").unwrap();
         (path, pdf)
     }
@@ -459,7 +459,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         for rotation in [0, 90, 180, 270] {
             let mut document =
-                lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+                lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
             let id = document.get_pages()[&1];
             let page = document.get_dictionary_mut(id).unwrap();
             page.set(
@@ -486,7 +486,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         for indirect in [false, true] {
             let mut doc =
-                lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+                lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
             let page_id = doc.get_pages()[&1];
             let note = dictionary! { "Type" => "Annot", "Subtype" => "Text", "Contents" => lopdf::text_string("已有批注"), "T" => lopdf::text_string("作者"), "Rect" => vec![50.into(), 600.into(), 70.into(), 620.into()] };
             let highlight = dictionary! { "Type" => "Annot", "Subtype" => "Highlight", "Contents" => "Highlight comment", "Rect" => vec![80.into(), 600.into(), 180.into(), 620.into()], "RC" => "old rich text" };
@@ -633,7 +633,8 @@ mod tests {
             for indirect_comment in [false, true] {
                 let root = tempfile::tempdir().unwrap();
                 let mut doc =
-                    lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+                    lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf"))
+                        .unwrap();
                 let page = doc.get_pages()[&1];
                 let parent = doc.new_object_id();
                 let popup = doc.add_object(dictionary! { "Subtype" => "Popup", "Parent" => parent, "Rect" => vec![0.into(), 0.into(), 20.into(), 20.into()] });
@@ -709,7 +710,7 @@ mod tests {
         ] {
             let root = tempfile::tempdir().unwrap();
             let mut doc =
-                lopdf::Document::load_mem(include_bytes!("../assets/folio-guide.pdf")).unwrap();
+                lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
             let page = doc.get_pages()[&1];
             let id = doc.add_object(dictionary! { "Subtype" => kind, "Contents" => lopdf::text_string(&contents), "F" => flags, "Rect" => vec![50.into(), 600.into(), 150.into(), 620.into()] });
             doc.get_dictionary_mut(page)

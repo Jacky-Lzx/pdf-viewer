@@ -143,7 +143,7 @@ impl Options {
 }
 
 fn query(mode: &str, input: OsString, pdf: &Path, options: &Options) -> Result<String, String> {
-    let executable = std::env::var_os("FOLIO_SYNCTEX").unwrap_or_else(|| {
+    let executable = std::env::var_os("PAGEWING_SYNCTEX").unwrap_or_else(|| {
         // Finder-launched macOS applications often have no TeX installation in PATH.
         if cfg!(target_os = "macos") && Path::new("/Library/TeX/texbin/synctex").is_file() {
             "/Library/TeX/texbin/synctex".into()
@@ -168,7 +168,7 @@ fn query(mode: &str, input: OsString, pdf: &Path, options: &Options) -> Result<S
         .env_remove("SYNCTEX_VIEWER")
         .output()
         .map_err(|e| {
-            format!("Cannot run synctex: {e}. Install TeX Live/MacTeX or set FOLIO_SYNCTEX.")
+            format!("Cannot run synctex: {e}. Install TeX Live/MacTeX or set PAGEWING_SYNCTEX.")
         })?;
     if !result.status.success() {
         return Err(format!(

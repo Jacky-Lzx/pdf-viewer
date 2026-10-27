@@ -17,12 +17,12 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-mouse-history-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-mouse-history-") as directory:
         root = Path(directory)
-        document = root / "folio-smoke.pdf"
-        document.write_bytes((SCRIPTS.parent / "assets/folio-guide.pdf").read_bytes())
+        document = root / "pagewing-smoke.pdf"
+        document.write_bytes((SCRIPTS.parent / "assets/pagewing-guide.pdf").read_bytes())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         keyboard.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         keyboard.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
@@ -102,10 +102,10 @@ def run(binary):
                 expect(lambda item: all(item.get(key) == second[key] for key in ("page", "fit", "rotation")), "side buttons do not navigate during text input")
                 keyboard.key(0xFF1B)
                 keyboard.key("p", ctrl=True)
-                sequence("folio")
+                sequence("pagewing")
                 button()
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
-                assert keyboard.clipboard() == "folio", "recent picker ignores side buttons"
+                assert keyboard.clipboard() == "pagewing", "recent picker ignores side buttons"
                 keyboard.key(0xFF1B)
                 button()
                 restored(first, "input guards leave history available after Escape")
@@ -120,7 +120,7 @@ def run(binary):
                 keyboard.key("w", ctrl=True)
                 button(); button(True)
                 keyboard.key("p", ctrl=True)
-                sequence("folio-smoke")
+                sequence("pagewing-smoke")
                 keyboard.key(0xFF0D)
                 expect(lambda item: item["page"] == 2, "reopen saved view after side buttons on welcome")
                 time.sleep(0.4)
@@ -162,4 +162,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())

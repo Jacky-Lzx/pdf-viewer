@@ -44,12 +44,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (path, page, sync_request) = match cli::parse(&args)? {
         cli::Command::Help => {
             output::line(format_args!(
-                "Folio — a keyboard-driven PDF reader\n\nUsage:\n  folio [document.pdf]\n  folio -- [document.pdf]\n  folio --page page [--] document.pdf\n  folio [--inverse-search COMMAND] [--synctex-directory DIR]\n        --forward-search LINE COLUMN SOURCE [--] document.pdf\n  folio --inverse-search COMMAND [--] document.pdf\n  folio [--no-focus] [--inverse-search-position COMMAND]\n        --synctex-location JSON [--] document.pdf\n  folio --render document.pdf output.png [page] [width]\n  folio --benchmark document.pdf [iterations]\n  folio --text document.pdf [page]\n  folio --info document.pdf\n  folio --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nSyncTeX: compile with -synctex=1. Lines start at 1; use column 0 if unknown.\nInverse command placeholders: %f file, %l line, %c column, %% literal percent.\nPosition callback placeholders: %f PDF, %p page, %x/%y coordinates.\n--synctex-location accepts an LSP location {{page,x,y,h?,v?,width?,height?}}; no SyncTeX query.\n--no-focus opens/reuses the window without requesting focus.\nCtrl/Cmd+click the PDF to jump to source (outside selection mode).\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
+                "Pagewing — a keyboard-driven PDF reader\n\nUsage:\n  pagewing [document.pdf]\n  pagewing -- [document.pdf]\n  pagewing --page page [--] document.pdf\n  pagewing [--inverse-search COMMAND] [--synctex-directory DIR]\n        --forward-search LINE COLUMN SOURCE [--] document.pdf\n  pagewing --inverse-search COMMAND [--] document.pdf\n  pagewing [--no-focus] [--inverse-search-position COMMAND]\n        --synctex-location JSON [--] document.pdf\n  pagewing --render document.pdf output.png [page] [width]\n  pagewing --benchmark document.pdf [iterations]\n  pagewing --text document.pdf [page]\n  pagewing --info document.pdf\n  pagewing --version\n\nPage numbers start at 1. Width: 1–16384 pixels. Iterations: 1–1000.\n--page selects a physical starting page; values beyond the document open its last page.\n--info reports document details without opening a window.\nSyncTeX: compile with -synctex=1. Lines start at 1; use column 0 if unknown.\nInverse command placeholders: %f file, %l line, %c column, %% literal percent.\nPosition callback placeholders: %f PDF, %p page, %x/%y coordinates.\n--synctex-location accepts an LSP location {{page,x,y,h?,v?,width?,height?}}; no SyncTeX query.\n--no-focus opens/reuses the window without requesting focus.\nCtrl/Cmd+click the PDF to jump to source (outside selection mode).\nUse -- before a GUI filename starting with '-'.\nPress ? inside the reader for Vim shortcuts."
             ))?;
             return Ok(());
         }
         cli::Command::Version => {
-            output::line(format_args!("Folio {}", env!("CARGO_PKG_VERSION")))?;
+            output::line(format_args!("Pagewing {}", env!("CARGO_PKG_VERSION")))?;
             return Ok(());
         }
         cli::Command::Gui { path, page } => (path, page, None),
@@ -90,10 +90,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
     eframe::run_native(
-        "Folio",
+        "Pagewing",
         options,
         Box::new(move |cc| {
-            let mut app = app::Folio::new(cc, path, page);
+            let mut app = app::Pagewing::new(cc, path, page);
             if let Some(request) = sync_request {
                 app.configure_synctex(request, &cc.egui_ctx);
             }

@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn real_document_reports_version_and_size_without_inventing_missing_fields() {
-        let data = include_bytes!("../assets/folio-guide.pdf");
+        let data = include_bytes!("../assets/pagewing-guide.pdf");
         let pdf = Pdf::new(data.to_vec()).unwrap();
         let info = DocumentInfo::read(&pdf);
         assert_eq!(info.version, "1.4");

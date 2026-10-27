@@ -1,4 +1,4 @@
-use super::{ACCENT, Folio};
+use super::{ACCENT, Pagewing};
 use eframe::egui::{self, RichText, Vec2};
 use std::{fmt::Write, sync::OnceLock};
 
@@ -162,7 +162,7 @@ impl HelpFilter {
     }
 
     fn copy_text(&self) -> String {
-        let mut text = String::from("Folio keyboard shortcuts\n\n");
+        let mut text = String::from("Pagewing keyboard shortcuts\n\n");
         for (keys, action) in self.rows() {
             let _ = writeln!(text, "{keys}\t{action}");
         }
@@ -170,7 +170,7 @@ impl HelpFilter {
     }
 }
 
-impl Folio {
+impl Pagewing {
     pub(super) fn open_help(&mut self, context: &egui::Context) {
         self.outline.cancel_input();
         self.nav.clear_prefix();
@@ -199,7 +199,7 @@ impl Folio {
     pub(super) fn close_help(&mut self, context: &egui::Context) {
         self.help = false;
         self.help_filter.focus = false;
-        context.memory_mut(|memory| memory.surrender_focus(egui::Id::new("folio-help-input")));
+        context.memory_mut(|memory| memory.surrender_focus(egui::Id::new("pagewing-help-input")));
     }
 
     pub(super) fn help_window(&mut self, context: &egui::Context) {
@@ -226,7 +226,7 @@ impl Folio {
                 ui.add_space(8.0);
                 let (input, _) = super::shortcuts::text_input(
                     ui,
-                    egui::Id::new("folio-help-input"),
+                    egui::Id::new("pagewing-help-input"),
                     &mut self.help_filter.focus,
                     &mut self.deferred_input,
                     egui::TextEdit::singleline(&mut self.help_filter.query)
@@ -243,7 +243,7 @@ impl Folio {
                 ));
                 let column_width = ((ui.available_width() - 24.0) * 0.5).max(100.0);
                 egui::ScrollArea::vertical()
-                    .id_salt("folio-help-results")
+                    .id_salt("pagewing-help-results")
                     .max_height((context.content_rect().height() - 245.0).max(100.0))
                     .show(ui, |ui| {
                         if self.help_filter.visible.is_empty() {
@@ -318,7 +318,7 @@ mod tests {
         };
         help.filter();
         let text = help.copy_text();
-        assert!(text.starts_with("Folio keyboard shortcuts\n\n"));
+        assert!(text.starts_with("Pagewing keyboard shortcuts\n\n"));
         assert!(text.contains("Toggle bookmark"));
         assert!(!text.contains("Zoom in"));
         help.query = "jkgmissing".into();

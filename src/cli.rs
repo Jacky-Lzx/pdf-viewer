@@ -86,23 +86,23 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
         Some("--help" | "-h") if args.len() == 1 => Ok(Command::Help),
         Some("--version" | "-V") if args.len() == 1 => Ok(Command::Version),
         Some("--info") => match &args[1..] {
-            [] => Err("Missing PDF path. Run folio --help.".into()),
+            [] => Err("Missing PDF path. Run pagewing --help.".into()),
             [path] => Ok(Command::Info { path: path.into() }),
-            _ => Err("Too many arguments for --info. Run folio --help.".into()),
+            _ => Err("Too many arguments for --info. Run pagewing --help.".into()),
         },
         Some("--page") => {
             if args.len() < 2 {
                 return Err(
-                    "Missing page number. Usage: folio --page PAGE [--] document.pdf".into(),
+                    "Missing page number. Usage: pagewing --page PAGE [--] document.pdf".into(),
                 );
             }
             let page = page(1)?;
             let path = match &args[2..] {
-                [] => return Err("Missing PDF path. Run folio --help.".into()),
+                [] => return Err("Missing PDF path. Run pagewing --help.".into()),
                 [path] if path == "--" => return Err("Missing PDF path after --".into()),
                 [path] => path,
                 [separator, path] if separator == "--" => path,
-                _ => return Err("Open one PDF at a time. Run folio --help.".into()),
+                _ => return Err("Open one PDF at a time. Run pagewing --help.".into()),
             };
             Ok(Command::Gui {
                 path: Some(path.into()),
@@ -111,13 +111,13 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
         }
         Some("--render") => {
             if args.len() < 2 {
-                return Err("Missing PDF path. Run folio --help.".into());
+                return Err("Missing PDF path. Run pagewing --help.".into());
             }
             if args.len() < 3 {
                 return Err("Missing output PNG path".into());
             }
             if args.len() > 5 {
-                return Err("Too many arguments for --render. Run folio --help.".into());
+                return Err("Too many arguments for --render. Run pagewing --help.".into());
             }
             let page = page(3)?;
             let width = number(4, 1200)?;
@@ -133,10 +133,10 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
         }
         Some("--text" | "--benchmark") => {
             if args.len() < 2 {
-                return Err("Missing PDF path. Run folio --help.".into());
+                return Err("Missing PDF path. Run pagewing --help.".into());
             }
             if args.len() > 3 {
-                return Err("Too many command arguments. Run folio --help.".into());
+                return Err("Too many command arguments. Run pagewing --help.".into());
             }
             let path = args[1].clone().into();
             if first == "--text" {
@@ -161,12 +161,12 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
                 path: Some(path.into()),
                 page: None,
             }),
-            _ => Err("Open one PDF at a time. Run folio --help.".into()),
+            _ => Err("Open one PDF at a time. Run pagewing --help.".into()),
         },
         _ if first.to_string_lossy().starts_with('-') => {
-            Err("Unknown option. Run folio --help.".into())
+            Err("Unknown option. Run pagewing --help.".into())
         }
-        _ if args.len() > 1 => Err("Open one PDF at a time. Run folio --help.".into()),
+        _ if args.len() > 1 => Err("Open one PDF at a time. Run pagewing --help.".into()),
         _ => Ok(Command::Gui {
             path: Some(first.into()),
             page: None,
@@ -183,7 +183,7 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
     while index < args.len() {
         let value = |offset: usize| {
             args.get(index + offset)
-                .ok_or("Missing SyncTeX option argument. Run folio --help.")
+                .ok_or("Missing SyncTeX option argument. Run pagewing --help.")
         };
         match args[index].to_str() {
             Some("--forward-search") => {
@@ -258,11 +258,11 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
                 break;
             }
             _ if args[index].to_string_lossy().starts_with('-') => {
-                return Err("Unknown SyncTeX option. Run folio --help.".into());
+                return Err("Unknown SyncTeX option. Run pagewing --help.".into());
             }
             _ => {
                 if path.is_some() {
-                    return Err("Open one PDF at a time. Run folio --help.".into());
+                    return Err("Open one PDF at a time. Run pagewing --help.".into());
                 }
                 path = Some(args[index].clone().into());
                 index += 1;
@@ -270,7 +270,7 @@ fn parse_synctex(args: &[OsString]) -> Result<Command, String> {
         }
     }
     Ok(Command::SyncGui {
-        path: path.ok_or("Missing PDF path. Run folio --help.")?,
+        path: path.ok_or("Missing PDF path. Run pagewing --help.")?,
         source,
         target,
         options,

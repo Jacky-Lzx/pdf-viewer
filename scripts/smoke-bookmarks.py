@@ -17,10 +17,10 @@ Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory(prefix="folio-bookmarks-") as directory:
+    with tempfile.TemporaryDirectory(prefix="pagewing-bookmarks-") as directory:
         root = Path(directory)
         fixture = runpy.run_path(str(SCRIPTS / "make-sample.py"))
-        document = root / "folio-smoke.pdf"
+        document = root / "pagewing-smoke.pdf"
 
         def write_document(count):
             fixture["PAGES"][:] = [(f"Page {page + 1}", "BOOKMARKS", ["Large bookmark list."]) for page in range(count)]
@@ -29,10 +29,10 @@ def run(binary):
             document.write_bytes(data)
 
         write_document(600)
-        second_document = root / "folio-second.pdf"
+        second_document = root / "pagewing-second.pdf"
         second_document.write_bytes(document.read_bytes())
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
-        config_path = root / "config/folio/library.json"
+        config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"sidebar": True, "recent": [
             {"path": str(document), "bookmarks": list(range(600))},
@@ -97,7 +97,7 @@ def run(binary):
                 keyboard.click((100, 171))
                 expect(1, "first virtual row no longer points at a removed bookmark", removed=0, count=29)
                 keyboard.key("p", ctrl=True)
-                for letter in "folio-second":
+                for letter in "pagewing-second":
                     keyboard.key(letter, delay=0.01)
                 keyboard.key(0xFF0D)
                 expect(5, "switching documents replaces the bookmark snapshot", count=2)
@@ -149,4 +149,4 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/folio").resolve())
+    run(Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/pagewing").resolve())
