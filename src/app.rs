@@ -7,6 +7,7 @@ mod reload;
 mod selection_scroll;
 mod shortcuts;
 mod sidebar;
+mod spread;
 mod sync;
 mod tiles;
 mod toolbar;
@@ -414,6 +415,7 @@ impl Pagewing {
             fit: self.reading.fit,
             rotation: self.reading.rotation,
             continuous: self.reading.continuous,
+            facing: self.reading.facing,
             offset: self.current_offset(),
         }
     }
@@ -428,6 +430,7 @@ impl Pagewing {
         self.reading.fit = position.fit;
         self.reading.rotation = position.rotation % 4;
         self.reading.continuous = position.continuous;
+        self.reading.facing = position.facing;
         self.pending_offset = Some(position.offset);
     }
 
@@ -504,6 +507,19 @@ impl Pagewing {
     fn step(&mut self, delta: isize) {
         let current = self.current_position();
         self.pending_destination = None;
+        let delta = if self.reading.facing {
+            let start = self.nav.page / 2 * 2;
+            let target = start
+                .saturating_add_signed(delta.saturating_mul(2))
+                .min(self.nav.count.saturating_sub(1) / 2 * 2);
+            if target == start {
+                0
+            } else {
+                target as isize - self.nav.page as isize
+            }
+        } else {
+            delta
+        };
         if self.nav.step(delta) {
             self.history.record(current);
             self.page_changed();
@@ -612,6 +628,10 @@ impl Pagewing {
             self.zoom_continuous(after, pivot);
             return;
         }
+        if self.reading.facing {
+            self.zoom_spread(target, pivot);
+            return;
+        }
         let before = self.scale;
         let pan = crate::geometry::zoom_pan(
             [self.pan.x, self.pan.y],
@@ -644,31 +664,66 @@ impl Pagewing {
             self.update_continuous_layout();
             self.overflow.y = self.continuous_layout.limit(self.nav.page);
         }
+        if self.reading.facing {
+            let spread = self.spread();
+            self.scale = spread.scale;
+            self.overflow = (spread.size - self.viewport).max(Vec2::ZERO);
+        }
         if let Some(offset) = self.pending_offset.take() {
             self.pan =
                 Vec2::new(offset[0].clamp(0.0, 1.0), offset[1].clamp(0.0, 1.0)) * self.overflow;
         }
         if let Some(focus) = self.pending_focus.take() {
-            let offset = crate::geometry::focus_offset(
+            let (focus, rotation) = if self.reading.facing {
+                let offset = self.spread().offset(self.nav.page) / self.scale;
+                (
+                    crate::geometry::rotate_rect(focus, dimensions, self.reading.rotation)
+                        + hayro::kurbo::Vec2::new(f64::from(offset.x), f64::from(offset.y)),
+                    0,
+                )
+            } else {
+                (focus, self.reading.rotation)
+            };
+            self.pan = Vec2::from(crate::geometry::focus_offset(
                 focus,
                 dimensions,
-                self.reading.rotation,
+                rotation,
                 self.scale,
                 [self.viewport.x, self.viewport.y],
                 [self.overflow.x, self.overflow.y],
-            );
-            self.pan = Vec2::from(offset);
+            ));
         }
-        if let Some((destination, origin)) = self.pending_destination.take() {
-            let offset = destination.pan(
+        if let Some((mut destination, origin)) = self.pending_destination.take() {
+            let rotation = if self.reading.facing {
+                let offset = self.spread().offset(self.nav.page) / self.scale;
+                destination.position = crate::destination::rotate_position(
+                    destination.position,
+                    dimensions,
+                    self.reading.rotation,
+                );
+                for (coordinate, offset) in
+                    destination.position.iter_mut().zip([offset.x, offset.y])
+                {
+                    *coordinate = coordinate.map(|value| value + f64::from(offset));
+                }
+                if let Some(crate::destination::DestinationFit::Rectangle(rect)) = destination.fit {
+                    destination.fit = Some(crate::destination::DestinationFit::Rectangle(
+                        crate::geometry::rotate_rect(rect, dimensions, self.reading.rotation)
+                            + hayro::kurbo::Vec2::new(f64::from(offset.x), f64::from(offset.y)),
+                    ));
+                }
+                0
+            } else {
+                self.reading.rotation
+            };
+            self.pan = Vec2::from(destination.pan(
                 dimensions,
-                self.reading.rotation,
+                rotation,
                 self.scale,
                 [self.viewport.x, self.viewport.y],
                 origin,
                 [self.overflow.x, self.overflow.y],
-            );
-            self.pan = Vec2::from(offset);
+            ));
         }
         self.pan = self.pan.clamp(Vec2::ZERO, self.overflow);
         Some(rotated)
@@ -1794,52 +1849,11 @@ impl Pagewing {
                         }
                         ui.separator();
                         if ui
-                            .button("−")
-                            .on_hover_text("Zoom out · − / Ctrl/Cmd+−")
-                            .clicked()
-                        {
-                            self.zoom(1.0 / 1.2);
-                        }
-                        let percent = self.scale * 100.0;
-                        ui.label(if percent < 0.01 {
-                            "<0.01%".to_owned()
-                        } else if percent < 1.0 {
-                            format!("{percent:.2}%")
-                        } else {
-                            format!("{percent:.0}%")
-                        });
-                        if ui
-                            .button("+")
-                            .on_hover_text("Zoom in · + / Ctrl/Cmd++")
-                            .clicked()
-                        {
-                            self.zoom(1.2);
-                        }
-                        if ui.button("Fit").on_hover_text("Fit page · p").clicked() {
-                            self.reading.fit = Fit::Page;
-                            self.pan = Vec2::ZERO;
-                            self.dirty = true;
-                        }
-                        if ui.button("Width").on_hover_text("Fit width · w").clicked() {
-                            self.reading.fit = Fit::Width;
-                            self.dirty = true;
-                        }
-                        if ui
                             .button("Rotate")
                             .on_hover_text("Rotate · r / Shift+R")
                             .clicked()
                         {
                             self.rotate_page(false, 1);
-                        }
-                        if ui
-                            .selectable_label(
-                                self.reading.continuous,
-                                if compact { "Scroll" } else { "Continuous" },
-                            )
-                            .on_hover_text("Toggle continuous scrolling · Shift+C")
-                            .clicked()
-                        {
-                            self.toggle_continuous();
                         }
                     }
                     toolbar::right_group(
@@ -1981,7 +1995,7 @@ impl Pagewing {
                     self.welcome(ui);
                     return;
                 }
-                if self.reading.continuous {
+                if self.reading.continuous || self.reading.facing {
                     self.continuous_canvas(ui);
                     return;
                 }
@@ -2494,9 +2508,9 @@ impl Pagewing {
 
     fn status(&mut self, context: &egui::Context) {
         egui::TopBottomPanel::bottom("status")
-            .exact_height(29.0)
+            .exact_height(36.0)
             .show(context, |ui| {
-                ui.horizontal_centered(|ui| {
+                toolbar::horizontal_bar(ui, "status-controls", |ui| {
                     ui.add_space(12.0);
                     ui.label(
                         RichText::new(match self.mark_action {
@@ -2533,7 +2547,20 @@ impl Pagewing {
                             ui.add(
                                 egui::Button::new(format!(
                                     "{} / {}",
-                                    self.page_name(self.nav.page),
+                                    if self.reading.facing {
+                                        let pages = self.spread().pages;
+                                        if pages.len() == 2 {
+                                            format!(
+                                                "{}–{}",
+                                                self.page_name(pages.start),
+                                                self.page_name(pages.end - 1)
+                                            )
+                                        } else {
+                                            self.page_name(self.nav.page)
+                                        }
+                                    } else {
+                                        self.page_name(self.nav.page)
+                                    },
                                     self.nav.count
                                 ))
                                 .frame(false),
@@ -2541,8 +2568,10 @@ impl Pagewing {
                             .on_hover_ui(|ui| {
                                 ui.set_max_width(ui.spacing().tooltip_width);
                                 ui.label(format!(
-                                    "Go to page · :\n{}",
-                                    self.labels.label(self.nav.page).unwrap_or_default()
+                                    "Go to page · :\n{}\n{:.0} ms · {:.1} MB cached",
+                                    self.labels.label(self.nav.page).unwrap_or_default(),
+                                    self.render_ms,
+                                    self.cache.bytes as f64 / 1_048_576.0
                                 ));
                             })
                             .id,
@@ -2560,21 +2589,10 @@ impl Pagewing {
                     } else if self.nav.count == 0 {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    toolbar::right_group(ui, 290.0, |ui| {
                         ui.add_space(12.0);
                         if self.nav.count > 0 {
-                            ui.weak(format!(
-                                "{:.0} ms  ·  {:.1} MB cached",
-                                self.render_ms,
-                                self.cache.bytes as f64 / 1_048_576.0
-                            ));
-                            ui.separator();
-                            ui.label(format!(
-                                "{}%",
-                                ((self.nav.page + 1) * 100)
-                                    .checked_div(self.nav.count)
-                                    .unwrap_or(0)
-                            ));
+                            self.view_controls(ui);
                         }
                     });
                 });

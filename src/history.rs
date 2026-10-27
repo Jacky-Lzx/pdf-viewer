@@ -15,6 +15,7 @@ fn same_view(left: &ReadingMark, right: &ReadingMark) -> bool {
         && left.fit == right.fit
         && left.rotation == right.rotation
         && left.continuous == right.continuous
+        && left.facing == right.facing
         && left
             .offset
             .iter()
@@ -85,6 +86,7 @@ mod tests {
             fit: Fit::Custom(2.0),
             rotation: 1,
             continuous: false,
+            facing: false,
             offset: [0.25, offset],
         }
     }

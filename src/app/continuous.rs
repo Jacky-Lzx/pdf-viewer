@@ -6,7 +6,11 @@ use std::time::Duration;
 impl Pagewing {
     fn continuous_view(&self, pixels_per_point: f32) -> RenderView {
         RenderView {
-            fit: self.reading.fit,
+            fit: if self.reading.facing {
+                Fit::Custom(self.scale)
+            } else {
+                self.reading.fit
+            },
             viewport: [self.viewport.x, self.viewport.y],
             pixels_per_point,
             rotation: self.reading.rotation,
@@ -21,16 +25,7 @@ impl Pagewing {
     }
 
     pub(super) fn toggle_continuous(&mut self) {
-        self.resolve_view();
-        self.reading.continuous = !self.reading.continuous;
-        self.pending_offset = None;
-        self.requested = None;
-        self.continuous_link_request = None;
-        self.hints.cancel();
-        self.selection.cancel();
-        self.nav.clear_prefix();
-        self.resolve_view();
-        self.dirty = true;
+        self.set_display_mode(!self.reading.continuous, false);
     }
 
     fn continuous_position(&mut self, page: usize, offset: f32) {
@@ -76,11 +71,23 @@ impl Pagewing {
     }
 
     fn continuous_rect(&self, page: usize, viewport: egui::Rect) -> egui::Rect {
+        if self.reading.facing {
+            return self.spread_rect(page, viewport);
+        }
         let layout = self.continuous_layout.pages[page];
         let current = self.continuous_layout.pages[self.nav.page];
         let x = viewport.left() + (viewport.width() - layout.size[0]).max(0.0) * 0.5 - self.pan.x;
         let y = viewport.top() + (layout.top - current.top - f64::from(self.pan.y)) as f32;
         egui::Rect::from_min_size(egui::pos2(x, y), Vec2::from(layout.size))
+    }
+
+    fn visible_pages(&self) -> std::ops::Range<usize> {
+        if self.reading.facing {
+            self.spread().pages
+        } else {
+            self.continuous_layout
+                .visible(self.nav.page, self.pan.y, 24.0)
+        }
     }
 
     pub(super) fn continuous_canvas(&mut self, ui: &mut egui::Ui) {
@@ -119,9 +126,7 @@ impl Pagewing {
         }
         self.resolve_view();
         self.continuous_selection(ui, &response, rect);
-        let visible = self
-            .continuous_layout
-            .visible(self.nav.page, self.pan.y, 24.0);
+        let visible = self.visible_pages();
         let pages: Vec<_> = visible
             .clone()
             .map(|page| (page, self.continuous_rect(page, rect)))
@@ -164,7 +169,9 @@ impl Pagewing {
         for (page, key) in visible.zip(plan.iter().filter(|key| key.tile.is_none())) {
             let page_rect = self.continuous_rect(page, rect);
             let dimensions = self.dimensions[page];
-            self.scale = self.continuous_layout.pages[page].scale;
+            if !self.reading.facing {
+                self.scale = self.continuous_layout.pages[page].scale;
+            }
             self.synctex_click(ui, page, page_rect);
             painter.rect_filled(
                 page_rect.translate(Vec2::new(2.0, 4.0)).expand(2.0),
@@ -244,8 +251,7 @@ impl Pagewing {
                 .or(response.interact_pointer_pos())
         {
             let page = self
-                .continuous_layout
-                .visible(self.nav.page, self.pan.y, 24.0)
+                .visible_pages()
                 .find(|&page| self.continuous_rect(page, viewport).contains(position));
             if let Some(page) = page {
                 if self.selection_page != page {
@@ -283,7 +289,7 @@ impl Pagewing {
             );
             if delta != Vec2::ZERO {
                 let before = (self.nav.page, self.pan);
-                self.scroll_continuous(delta);
+                self.scroll(delta, false);
                 if before != (self.nav.page, self.pan) {
                     ui.ctx().request_repaint_after(Duration::from_millis(16));
                 }
@@ -306,7 +312,11 @@ impl Pagewing {
         viewport: egui::Rect,
     ) -> hayro::kurbo::Point {
         let relative = position - self.continuous_rect(page, viewport).min;
-        let scale = f64::from(self.continuous_layout.pages[page].scale);
+        let scale = f64::from(if self.reading.facing {
+            self.scale
+        } else {
+            self.continuous_layout.pages[page].scale
+        });
         crate::geometry::unrotate_point(
             hayro::kurbo::Point::new(f64::from(relative.x) / scale, f64::from(relative.y) / scale),
             self.dimensions[page],

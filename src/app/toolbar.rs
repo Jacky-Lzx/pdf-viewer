@@ -1,4 +1,85 @@
+use super::Pagewing;
+use crate::navigation::Fit;
 use eframe::egui::{self, scroll_area::ScrollAreaOutput};
+
+impl Pagewing {
+    pub(super) fn view_controls(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .button("+")
+            .on_hover_text("Zoom in · + / Ctrl/Cmd++")
+            .clicked()
+        {
+            self.zoom(1.2);
+        }
+        let percent = self.scale * 100.0;
+        ui.label(if percent < 0.01 {
+            "<0.01%".to_owned()
+        } else if percent < 1.0 {
+            format!("{percent:.2}%")
+        } else {
+            format!("{percent:.0}%")
+        });
+        if ui
+            .button("−")
+            .on_hover_text("Zoom out · − / Ctrl/Cmd+−")
+            .clicked()
+        {
+            self.zoom(1.0 / 1.2);
+        }
+        ui.separator();
+        let mode = if self.reading.facing {
+            "Two pages"
+        } else if self.reading.continuous {
+            "Continuous"
+        } else {
+            "Single page"
+        };
+        ui.menu_button(format!("View: {mode}"), |ui| {
+            ui.label("Page layout");
+            for (label, continuous, facing) in [
+                ("Single page", false, false),
+                ("Continuous", true, false),
+                ("Two pages side by side", false, true),
+            ] {
+                if ui
+                    .selectable_label(
+                        self.reading.continuous == continuous && self.reading.facing == facing,
+                        label,
+                    )
+                    .clicked()
+                {
+                    self.set_display_mode(continuous, facing);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            ui.label("Page size");
+            for (label, fit) in [
+                ("Fit page · p", Fit::Page),
+                ("Fit width · w", Fit::Width),
+                ("Fit height · e", Fit::Height),
+                ("Actual size · Ctrl/Cmd+0", Fit::Custom(1.0)),
+            ] {
+                if ui
+                    .selectable_label(self.reading.fit == fit, label)
+                    .clicked()
+                {
+                    if fit == Fit::Custom(1.0) {
+                        self.actual_size();
+                    } else {
+                        self.resolve_view();
+                        self.reading.fit = fit;
+                        self.pan = egui::Vec2::ZERO;
+                        self.dirty = true;
+                    }
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text("Choose page layout and size");
+    }
+}
 
 /// A single row that keeps every control reachable without widening the window.
 pub(super) fn horizontal_bar<R>(

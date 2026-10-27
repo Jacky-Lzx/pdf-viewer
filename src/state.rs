@@ -14,6 +14,7 @@ pub struct ReadingState {
     pub fit: Fit,
     pub rotation: u8,
     pub continuous: bool,
+    pub facing: bool,
     pub bookmarks: BTreeSet<usize>,
     pub offset: [f32; 2],
     pub marks: BTreeMap<char, ReadingMark>,
@@ -78,6 +79,7 @@ pub struct ReadingMark {
     pub fit: Fit,
     pub rotation: u8,
     pub continuous: bool,
+    pub facing: bool,
     pub offset: [f32; 2],
 }
 
@@ -230,6 +232,7 @@ mod tests {
                     fit: Fit::Custom(2.0),
                     rotation: 1,
                     continuous: true,
+                    facing: false,
                     offset: [0.4, 0.8],
                 },
             )]
@@ -260,6 +263,8 @@ mod tests {
         )
         .unwrap();
         assert!(!state.continuous);
+        assert!(!state.facing);
+        assert!(!state.marks[&'a'].facing);
         assert!(!state.marks[&'a'].continuous);
         assert_eq!(state.offset, [0.2, 0.4]);
     }
