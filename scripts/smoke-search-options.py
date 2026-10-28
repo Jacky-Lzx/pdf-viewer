@@ -266,6 +266,15 @@ def run(binary):
                 assert json.loads(config_path.read_text())["recent"][0]["page"] == 0
                 print("PASS: saved keyboard/button preferences, Tab/Space/Enter on all search controls, actual focused-button visibility and click after 240x240 resize, manual scrolling, query focus and text preservation, actual search behavior across restarts, old-config defaults, case/whole-word combinations, focused shortcuts, rapid replacement, deferred Enter, wrap, reload, empty/no matches, compact buttons and clickable inline result highlights across light/dark themes and replacement queries")
             except Exception:
+                print(f"Reader process status: {application.poll()!r}", file=sys.stderr)
+                if application.poll() is None:
+                    try:
+                        keyboard.key("f", ctrl=True)
+                        keyboard.key("a", ctrl=True)
+                        keyboard.key("c", ctrl=True)
+                        print(f"Actual search query: {keyboard.clipboard()!r}", file=sys.stderr)
+                    except Exception as diagnostic:
+                        print(f"Could not inspect search query: {diagnostic}", file=sys.stderr)
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
                 if config_path.exists():
