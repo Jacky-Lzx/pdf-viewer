@@ -1,4 +1,4 @@
-use super::{MarkAction, Pagewing, appearance, toolbar};
+use super::{MarkAction, Pagewing, appearance, spread, toolbar};
 use eframe::egui::{self, RichText};
 use std::time::Duration;
 
@@ -41,25 +41,18 @@ impl Pagewing {
                     }
                     ui.separator();
                     if self.nav.count > 0 {
+                        let (first, second) = if self.reading.facing {
+                            let pages = spread::page_range(self.nav.page, self.nav.count);
+                            (pages.start, (pages.len() == 2).then_some(pages.end - 1))
+                        } else {
+                            (self.nav.page, None)
+                        };
                         self.input_buttons.page = Some(
                             ui.add(
-                                egui::Button::new(format!(
-                                    "{} / {}",
-                                    if self.reading.facing {
-                                        let pages = self.spread().pages;
-                                        if pages.len() == 2 {
-                                            format!(
-                                                "{}–{}",
-                                                self.page_name(pages.start),
-                                                self.page_name(pages.end - 1)
-                                            )
-                                        } else {
-                                            self.page_name(self.nav.page)
-                                        }
-                                    } else {
-                                        self.page_name(self.nav.page)
-                                    },
-                                    self.nav.count
+                                egui::Button::new(self.labels.status_caption(
+                                    first,
+                                    second,
+                                    self.nav.count,
                                 ))
                                 .frame(false),
                             )

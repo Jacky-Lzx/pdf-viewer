@@ -5,6 +5,11 @@ use std::ops::Range;
 
 const GAP: f32 = 24.0;
 
+pub(super) fn page_range(page: usize, count: usize) -> Range<usize> {
+    let start = page / 2 * 2;
+    start..(start + 2).min(count)
+}
+
 /// Geometry shared by rendering, panning and zooming both pages together.
 pub(super) struct Spread {
     pub pages: Range<usize>,
@@ -21,8 +26,9 @@ impl Spread {
         fit: Fit,
         viewport: Vec2,
     ) -> Self {
-        let start = page / 2 * 2;
-        let end = (start + 2).min(dimensions.len());
+        let pages = page_range(page, dimensions.len());
+        let start = pages.start;
+        let end = pages.end;
         let rotated = |page: usize| {
             let d = dimensions[page];
             if rotation % 2 == 1 {
@@ -41,7 +47,7 @@ impl Spread {
             [(viewport.x - gap).max(1.0), viewport.y],
         );
         Self {
-            pages: start..end,
+            pages,
             scale,
             size: Vec2::new(dimensions.x * scale + gap, height * scale),
             first_width: first.x * scale,

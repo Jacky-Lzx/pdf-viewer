@@ -139,3 +139,7 @@ harness = false
 [[bench]]
 name = "page_label_text"
 harness = false
+
+[[bench]]
+name = "status_text"
+harness = false

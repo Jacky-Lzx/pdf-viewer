@@ -2,7 +2,10 @@ use hayro::hayro_syntax::{
     Pdf,
     object::{Array, Dict, Name, Object, String as PdfString},
 };
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt::Write,
+};
 
 const LABEL_EXCERPT_CHARACTERS: usize = 12;
 
@@ -161,6 +164,24 @@ impl PageLabels {
         label.push_str(" · ");
         label.push_str(&physical);
         label
+    }
+
+    /// Name the current page or pair, followed by the document page count.
+    pub fn status_caption(&self, first: usize, second: Option<usize>, total: usize) -> String {
+        let mut caption = self.display_name(first);
+        let second = second.map(|page| self.display_name(page));
+        let extra = " / ".len()
+            + total
+                .checked_ilog10()
+                .map_or(1, |digits| digits as usize + 1)
+            + second.as_ref().map_or(0, |label| "–".len() + label.len());
+        caption.reserve(extra);
+        if let Some(second) = second {
+            caption.push('–');
+            caption.push_str(&second);
+        }
+        let _ = write!(caption, " / {total}");
+        caption
     }
 
     // Borrow the visible prefix and format a suffix only when it can appear.
