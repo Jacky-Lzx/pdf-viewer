@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import signal
 import subprocess
@@ -15,6 +16,7 @@ SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 ENTER, ESCAPE, TAB, F10 = 0xFF0D, 0xFF1B, 0xFF09, 0xFFC7
+HOME, END, UP, DOWN, PAGE_DOWN = 0xFF50, 0xFF57, 0xFF52, 0xFF54, 0xFF56
 
 
 def run(binary):
@@ -74,6 +76,13 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
+
+            def copied_page(minimum, maximum, description):
+                def ready():
+                    match = re.search(r"Needle (\d{3})", keyboard.clipboard())
+                    page = int(match.group(1)) if match else 0
+                    return page if minimum <= page <= maximum else None
+                return wait_for(ready, description)
 
             def selected_result(height):
                 # Highlight pixels identify search rows even while bookmarks,
@@ -191,10 +200,41 @@ def run(binary):
                 position = wait_for(lambda: selected_result(540), "Results returns from focused contents")
                 keyboard.click(position)
                 expect(78, "Results preserves the current hit while reading another chapter")
+
+                keyboard.key("f", ctrl=True)
+                for _ in range(5):
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                burst([(HOME, {}), (DOWN, {}), ("c", {"ctrl": True})])
+                copied_page(2, 2, "queued copying uses the newly focused offscreen row")
+                expect(78, "browsing result focus preserves the reading page")
+                burst([(PAGE_DOWN, {}), ("c", {"ctrl": True})])
+                large_page = copied_page(3, 79, "PageDown copies a later result")
+                burst([(HOME, {}), (UP, {}), ("c", {"ctrl": True})])
+                copied_page(1, 1, "Up stops at the first result")
+                burst([(END, {}), (DOWN, {}), ("c", {"ctrl": True})])
+                copied_page(80, 80, "Down stops at the final result")
+                resize(860, 240)
+                burst([(HOME, {}), (PAGE_DOWN, {}), ("c", {"ctrl": True})])
+                copied_page(2, large_page - 1, "a smaller viewport pages by fewer results")
+                expect(78, "result paging in a short window preserves navigation")
+                resize(860, 540)
+                burst([(END, {}), (UP, {}), (F10, {"shift": True}), (ENTER, {})])
+                copied_page(79, 79, "the snippet menu belongs to the newly focused row")
+                expect(78, "opening a menu after result motion preserves the reading page")
+                burst([(HOME, {}), (DOWN, {}), (ENTER, {})])
+                expect(1, "Enter follows the focused result after queued first/next motion")
+                keyboard.key(ESCAPE)
+                keyboard.key(HOME)
+                expect(0, "Escape releases result focus and restores reader Home")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, right-click and focused keyboard snippet copying, fast menu activation, resize and restored-focus copying, first/last navigation, manual scrolling, Results restoration, clickable rows and chapter focus")
+                print("PASS: 80 search results below long contents and 60 bookmarks, full and individual snippet copying, queued focus motions/copy/menu/activation, viewport paging, first/last boundaries, reader-position preservation, resize, manual scrolling, Results restoration, clickable rows, chapter focus and Escape return to reader navigation")
             except Exception:
+                try:
+                    print(f"Clipboard at failure: {keyboard.clipboard()!r}", file=sys.stderr)
+                except Exception as diagnostic:
+                    print(f"Could not inspect clipboard: {diagnostic}", file=sys.stderr)
                 log.flush()
                 log.seek(0)
                 print(log.read(), file=sys.stderr)

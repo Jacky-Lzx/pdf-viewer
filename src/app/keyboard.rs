@@ -202,6 +202,9 @@ impl Pagewing {
             let symbol = key_text.character();
             let raw_key = key;
             let raw_modifiers = modifiers;
+            if !typing && self.result_navigation_key(context, key, modifiers) {
+                continue;
+            }
             if !typing
                 && !popup_open
                 && !self.help

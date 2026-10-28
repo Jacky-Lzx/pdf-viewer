@@ -64,6 +64,7 @@ impl Pagewing {
     }
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {
+        self.result_navigation.begin_frame(context);
         self.sidebar_region = None;
         self.input_buttons.current_chapter = None;
         self.thumbnails.begin_frame();
@@ -71,6 +72,7 @@ impl Pagewing {
             || self.nav.count == 0
             || (self.comments.open && context.available_rect().width() < 220.0)
         {
+            self.result_navigation.clear();
             if !self.loading
                 && let Some(keys) = self.thumbnails.requests()
             {

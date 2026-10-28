@@ -54,6 +54,7 @@ impl Pagewing {
         self.hit_index = None;
         self.reveal_hit = None;
         self.result_focus_origin = None;
+        self.result_navigation.clear();
         self.scanned = 0;
         self.scan_total = self.nav.count;
         self.search_complete = self.query.trim().is_empty();

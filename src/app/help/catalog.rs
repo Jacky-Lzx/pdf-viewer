@@ -3,6 +3,11 @@ const FILTER_NAVIGATION: (&str, &str) = (
     "Move by visible rows / to first or last result (chapter, recent or comment filter)",
 );
 
+const RESULT_NAVIGATION: (&str, &str) = (
+    "↑/↓ · PageUp/PageDown · Home/End (focused result)",
+    "Browse search snippets without navigating · Enter/Space to follow",
+);
+
 pub(super) const SHORTCUTS: &[(&str, &str)] = &[
     ("j / k / h / l", "Scroll down / up / left / right"),
     ("J / K   or   ] / [", "Next / previous page"),
@@ -131,6 +136,7 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
         "Copy its snippet without moving the reading view",
     ),
     ("Ctrl/Cmd+c (focused result)", "Copy this search snippet"),
+    RESULT_NAVIGATION,
     ("Shift+F10 (focused result)", "Open the snippet copy menu"),
     (
         "Results (search)",
@@ -177,6 +183,7 @@ pub(super) const FIXED_SHORTCUTS: &[(&str, &str)] = &[
         "Copy its snippet without moving the reading view",
     ),
     ("Ctrl/Cmd+c (focused result)", "Copy this search snippet"),
+    RESULT_NAVIGATION,
     ("Shift+F10 (focused result)", "Open the snippet copy menu"),
     (
         "Results (search)",

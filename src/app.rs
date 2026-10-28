@@ -19,6 +19,7 @@ mod properties;
 mod reading_controls;
 mod recent;
 mod reload;
+mod result_navigation;
 mod search;
 mod selection_scroll;
 mod shortcuts;
@@ -144,6 +145,7 @@ pub struct Pagewing {
     hit_index: Option<usize>,
     reveal_hit: Option<usize>,
     result_focus_origin: Option<egui::Id>,
+    result_navigation: result_navigation::ResultNavigation,
     search_navigation: crate::search_navigation::SearchNavigation,
     scanned: usize,
     scan_total: usize,
@@ -320,6 +322,7 @@ impl Pagewing {
             hit_index: None,
             reveal_hit: None,
             result_focus_origin: None,
+            result_navigation: result_navigation::ResultNavigation::default(),
             search_navigation: Default::default(),
             scanned: 0,
             scan_total: 0,
