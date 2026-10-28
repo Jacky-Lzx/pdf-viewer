@@ -95,7 +95,7 @@ fn batch(labels: &PageLabels, preview: bool, old: bool) {
         black_box(if old {
             baseline(labels, page, preview)
         } else if preview {
-            labels.preview_caption(page)
+            labels.sidebar_caption(page)
         } else {
             labels.display_name(page)
         });
@@ -125,7 +125,7 @@ fn main() {
                 assert_eq!(
                     baseline(&labels, page, preview),
                     if preview {
-                        labels.preview_caption(page)
+                        labels.sidebar_caption(page)
                     } else {
                         labels.display_name(page)
                     }

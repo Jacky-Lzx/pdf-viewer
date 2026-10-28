@@ -226,8 +226,8 @@ impl PageLabels {
         })
     }
 
-    /// Keep the physical page first so narrow preview captions retain it.
-    pub fn preview_caption(&self, page: usize) -> String {
+    /// Keep the physical page first in both sidebar lists and previews.
+    pub fn sidebar_caption(&self, page: usize) -> String {
         let mut caption = format!("Page {}", page + 1);
         if let Some(excerpt) = self.excerpt(page, &caption["Page ".len()..]) {
             caption.reserve(
@@ -249,8 +249,8 @@ impl PageLabels {
         caption
     }
 
-    /// Hover text uses the complete retained label, independently of its caption.
-    pub fn preview_tooltip(&self, page: usize) -> String {
+    /// Sidebar hover text uses the complete retained label, independently of its caption.
+    pub fn sidebar_tooltip(&self, page: usize) -> String {
         let mut tooltip = format!("Go to page {}", page + 1);
         if let Some(label) = self.label(page)
             && !label.is_empty()
@@ -654,9 +654,9 @@ mod tests {
                     style: Style::None,
                 }],
             };
-            assert_eq!(labels.preview_caption(0), caption);
+            assert_eq!(labels.sidebar_caption(0), caption);
             assert_eq!(
-                labels.preview_tooltip(0),
+                labels.sidebar_tooltip(0),
                 if label.is_empty() || label == "1" {
                     "Go to page 1".to_owned()
                 } else {
@@ -664,8 +664,8 @@ mod tests {
                 }
             );
         }
-        assert_eq!(PageLabels::default().preview_caption(4), "Page 5");
-        assert_eq!(PageLabels::default().preview_tooltip(4), "Go to page 5");
+        assert_eq!(PageLabels::default().sidebar_caption(4), "Page 5");
+        assert_eq!(PageLabels::default().sidebar_tooltip(4), "Go to page 5");
     }
 
     fn assert_excerpt_matches_full_label(labels: &PageLabels, page: usize) {
@@ -699,7 +699,7 @@ mod tests {
             "page {page}, {labels:?}"
         );
         assert_eq!(
-            labels.preview_caption(page),
+            labels.sidebar_caption(page),
             caption,
             "page {page}, {labels:?}"
         );

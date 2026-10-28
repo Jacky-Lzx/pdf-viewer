@@ -162,10 +162,14 @@ impl Pagewing {
                         Vec2::new(ui.available_width(), row_height),
                         egui::Button::selectable(
                             page == self.nav.page,
-                            format!("Page {}", self.page_name(page)),
+                            self.labels.sidebar_caption(page),
                         )
                         .truncate(),
                     )
+                    .on_hover_ui(|ui| {
+                        ui.set_max_width(ui.spacing().tooltip_width);
+                        ui.label(self.labels.sidebar_tooltip(page));
+                    })
                     .clicked()
                 {
                     self.jump(page);
@@ -261,13 +265,13 @@ impl Pagewing {
                 caption::paint(
                     painter,
                     rect,
-                    self.labels.preview_caption(page),
+                    self.labels.sidebar_caption(page),
                     ui.visuals().text_color(),
                 );
                 if response
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
-                        ui.label(self.labels.preview_tooltip(page));
+                        ui.label(self.labels.sidebar_tooltip(page));
                     })
                     .clicked()
                 {
@@ -450,75 +454,113 @@ mod tests {
     }
 
     #[test]
-    fn long_pdf_labels_keep_the_preview_caption_inside_its_card() {
-        let (_directory, context, mut app) = preview_app(false);
-        app.nav = Navigation::new(6, 5);
-        app.dimensions.truncate(6);
-        app.labels = labels_with_prefix("Long appendix 中文😀 title\nsecond line ");
-        preview_key(&mut app, &context, Vec2::new(240.0, 240.0));
-        for size in crate::app::dialog::TEST_SIZES {
+    fn long_pdf_labels_keep_physical_numbers_visible_in_lists_and_previews() {
+        for previews in [false, true] {
+            let (_directory, context, mut app) = preview_app(false);
+            app.nav = Navigation::new(6, 5);
+            app.dimensions.truncate(6);
+            app.labels = labels_with_prefix("Long appendix 中文😀 title\nsecond line ");
+            app.library.sidebar = true;
+            app.library.thumbnails = previews;
+            app.reveal_page = Some(app.nav.page);
+            app.reveal_page_section = true;
+            for size in crate::app::dialog::TEST_SIZES {
+                let output = settle(&mut app, &context, size);
+                let caption = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.job.text.starts_with("Page ")
+                                && (text.galley.job.text.ends_with(" · 6")
+                                    || text.galley.job.text.starts_with("Page 6")) =>
+                        {
+                            Some((shape.clip_rect, text))
+                        }
+                        _ => None,
+                    })
+                    .expect("the selected page caption must be drawn");
+                let bounds = egui::Rect::from_min_size(caption.1.pos, caption.1.galley.size());
+                assert!(
+                    caption.0.contains_rect(bounds),
+                    "caption {bounds:?} exceeds {:?}",
+                    caption.0
+                );
+                assert_eq!(caption.1.galley.rows.len(), 1);
+                let visible: String = caption.1.galley.rows[0]
+                    .glyphs
+                    .iter()
+                    .map(|glyph| glyph.chr)
+                    .collect();
+                assert!(
+                    visible.starts_with("Page 6") || visible.ends_with(" · 6"),
+                    "{size:?}, previews={previews}: physical page number must remain visible: {visible}"
+                );
+            }
+            let size = Vec2::new(860.0, 540.0);
             let output = settle(&mut app, &context, size);
-            let caption = output
+            let position = output
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text)
-                        if text.galley.job.text.starts_with("Page ")
-                            && (text.galley.job.text.ends_with(" · 6")
-                                || text.galley.job.text.starts_with("Page 6")) =>
-                    {
-                        Some((shape.clip_rect, text))
+                    egui::Shape::Text(text) if text.galley.job.text.starts_with("Page 6") => {
+                        Some(text.pos + egui::vec2(5.0, 5.0))
                     }
                     _ => None,
                 })
-                .expect("the selected preview caption must be drawn");
-            let bounds = egui::Rect::from_min_size(caption.1.pos, caption.1.galley.size());
-            assert!(
-                caption.0.contains_rect(bounds),
-                "caption {bounds:?} exceeds {:?}",
-                caption.0
+                .unwrap();
+            frame(
+                &mut app,
+                &context,
+                size,
+                vec![egui::Event::PointerMoved(position)],
             );
-            assert_eq!(caption.1.galley.rows.len(), 1);
-            let visible: String = caption.1.galley.rows[0]
-                .glyphs
-                .iter()
-                .map(|glyph| glyph.chr)
-                .collect();
+            let output = settle(&mut app, &context, size);
             assert!(
-                visible.starts_with("Page 6"),
-                "physical page number must remain visible: {visible}"
+                output.shapes.iter().any(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => text
+                        .galley
+                        .job
+                        .text
+                        .contains("PDF page label: Long appendix 中文😀 title\nsecond line 6"),
+                    _ => false,
+                }),
+                "hover must display the full retained label, including the suffix omitted from the caption"
             );
-        }
-        let size = Vec2::new(860.0, 540.0);
-        let output = settle(&mut app, &context, size);
-        let position = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.job.text.starts_with("Page 6") => {
-                    Some(text.pos + egui::vec2(5.0, 5.0))
+            if !previews {
+                let output = frame(&mut app, &context, size, vec![egui::Event::PointerGone]);
+                let position = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.job.text.starts_with("Page 5 ·")
+                                && shape.clip_rect.contains(text.pos) =>
+                        {
+                            Some(text.pos + egui::vec2(5.0, 5.0))
+                        }
+                        _ => None,
+                    })
+                    .expect("the preceding page row must be visible");
+                for pressed in [true, false] {
+                    frame(
+                        &mut app,
+                        &context,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(position),
+                            egui::Event::PointerButton {
+                                pos: position,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
                 }
-                _ => None,
-            })
-            .unwrap();
-        frame(
-            &mut app,
-            &context,
-            size,
-            vec![egui::Event::PointerMoved(position)],
-        );
-        let output = settle(&mut app, &context, size);
-        assert!(
-            output.shapes.iter().any(|shape| match &shape.shape {
-                egui::Shape::Text(text) => text
-                    .galley
-                    .job
-                    .text
-                    .contains("PDF page label: Long appendix 中文😀 title\nsecond line 6"),
-                _ => false,
-            }),
-            "hover must display the full retained label, including the suffix omitted from the caption"
-        );
+                assert_eq!(app.nav.page, 4, "the labeled list row must navigate");
+            }
+        }
     }
 
     #[test]
