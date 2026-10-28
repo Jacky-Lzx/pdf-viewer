@@ -4,25 +4,70 @@ use eframe::egui::{Color32, ColorImage};
 /// Reuse the raster target for even rotations; allocate once for quarter turns.
 pub fn prepare(image: ColorImage, turns: u8, night: bool) -> ColorImage {
     if night {
-        transform::<true>(image, turns)
+        transform::<true>(image, turns, |[r, g, b, a]| {
+            Color32::from_rgba_premultiplied(255 - r, 255 - g, 255 - b, a)
+        })
     } else {
-        transform::<false>(image, turns)
+        transform::<false>(image, turns, |rgba| {
+            Color32::from_rgba_premultiplied(rgba[0], rgba[1], rgba[2], rgba[3])
+        })
     }
 }
 
-fn transform<const NIGHT: bool>(mut image: ColorImage, turns: u8) -> ColorImage {
+pub fn prepare_with_palette(
+    image: ColorImage,
+    turns: u8,
+    palette: crate::page_colors::PagePalette,
+) -> ColorImage {
+    use crate::page_colors::PagePalette;
+    // Preserve the allocation-free identity path and exact legacy inversion.
+    if palette.foreground == PagePalette::default().foreground
+        && palette.background == PagePalette::default().background
+    {
+        return prepare(image, turns, false);
+    }
+    if palette.foreground == PagePalette::inverted().foreground
+        && palette.background == PagePalette::inverted().background
+    {
+        return prepare(image, turns, true);
+    }
+    let foreground = palette.foreground.0.map(u32::from);
+    let background = palette.background.0.map(u32::from);
+    // Map each RGB channel independently: grayscale follows the paper/ink
+    // gradient, while colored figures retain their channel differences.
+    let channels: [[u8; 256]; 3] = std::array::from_fn(|channel| {
+        std::array::from_fn(|value| {
+            ((foreground[channel] * (255 - value as u32)
+                + background[channel] * value as u32
+                + 127)
+                / 255) as u8
+        })
+    });
+    transform::<true>(image, turns, |[r, g, b, a]| {
+        let input = [r, g, b];
+        let rgb: [u8; 3] = std::array::from_fn(|channel| {
+            if a == 255 {
+                channels[channel][usize::from(input[channel])]
+            } else {
+                let value = u32::from(input[channel].min(a));
+                ((foreground[channel] * (u32::from(a) - value) + background[channel] * value + 127)
+                    / 255) as u8
+            }
+        });
+        Color32::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], a)
+    })
+}
+
+fn transform<const CONVERT: bool>(
+    mut image: ColorImage,
+    turns: u8,
+    convert: impl Fn([u8; 4]) -> Color32,
+) -> ColorImage {
     let [w, h] = image.size;
-    let convert = |[r, g, b, a]: [u8; 4]| {
-        if NIGHT {
-            Color32::from_rgba_premultiplied(255 - r, 255 - g, 255 - b, a)
-        } else {
-            Color32::from_rgba_premultiplied(r, g, b, a)
-        }
-    };
     let turns = turns % 4;
     match turns {
         0 => {
-            if NIGHT {
+            if CONVERT {
                 for pixel in &mut image.pixels {
                     *pixel = convert(pixel.to_array());
                 }
@@ -30,7 +75,7 @@ fn transform<const NIGHT: bool>(mut image: ColorImage, turns: u8) -> ColorImage 
             image
         }
         2 => {
-            if NIGHT {
+            if CONVERT {
                 reverse_map(&mut image.pixels, |pixel| convert(pixel.to_array()));
             } else {
                 image.pixels.reverse();
@@ -48,6 +93,48 @@ fn transform<const NIGHT: bool>(mut image: ColorImage, turns: u8) -> ColorImage 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn custom_palette_maps_ink_paper_antialiasing_color_and_alpha_through_rotations() {
+        use super::*;
+        use crate::page_colors::{PagePalette, Rgb};
+        let palette = PagePalette {
+            foreground: Rgb([205, 214, 244]),
+            background: Rgb([30, 30, 46]),
+            canvas: None,
+        };
+        let input = ColorImage::new(
+            [2, 3],
+            vec![
+                Color32::BLACK,
+                Color32::WHITE,
+                Color32::from_gray(128),
+                Color32::RED,
+                Color32::TRANSPARENT,
+                Color32::from_rgba_premultiplied(0, 0, 0, 128),
+            ],
+        );
+        let expected = ColorImage::new(
+            [2, 3],
+            vec![
+                palette.foreground.color(),
+                palette.background.color(),
+                Color32::from_rgb(117, 122, 145),
+                Color32::from_rgb(30, 214, 244),
+                Color32::TRANSPARENT,
+                Color32::from_rgba_premultiplied(103, 107, 122, 128),
+            ],
+        );
+        for turns in 0..8 {
+            let image = input.clone();
+            let original = image.pixels.as_ptr();
+            let actual = prepare_with_palette(image, turns, palette);
+            assert_eq!(actual, prepare(expected.clone(), turns, false));
+            if turns % 2 == 0 {
+                assert_eq!(actual.pixels.as_ptr(), original);
+            }
+        }
+    }
+
     #[test]
     fn direct_texture_pixels_match_byte_transforms_including_alpha_and_tile_edges() {
         use super::*;

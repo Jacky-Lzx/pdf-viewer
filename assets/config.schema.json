@@ -29,6 +29,72 @@
           "type": "boolean",
           "description": "Use page previews in the sidebar.",
           "default": false
+        },
+        "white": {
+          "type": "object",
+          "description": "White PDF palette. Each source RGB channel is mapped between foreground (black) and background (white).",
+          "additionalProperties": false,
+          "default": {
+            "foreground": "#000000",
+            "background": "#ffffff",
+            "canvas": null
+          },
+          "properties": {
+            "foreground": {
+              "type": "string",
+              "description": "Output color for black PDF pixels.",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#000000"
+            },
+            "background": {
+              "type": "string",
+              "description": "Output color for white PDF pixels (paper).",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#ffffff"
+            },
+            "canvas": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Color outside the paper; omitted values follow the interface theme.",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": null
+            }
+          }
+        },
+        "inverted": {
+          "type": "object",
+          "description": "Inverted PDF palette. Each source RGB channel is mapped between foreground (black) and background (white).",
+          "additionalProperties": false,
+          "default": {
+            "foreground": "#ffffff",
+            "background": "#000000",
+            "canvas": null
+          },
+          "properties": {
+            "foreground": {
+              "type": "string",
+              "description": "Output color for black PDF pixels.",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#ffffff"
+            },
+            "background": {
+              "type": "string",
+              "description": "Output color for white PDF pixels (paper).",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#000000"
+            },
+            "canvas": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Color outside the paper; omitted values follow the interface theme.",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": null
+            }
+          }
         }
       }
     },

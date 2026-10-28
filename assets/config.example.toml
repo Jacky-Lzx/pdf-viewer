@@ -8,6 +8,18 @@ night = false
 sidebar = false
 thumbnails = false
 
+# Output colors for black (foreground) and white (background) source pixels.
+[appearance.white]
+foreground = "#000000"
+background = "#ffffff"
+# canvas = "#ebefeb" # Outside the paper; omitted: follow the interface theme.
+
+[appearance.inverted]
+foreground = "#ffffff"
+background = "#000000"
+# Catppuccin Mocha: foreground = "#cdd6f4", background = "#1e1e2e"
+# canvas = "#181825"
+
 [display]
 # single, continuous, facing
 layout = "single"

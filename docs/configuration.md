@@ -24,6 +24,27 @@ schema 校验字段、值类型、枚举和数值范围；快捷键的具体按�
 
 `[appearance]` 的 `dark`（深色界面）、`night`（页面反色）、`sidebar`（侧栏）、`thumbnails`（页面预览）均为布尔值，默认 `false`。这些值在每次启动时应用，阅读过程中仍可临时切换。
 
+`I` 在白色模式和反转模式间切换，分别使用 `[appearance.white]` 与 `[appearance.inverted]`；`D` 独立切换界面主题。两个配色表都支持 `foreground`（原 PDF 黑色像素的显示颜色）、`background`（原 PDF 白色像素/纸张的显示颜色）和可选的 `canvas`（纸张外围的底色）。颜色必须为 `"#RRGGBB"`，大小写均可。省略 `canvas` 时沿用界面主题底色。
+
+白色模式默认黑字白纸，反转模式默认白字黑纸；只配置部分字段时，其余字段仍使用对应模式的默认值。下面将反转模式配置为 [Catppuccin Mocha](https://catppuccin.com/palette/) 的 Text、Base 和 Mantle，并在启动时启用：
+
+```toml
+[appearance]
+dark = true
+night = true
+
+[appearance.white]
+foreground = "#000000"
+background = "#ffffff"
+
+[appearance.inverted]
+foreground = "#cdd6f4"
+background = "#1e1e2e"
+canvas = "#181825"
+```
+
+配色应用于主页面、双页/连续阅读、缩略图和高倍缩放瓦片，只改变显示，不修改 PDF 或导出内容。每个 RGB 通道在前景与背景之间线性映射，保留抗锯齿及灰阶过渡；彩色图片、图表也会参与映射（反转模式会改变其颜色）。修改后重启阅读器生效。
+
 `[display]`：
 
 | 字段 | 可用值 | 默认值 |
@@ -107,6 +128,6 @@ night = []
 
 ## 错误与阅读记录
 
-未知字段、未知动作、无效按键、快捷键冲突和非法缩放会报告错误。程序显示配置路径并使用内置默认设置，保留原配置文件，修正后重启即可。
+未知字段、未知动作、无效颜色、无效按键、快捷键冲突和非法缩放会报告错误。程序显示配置路径并使用内置默认设置，保留原配置文件，修正后重启即可。
 
 `config.toml` 只由用户编辑，阅读进度保存不会改写它。`library.json` 继续保存最近文档、阅读位置、书签及会话状态；其中旧的偏好字段只用于首次迁移，之后启动时以 TOML 配置为准。Linux 的阅读记录位于 `$XDG_CONFIG_HOME/pagewing/library.json`（默认 `~/.config/pagewing/library.json`），macOS 位于 `~/Library/Application Support/dev.pagewing.Pagewing/library.json`。

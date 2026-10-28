@@ -29,6 +29,7 @@ mod navigation;
 mod outline;
 mod outline_view;
 mod output;
+mod page_colors;
 mod page_geometry;
 mod page_labels;
 mod pdf_objects;

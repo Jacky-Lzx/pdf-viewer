@@ -6,6 +6,9 @@ mod document;
 #[allow(dead_code, unused_imports)]
 #[path = "../src/document_bytes.rs"]
 mod document_bytes;
+#[allow(dead_code)]
+#[path = "../src/page_colors.rs"]
+mod page_colors;
 #[path = "support/texture_pixels_previous.rs"]
 mod previous;
 #[path = "../src/texture_pixels.rs"]
@@ -31,10 +34,10 @@ fn main() {
                 night,
             )
         } else {
-            texture_pixels::prepare(
+            texture_pixels::prepare_with_palette(
                 document::rasterize_pixels(&pdf, &caches[1], 0, width).unwrap(),
                 turns,
-                night,
+                page_colors::PageColors::default().palette(night),
             )
         }
     };

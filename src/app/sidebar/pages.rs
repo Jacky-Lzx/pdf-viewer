@@ -232,11 +232,7 @@ impl Pagewing {
                 painter.rect_filled(
                     image_rect,
                     0.0,
-                    if key.night {
-                        Color32::BLACK
-                    } else {
-                        Color32::WHITE
-                    },
+                    self.page_colors.palette(key.night).background.color(),
                 );
                 if let Some(texture) = texture {
                     painter.image(
@@ -255,11 +251,7 @@ impl Pagewing {
                             "Loading…"
                         },
                         egui::FontId::proportional(12.0),
-                        if key.night {
-                            Color32::LIGHT_GRAY
-                        } else {
-                            Color32::DARK_GRAY
-                        },
+                        self.page_colors.palette(key.night).foreground.color(),
                     );
                 }
                 caption::paint(

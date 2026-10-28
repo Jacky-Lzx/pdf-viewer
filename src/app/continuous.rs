@@ -191,11 +191,10 @@ impl Pagewing {
             painter.rect_filled(
                 page_rect,
                 0.0,
-                if self.library.night {
-                    Color32::BLACK
-                } else {
-                    Color32::WHITE
-                },
+                self.page_colors
+                    .palette(self.library.night)
+                    .background
+                    .color(),
             );
             if let Some(texture) = self.cache.get(key).or_else(|| self.cache.fallback(*key)) {
                 painter.image(

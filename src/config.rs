@@ -1,6 +1,7 @@
 //! Human-edited preferences, kept separate from automatic reading-state saves.
 use crate::{
     navigation::{Fit, MAX_SCALE, MIN_SCALE},
+    page_colors::{InvertedPalette, PageColors, PagePalette},
     settings::{Binding, DisplaySettings, Layout, Shortcuts},
     state::Library,
 };
@@ -29,6 +30,8 @@ struct Appearance {
     night: bool,
     sidebar: bool,
     thumbnails: bool,
+    white: PagePalette,
+    inverted: InvertedPalette,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,6 +75,8 @@ impl Config {
                 night: library.night,
                 sidebar: library.sidebar,
                 thumbnails: library.thumbnails,
+                white: PagePalette::default(),
+                inverted: InvertedPalette::default(),
             },
             display: Display {
                 layout: library.display.layout,
@@ -94,6 +99,13 @@ impl Config {
                     )
                 })
                 .collect(),
+        }
+    }
+
+    pub fn page_colors(&self) -> PageColors {
+        PageColors {
+            white: self.appearance.white,
+            inverted: self.appearance.inverted,
         }
     }
 
@@ -313,6 +325,46 @@ mod tests {
         assert_eq!(library.shortcuts.label("next_page"), "X");
         assert_eq!(library.shortcuts.label("night"), "Unassigned");
         parse(include_str!("../assets/config.example.toml")).unwrap();
+    }
+
+    #[test]
+    fn page_palettes_use_mode_defaults_and_roundtrip_custom_colors() {
+        use crate::page_colors::Rgb;
+        let defaults = parse("").unwrap().page_colors();
+        assert_eq!(defaults.palette(false), PagePalette::default());
+        assert_eq!(defaults.palette(true), PagePalette::inverted());
+        let text = "[appearance.white]\nbackground = '#FFF4DC'\n\
+                    [appearance.inverted]\nbackground = '#1e1e2e'\ncanvas = '#181825'\n";
+        let config = parse(text).unwrap();
+        let colors = config.page_colors();
+        assert_eq!(colors.palette(false).foreground, Rgb([0; 3]));
+        assert_eq!(colors.palette(false).background, Rgb([255, 244, 220]));
+        assert_eq!(colors.palette(true).foreground, Rgb([255; 3]));
+        assert_eq!(colors.palette(true).background, Rgb([30, 30, 46]));
+        assert_eq!(colors.palette(true).canvas, Some(Rgb([24, 24, 37])));
+        let restored = parse(&toml::to_string_pretty(&config).unwrap())
+            .unwrap()
+            .page_colors();
+        for night in [false, true] {
+            assert_eq!(restored.palette(night), colors.palette(night));
+        }
+        for value in [
+            "red",
+            "#fff",
+            "#12345678",
+            "#gg1234",
+            "#１２３",
+            "123456",
+            "",
+        ] {
+            for mode in ["white", "inverted"] {
+                for field in ["foreground", "background", "canvas"] {
+                    let text = format!("[appearance.{mode}]\n{field} = '{value}'");
+                    assert!(parse(&text).unwrap_err().contains("expected #RRGGBB"));
+                }
+            }
+        }
+        assert!(parse("[appearance.inverted]\nbackgound = '#1e1e2e'").is_err());
     }
 
     #[test]

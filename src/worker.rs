@@ -209,14 +209,30 @@ pub struct Worker {
 }
 
 impl Worker {
+    #[cfg(test)]
     pub fn new(context: egui::Context) -> Self {
-        Self::with_loader(context, |path, password, cancelled| {
+        Self::with_colors(context, crate::page_colors::PageColors::default())
+    }
+
+    pub fn with_colors(context: egui::Context, colors: crate::page_colors::PageColors) -> Self {
+        Self::with_loader_and_colors(context, colors, |path, password, cancelled| {
             document::load_cancellable(path, password, cancelled)
         })
     }
 
+    #[cfg(test)]
     fn with_loader(
         context: egui::Context,
+        load: impl FnMut(&std::path::Path, &str, &dyn Fn() -> bool) -> Result<Option<Pdf>, LoadError>
+        + Send
+        + 'static,
+    ) -> Self {
+        Self::with_loader_and_colors(context, crate::page_colors::PageColors::default(), load)
+    }
+
+    fn with_loader_and_colors(
+        context: egui::Context,
+        colors: crate::page_colors::PageColors,
         mut load: impl FnMut(
             &std::path::Path,
             &str,
@@ -337,7 +353,7 @@ impl Worker {
                     }
                     if let Some((pdf, active_id, watch)) = &mut active
                         && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            session(pdf, *active_id, watch, &state, &tx, &context);
+                            session(pdf, *active_id, watch, &state, &tx, &context, colors);
                         }))
                         .is_err()
                     {
@@ -483,6 +499,7 @@ fn session(
     shared: &Shared,
     tx: &SyncSender<Event>,
     context: &egui::Context,
+    colors: crate::page_colors::PageColors,
 ) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
@@ -643,10 +660,10 @@ fn session(
                 // The receiver only uploads finished texture images.
                 let result = result.map(|result| {
                     result.map(|image| {
-                        crate::texture_pixels::prepare(
+                        crate::texture_pixels::prepare_with_palette(
                             image,
                             if key.tile.is_some() { 0 } else { key.rotation },
-                            key.night,
+                            colors.palette(key.night),
                         )
                     })
                 });
@@ -1131,6 +1148,91 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn custom_palettes_reach_pages_thumbnails_and_tiles_in_both_modes() {
+        use crate::page_colors::{InvertedPalette, PageColors, PagePalette, Rgb};
+        let colors = PageColors {
+            white: PagePalette {
+                background: Rgb([255, 244, 220]),
+                ..Default::default()
+            },
+            inverted: InvertedPalette {
+                foreground: Rgb([205, 214, 244]),
+                background: Rgb([30, 30, 46]),
+                canvas: None,
+            },
+        };
+        let worker = Worker::with_colors(egui::Context::default(), colors);
+        worker.open(1, sample(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        let pdf = document::load(&sample(), "").unwrap();
+        let cache = RenderCache::new();
+        for rotation in 0..4 {
+            // Revisit white mode after inverted mode, as with repeated I presses.
+            for night in [false, true, false] {
+                for tiled in [false, true] {
+                    let key = RenderKey {
+                        page: 0,
+                        width: 96,
+                        rotation,
+                        night,
+                        tile: tiled.then_some(document::Tile {
+                            scale_bits: 0.5_f32.to_bits(),
+                            x: 0,
+                            y: 0,
+                            size: [32, 32],
+                        }),
+                    };
+                    let source = if let Some(tile) = key.tile {
+                        document::rasterize_tile(&pdf, &cache, key, tile).unwrap()
+                    } else {
+                        let bitmap = document::rasterize(
+                            &pdf,
+                            &cache,
+                            RenderKey {
+                                night: false,
+                                ..key
+                            },
+                        )
+                        .unwrap();
+                        egui::ColorImage::from_rgba_premultiplied(bitmap.size, &bitmap.rgba)
+                    };
+                    worker.update(|pending| {
+                        pending.replace_renders(vec![key]);
+                        pending.replace_thumbnails(vec![key]);
+                    });
+                    for thumbnail in [false, true] {
+                        let image = match receive(&worker) {
+                            Event::Rendered {
+                                key: actual, image, ..
+                            } if !thumbnail && actual == key => image,
+                            Event::Thumbnail {
+                                key: actual,
+                                image: Some(image),
+                                ..
+                            } if thumbnail && actual == key => image,
+                            _ => panic!("Expected a prepared image for {key:?}"),
+                        };
+                        assert_eq!(image.size, source.size);
+                        let palette = colors.palette(night);
+                        for (actual, original) in image.pixels.iter().zip(&source.pixels) {
+                            let mut expected = [0; 4];
+                            for channel in 0..3 {
+                                let t = f64::from(original[channel]) / 255.0;
+                                expected[channel] =
+                                    (f64::from(palette.foreground.0[channel]) * (1.0 - t)
+                                        + f64::from(palette.background.0[channel]) * t)
+                                        .round() as u8;
+                            }
+                            expected[3] = 255;
+                            assert_eq!(actual.to_array(), expected, "{key:?}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

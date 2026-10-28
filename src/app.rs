@@ -63,6 +63,7 @@ pub struct Pagewing {
     worker: Worker,
     state_writer: crate::state_writer::StateWriter,
     library: Library,
+    page_colors: crate::page_colors::PageColors,
     reading: ReadingState,
     last_closed: Option<PathBuf>,
     bookmark_pages: Vec<usize>,
@@ -210,14 +211,17 @@ impl Pagewing {
         let mut library = Library::load(&state_path);
         let config = crate::config::load_or_create(&preferences, &library);
         let config_error = config.as_ref().err().cloned();
-        config.unwrap_or_default().apply(&mut library);
+        let config = config.unwrap_or_default();
+        config.apply(&mut library);
+        let page_colors = config.page_colors();
         set_theme(context, library.dark);
         shortcuts::configure_input(context);
         crate::fonts::install(context.clone());
         let mut app = Self {
             #[cfg(target_os = "macos")]
             open_documents: None,
-            worker: Worker::new(context.clone()),
+            worker: Worker::with_colors(context.clone(), page_colors),
+            page_colors,
             state_writer: crate::state_writer::StateWriter::new(state_path, context.clone()),
             library,
             reading: ReadingState::default(),
@@ -934,7 +938,14 @@ impl Pagewing {
     }
 
     fn canvas(&mut self, context: &egui::Context) {
-        let background = appearance::canvas(self.library.dark);
+        let background = self
+            .page_colors
+            .palette(self.library.night)
+            .canvas
+            .map_or_else(
+                || appearance::canvas(self.library.dark),
+                |color| color.color(),
+            );
         let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(context, |ui| {
@@ -1108,11 +1119,10 @@ impl Pagewing {
                 painter.rect_filled(
                     page_rect,
                     0.0,
-                    if self.library.night {
-                        Color32::BLACK
-                    } else {
-                        Color32::WHITE
-                    },
+                    self.page_colors
+                        .palette(self.library.night)
+                        .background
+                        .color(),
                 );
                 if let Some(texture) = texture {
                     painter.image(
