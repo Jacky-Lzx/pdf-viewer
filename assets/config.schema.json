@@ -37,6 +37,13 @@
           "maximum": 1,
           "default": 0.0
         },
+        "text_embolden_step": {
+          "type": "number",
+          "description": "Amount added/removed by the PDF text weight shortcuts. Changes apply immediately during reading and clamp to 0–1; restart restores text_embolden.",
+          "minimum": 0.001,
+          "maximum": 1,
+          "default": 0.05
+        },
         "white": {
           "type": "object",
           "description": "White PDF palette. Each source RGB channel is mapped between foreground (black) and background (white).",
@@ -385,6 +392,16 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "text_embolden_increase": {
+          "description": "Increase PDF text weight. Default: Alt+Equals. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "text_embolden_decrease": {
+          "description": "Decrease PDF text weight. Default: Alt+Minus. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "zoom": {
           "description": "Set an exact zoom percentage. Replaces all default bindings; [] disables this action.",

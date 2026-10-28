@@ -590,7 +590,9 @@ impl Pagewing {
             }
             if modifiers.alt {
                 let count = self.nav.take_count();
-                if matches!(key, Key::ArrowLeft | Key::ArrowRight) {
+                if matches!(key, Key::Equals | Key::Minus) && !modifiers.shift {
+                    self.adjust_text_embolden(key == Key::Equals, count);
+                } else if matches!(key, Key::ArrowLeft | Key::ArrowRight) {
                     for _ in 0..count {
                         if !self.history(key == Key::ArrowRight) {
                             break;

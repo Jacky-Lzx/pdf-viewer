@@ -9,6 +9,8 @@ sidebar = false
 thumbnails = false
 # Display-only outline text weight, 0.0–1.0. Try 0.2 for thin serif fonts.
 text_embolden = 0.0
+# Amount added/removed by the text weight shortcuts (range: 0.001–1.0).
+text_embolden_step = 0.05
 
 # Output colors for black (foreground) and white (background) source pixels.
 [appearance.white]
@@ -31,6 +33,8 @@ fit = "page"
 remember_documents = true
 
 [shortcuts]
+text_embolden_increase = ["Alt+Equals"]
+text_embolden_decrease = ["Alt+Minus"]
 # An action replaces all of its default bindings; [] disables it.
 # Modifiers: Cmd (Ctrl on Linux, Command on macOS), Ctrl, Alt, Shift.
 # Use key names such as X, ArrowDown, PageDown, Comma, Plus, Questionmark.

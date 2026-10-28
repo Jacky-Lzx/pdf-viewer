@@ -48,11 +48,13 @@ pub enum Event {
         key: RenderKey,
         image: egui::ColorImage,
         milliseconds: f64,
+        appearance_revision: u64,
     },
     Thumbnail {
         id: u64,
         key: RenderKey,
         image: Option<egui::ColorImage>,
+        appearance_revision: u64,
     },
     Search {
         id: u64,
@@ -127,6 +129,7 @@ impl SearchProgress {
 
 #[derive(Default)]
 struct Pending {
+    text_style: TextStyle,
     open: Option<OpenRequest>,
     close: bool,
     render: VecDeque<RenderKey>,
@@ -140,6 +143,12 @@ struct Pending {
     comments: bool,
     edit_comment: Option<EditComment>,
     stop: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TextStyle {
+    weight: f32,
+    revision: u64,
 }
 
 struct Inspection {
@@ -203,8 +212,8 @@ impl Pending {
 
 type Shared = Arc<(Mutex<Pending>, Condvar)>;
 
-// Fixed for a worker's lifetime, so every page/tile/thumbnail cache has the
-// same appearance without adding startup preferences to individual render keys.
+// Palettes are fixed for a worker's lifetime. Text weight can change between
+// renders; its revision follows every result through the bounded event queue.
 #[derive(Clone, Copy, Default)]
 struct RenderAppearance {
     colors: crate::page_colors::PageColors,
@@ -260,7 +269,14 @@ impl Worker {
         + Send
         + 'static,
     ) -> Self {
-        let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
+        let pending = Pending {
+            text_style: TextStyle {
+                weight: appearance.settings.text_embolden,
+                revision: 0,
+            },
+            ..Default::default()
+        };
+        let shared = Arc::new((Mutex::new(pending), Condvar::new()));
         let (tx, events) = mpsc::sync_channel(4);
         let state = shared.clone();
         std::thread::Builder::new()
@@ -391,10 +407,21 @@ impl Worker {
         Self { shared, events }
     }
 
-    fn update(&self, change: impl FnOnce(&mut Pending)) {
+    fn update<T>(&self, change: impl FnOnce(&mut Pending) -> T) -> T {
         let (lock, wake) = &*self.shared;
-        change(&mut lock.lock().unwrap());
+        let result = change(&mut lock.lock().unwrap());
         wake.notify_one();
+        result
+    }
+
+    pub fn set_text_embolden(&self, weight: f32) -> u64 {
+        self.update(|pending| {
+            pending.text_style.weight = weight;
+            pending.text_style.revision = pending.text_style.revision.wrapping_add(1);
+            pending.render.clear();
+            pending.thumbnails.clear();
+            pending.text_style.revision
+        })
     }
 
     pub fn open(&self, id: u64, path: PathBuf, password: String) {
@@ -521,6 +548,7 @@ fn session(
     appearance: RenderAppearance,
 ) {
     let render_cache = RenderCache::new();
+    let mut rendered_weight = appearance.settings.text_embolden;
     let interpreter_cache = InterpreterCache::new();
     let link_reader = crate::links::LinkReader::new(pdf);
     let mut texts = crate::text_cache::TextCache::default();
@@ -656,6 +684,15 @@ fn session(
             }
             Job::Render(key, revision) | Job::Thumbnail(key, revision) => {
                 let thumbnail = matches!(job, Job::Thumbnail(..));
+                let style = shared.0.lock().unwrap().text_style;
+                if style.weight != rendered_weight {
+                    render_cache.clear_text_weight_cache();
+                    rendered_weight = style.weight;
+                }
+                let settings = hayro::RenderSettings {
+                    text_embolden: style.weight,
+                    ..appearance.settings
+                };
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if let Some(tile) = key.tile {
@@ -664,7 +701,7 @@ fn session(
                             &render_cache,
                             key,
                             tile,
-                            &appearance.settings,
+                            &settings,
                         )
                     } else {
                         document::rasterize_pixels_with_settings(
@@ -672,13 +709,15 @@ fn session(
                             &render_cache,
                             key.page,
                             key.width,
-                            &appearance.settings,
+                            &settings,
                         )
                     }
                 }));
                 let relevant = {
                     let pending = shared.0.lock().unwrap();
-                    if thumbnail {
+                    if pending.text_style.revision != style.revision {
+                        false
+                    } else if thumbnail {
                         pending.wants_thumbnail(key, revision)
                     } else {
                         pending.wants_render(key, revision)
@@ -702,7 +741,9 @@ fn session(
                 // duplicate still-needed job only when its final image is ready.
                 let relevant = {
                     let mut pending = shared.0.lock().unwrap();
-                    if thumbnail {
+                    if pending.text_style.revision != style.revision {
+                        false
+                    } else if thumbnail {
                         pending.finish_thumbnail(key, revision)
                     } else {
                         pending.finish_render(key, revision)
@@ -720,6 +761,7 @@ fn session(
                             id,
                             key,
                             image: result.ok().and_then(Result::ok),
+                            appearance_revision: style.revision,
                         },
                     );
                     continue;
@@ -733,6 +775,7 @@ fn session(
                             key,
                             image,
                             milliseconds,
+                            appearance_revision: style.revision,
                         },
                     ),
                     result => {
@@ -1182,6 +1225,53 @@ mod tests {
     }
 
     #[test]
+    fn live_text_weight_changes_reuse_the_session_and_tag_every_image() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text-weight.pdf");
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, path.clone(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        let pdf = document::load(&path, "").unwrap();
+        let cache = RenderCache::new();
+        let key = RenderKey {
+            page: 0,
+            width: 800,
+            rotation: 0,
+            night: false,
+            tile: None,
+        };
+        for weight in [0.2, 0.4, 0.0, 0.2] {
+            let revision = worker.set_text_embolden(weight);
+            worker.render(vec![key]);
+            worker.thumbnails(vec![key]);
+            let settings = hayro::RenderSettings {
+                text_embolden: weight,
+                ..Default::default()
+            };
+            let expected =
+                document::rasterize_pixels_with_settings(&pdf, &cache, 0, 800, &settings).unwrap();
+            for thumbnail in [false, true] {
+                let (image, actual_revision) = match receive(&worker) {
+                    Event::Rendered {
+                        image,
+                        appearance_revision,
+                        ..
+                    } if !thumbnail => (image, appearance_revision),
+                    Event::Thumbnail {
+                        image: Some(image),
+                        appearance_revision,
+                        ..
+                    } if thumbnail => (image, appearance_revision),
+                    _ => panic!("expected updated weight image"),
+                };
+                assert_eq!(actual_revision, revision);
+                assert_eq!(image.pixels, expected.pixels);
+            }
+        }
+        worker.copy(0);
+        assert!(matches!(receive(&worker), Event::Text { text, .. } if text.contains("Times")));
+    }
+
+    #[test]
     fn text_embolden_reaches_pages_thumbnails_and_rotated_tiles_in_both_modes() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text-weight.pdf");
         let settings = hayro::RenderSettings {
@@ -1361,6 +1451,7 @@ mod tests {
                             key: actual,
                             image,
                             milliseconds,
+                            appearance_revision: 0,
                         } if !thumbnail && actual == key => {
                             assert!(milliseconds.is_finite() && milliseconds >= 0.0);
                             image
@@ -1369,6 +1460,7 @@ mod tests {
                             id: 1,
                             key: actual,
                             image: Some(image),
+                            appearance_revision: 0,
                         } if thumbnail && actual == key => image,
                         _ => panic!("Expected a prepared image for {key:?}"),
                     };

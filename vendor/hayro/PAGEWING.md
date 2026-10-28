@@ -14,6 +14,8 @@ Local changes are confined to `src/lib.rs` and `src/glyph.rs`:
   Merge the border with the original fill using matching nonzero winding,
   preserving glyph opacity and paint without an additional compositing pass.
 - Include weight in outline cache keys so caches can be reused across settings.
+- Expose `RenderCache::clear_text_weight_cache` to bound expanded-outline memory
+  when the reader changes weight interactively, retaining original/font caches.
 - Leave stroke-only/invisible text, Type 3 glyphs, text clipping outlines, images,
   and ordinary vector graphics unchanged.
 

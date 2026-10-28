@@ -64,6 +64,9 @@ pub struct Pagewing {
     state_writer: crate::state_writer::StateWriter,
     library: Library,
     page_colors: crate::page_colors::PageColors,
+    text_embolden: f32,
+    text_embolden_step: f64,
+    appearance_revision: u64,
     reading: ReadingState,
     last_closed: Option<PathBuf>,
     bookmark_pages: Vec<usize>,
@@ -222,6 +225,9 @@ impl Pagewing {
             open_documents: None,
             worker: Worker::with_appearance(context.clone(), page_colors, config.render_settings()),
             page_colors,
+            text_embolden: config.render_settings().text_embolden,
+            text_embolden_step: config.text_embolden_step(),
+            appearance_revision: 0,
             state_writer: crate::state_writer::StateWriter::new(state_path, context.clone()),
             library,
             reading: ReadingState::default(),
@@ -834,7 +840,8 @@ impl Pagewing {
                     key,
                     image,
                     milliseconds,
-                } if id == self.id => {
+                    appearance_revision,
+                } if id == self.id && appearance_revision == self.appearance_revision => {
                     let wanted = self
                         .requested
                         .as_ref()
@@ -873,7 +880,12 @@ impl Pagewing {
                         self.render_ms = milliseconds;
                     }
                 }
-                Event::Thumbnail { id, key, image } if id == self.id => {
+                Event::Thumbnail {
+                    id,
+                    key,
+                    image,
+                    appearance_revision,
+                } if id == self.id && appearance_revision == self.appearance_revision => {
                     if key.rotation == self.reading.rotation && key.night == self.library.night {
                         self.thumbnails.accept(key, image, context);
                     }

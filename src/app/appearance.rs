@@ -1,6 +1,29 @@
 use super::ACCENT;
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 
+impl super::Pagewing {
+    pub(super) fn adjust_text_embolden(&mut self, increase: bool, count: usize) {
+        let delta = self.text_embolden_step * count as f64;
+        let value = (f64::from(self.text_embolden) + if increase { delta } else { -delta })
+            .clamp(0.0, 1.0) as f32;
+        let value = if value < f32::EPSILON {
+            0.0
+        } else if (1.0 - value).abs() < f32::EPSILON {
+            1.0
+        } else {
+            value
+        };
+        if value != self.text_embolden {
+            self.text_embolden = value;
+            self.appearance_revision = self.worker.set_text_embolden(value);
+            self.cache.clear();
+            self.thumbnails.clear();
+            self.requested = None;
+        }
+        self.notify(format!("PDF text weight: {value:.3}"));
+    }
+}
+
 pub(super) fn accent(ui: &egui::Ui) -> Color32 {
     if ui.visuals().dark_mode {
         Color32::from_rgb(133, 205, 174)

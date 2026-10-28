@@ -29,7 +29,14 @@ schema 校验字段、值类型、枚举和数值范围；快捷键的具体按�
 ```toml
 [appearance]
 text_embolden = 0.2
+text_embolden_step = 0.05
+
+[shortcuts]
+text_embolden_increase = ["Alt+Equals"]
+text_embolden_decrease = ["Alt+Minus"]
 ```
+
+阅读时默认按 `Alt+=` 增加、`Alt+-` 减少文字加粗（macOS 的 Alt 为 Option）；每次变化量由 `appearance.text_embolden_step` 决定，范围 `0.001`–`1.0`，默认 `0.05`。支持数字计数，例如 `3` 后按增加键会增加三个步长。结果限制在 `0.0`–`1.0`，立即刷新页面、缩略图及高倍缩放瓦片，并在状态栏显示当前值。快捷键可像其他动作一样改绑或用 `[]` 停用；在搜索框、评论编辑等输入区域不会触发。调节只对当前阅读器会话生效，不改写配置文件，重启后恢复 `text_embolden` 配置的初始值。
 
 `I` 在白色模式和反转模式间切换，分别使用 `[appearance.white]` 与 `[appearance.inverted]`；`D` 独立切换界面主题。两个配色表都支持 `foreground`（原 PDF 黑色像素的显示颜色）、`background`（原 PDF 白色像素/纸张的显示颜色）和可选的 `canvas`（纸张外围的底色）。颜色必须为 `"#RRGGBB"`，大小写均可。省略 `canvas` 时沿用界面主题底色。
 

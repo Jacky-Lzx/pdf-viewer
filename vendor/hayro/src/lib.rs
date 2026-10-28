@@ -189,6 +189,12 @@ pub struct RenderCache<'a> {
 }
 
 impl<'a> RenderCache<'a> {
+    /// Release expanded outlines when changing display weight, keeping the
+    /// original outlines and interpreter/font caches for the open document.
+    pub fn clear_text_weight_cache(&self) {
+        self.outline_cache.borrow_mut().retain(|(_, weight), _| *weight == 0);
+    }
+
     /// Create a new render cache.
     pub fn new() -> Self {
         Self {

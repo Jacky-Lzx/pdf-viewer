@@ -31,6 +31,123 @@ fn frame(app: &mut Pagewing, context: &Context, events: Vec<Event>) -> FullOutpu
 }
 
 #[test]
+fn text_weight_keys_apply_configured_steps_counts_limits_and_input_isolation() {
+    let directory = tempfile::tempdir().unwrap();
+    let preferences = directory.path().join("config.toml");
+    let original = "[appearance]\ntext_embolden = 0.2\ntext_embolden_step = 0.125\n[shortcuts]\ntext_embolden_increase = ['X']\ntext_embolden_decrease = ['Shift+X']\n";
+    std::fs::write(&preferences, original).unwrap();
+    let context = Context::default();
+    let mut app =
+        Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+    app.nav = crate::navigation::Navigation::new(1, 0);
+    app.dimensions = vec![[600.0, 800.0]];
+    frame(&mut app, &context, key(Key::Equals, Modifiers::ALT));
+    assert_eq!(app.text_embolden, 0.2, "replaced default is disabled");
+    frame(&mut app, &context, key(Key::X, Modifiers::NONE));
+    assert!((app.text_embolden - 0.325).abs() < 0.00001);
+    let mut events = key(Key::Num3, Modifiers::NONE);
+    events.extend(key(Key::X, Modifiers::NONE));
+    frame(&mut app, &context, events);
+    assert!((app.text_embolden - 0.7).abs() < 0.00001);
+    frame(&mut app, &context, key(Key::X, Modifiers::SHIFT));
+    assert!((app.text_embolden - 0.575).abs() < 0.00001);
+    app.search_open = true;
+    app.search_focus = true;
+    frame(&mut app, &context, key(Key::X, Modifiers::NONE));
+    assert!((app.text_embolden - 0.575).abs() < 0.00001);
+    app.search_open = false;
+    app.search_focus = false;
+    context.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    app.adjust_text_embolden(true, 100);
+    assert_eq!(app.text_embolden, 1.0);
+    let revision = app.appearance_revision;
+    app.adjust_text_embolden(true, 1);
+    assert_eq!(
+        app.appearance_revision, revision,
+        "limit does not invalidate caches again"
+    );
+    app.adjust_text_embolden(false, 100);
+    assert_eq!(app.text_embolden, 0.0);
+    assert!(app.message.as_ref().unwrap().0.contains("0.000"));
+    app.save();
+    assert_eq!(std::fs::read_to_string(preferences).unwrap(), original);
+}
+
+#[test]
+fn default_text_weight_keys_work_and_stale_images_cannot_reenter_caches() {
+    use crate::document::RenderKey;
+    use crate::worker::Event as WorkerEvent;
+    let directory = tempfile::tempdir().unwrap();
+    let context = Context::default();
+    let mut app =
+        Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+    app.nav = crate::navigation::Navigation::new(1, 0);
+    app.dimensions = vec![[600.0, 800.0]];
+    let key_value = RenderKey {
+        page: 0,
+        width: 1,
+        rotation: 0,
+        night: false,
+        tile: None,
+    };
+    let image = egui::ColorImage::filled([1, 1], egui::Color32::BLACK);
+    let texture = context.load_texture("old weight", image.clone(), egui::TextureOptions::LINEAR);
+    app.cache.insert(key_value, texture);
+    app.thumbnails.want(key_value);
+    app.thumbnails
+        .accept(key_value, Some(image.clone()), &context);
+    frame(&mut app, &context, key(Key::Equals, Modifiers::ALT));
+    assert_eq!(app.text_embolden, 0.05);
+    assert!(!app.cache.contains(&key_value));
+    assert!(app.thumbnails.want(key_value).is_none());
+    // Simulate results that were already in the bounded queue when the user
+    // changed weight. Session ID and render key still match the current view.
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.worker.events = rx;
+    for revision in [0, app.appearance_revision] {
+        tx.send(WorkerEvent::Rendered {
+            id: app.id,
+            key: key_value,
+            image: image.clone(),
+            milliseconds: 0.0,
+            appearance_revision: revision,
+        })
+        .unwrap();
+        tx.send(WorkerEvent::Thumbnail {
+            id: app.id,
+            key: key_value,
+            image: Some(image.clone()),
+            appearance_revision: revision,
+        })
+        .unwrap();
+        app.events(&context);
+        assert_eq!(
+            app.cache.contains(&key_value),
+            revision == app.appearance_revision
+        );
+        assert_eq!(
+            app.thumbnails.want(key_value).is_some(),
+            revision == app.appearance_revision
+        );
+    }
+    frame(&mut app, &context, key(Key::Minus, Modifiers::ALT));
+    assert_eq!(app.text_embolden, 0.0);
+    // Repeated decimal steps return exactly to each endpoint.
+    for _ in 0..20 {
+        app.adjust_text_embolden(true, 1);
+    }
+    assert_eq!(app.text_embolden, 1.0);
+    for _ in 0..20 {
+        app.adjust_text_embolden(false, 1);
+    }
+    assert_eq!(app.text_embolden, 0.0);
+}
+
+#[test]
 fn zoom_roundtrip_does_not_save_roundoff_as_half_page_scroll() {
     let directory = tempfile::tempdir().unwrap();
     let context = Context::default();

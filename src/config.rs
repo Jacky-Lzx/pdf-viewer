@@ -23,7 +23,7 @@ pub struct Config {
     shortcuts: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Appearance {
     dark: bool,
@@ -31,8 +31,24 @@ struct Appearance {
     sidebar: bool,
     thumbnails: bool,
     text_embolden: f32,
+    text_embolden_step: f64,
     white: PagePalette,
     inverted: InvertedPalette,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            dark: false,
+            night: false,
+            sidebar: false,
+            thumbnails: false,
+            text_embolden: 0.0,
+            text_embolden_step: 0.05,
+            white: PagePalette::default(),
+            inverted: InvertedPalette::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,6 +93,7 @@ impl Config {
                 sidebar: library.sidebar,
                 thumbnails: library.thumbnails,
                 text_embolden: 0.0,
+                text_embolden_step: Appearance::default().text_embolden_step,
                 white: PagePalette::default(),
                 inverted: InvertedPalette::default(),
             },
@@ -118,6 +135,10 @@ impl Config {
         }
     }
 
+    pub fn text_embolden_step(&self) -> f64 {
+        self.appearance.text_embolden_step
+    }
+
     fn fit(&self) -> Result<Fit, String> {
         Ok(match self.display.fit {
             ConfigFit::Mode(FitMode::Page) => Fit::Page,
@@ -154,6 +175,11 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), String> {
+        if !self.appearance.text_embolden_step.is_finite()
+            || !(0.001..=1.0).contains(&self.appearance.text_embolden_step)
+        {
+            return Err("appearance.text_embolden_step must be a number from 0.001 to 1.0".into());
+        }
         if !self.appearance.text_embolden.is_finite()
             || !(0.0..=1.0).contains(&self.appearance.text_embolden)
         {
@@ -358,6 +384,29 @@ mod tests {
         for value in ["-0.1", "1.1", "nan", "inf", "-inf", "true", "'0.2'"] {
             assert!(parse(&format!("[appearance]\ntext_embolden = {value}")).is_err());
         }
+    }
+
+    #[test]
+    fn text_embolden_step_defaults_validates_and_roundtrips() {
+        assert_eq!(parse("").unwrap().text_embolden_step(), 0.05);
+        assert_eq!(
+            parse("[appearance]\ntext_embolden = 0.2")
+                .unwrap()
+                .text_embolden_step(),
+            0.05
+        );
+        for step in [0.001, 0.025, 0.1, 1.0] {
+            let config = parse(&format!("[appearance]\ntext_embolden_step = {step}")).unwrap();
+            let restored = parse(&toml::to_string_pretty(&config).unwrap()).unwrap();
+            assert_eq!(restored.text_embolden_step(), step);
+        }
+        for value in [
+            "0.0", "-0.1", "0.0001", "1.1", "nan", "inf", "-inf", "true", "'0.05'",
+        ] {
+            assert!(parse(&format!("[appearance]\ntext_embolden_step = {value}")).is_err());
+        }
+        assert!(parse("[shortcuts]\ntext_embolden_increase = ['Minus']").is_err());
+        parse("[shortcuts]\ntext_embolden_increase = ['X']\ntext_embolden_decrease = []").unwrap();
     }
 
     #[test]

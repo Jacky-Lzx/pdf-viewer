@@ -40,6 +40,7 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Alt+Left / Alt+Right", "Jump history back / forward"),
     ("+ / −  ·  Ctrl/Cmd++ / −", "Zoom in / out"),
+    ("Alt+= / Alt+−", "Increase / decrease PDF text weight"),
     (
         "3+ / 3−   or   4=",
         "Zoom by a count, preserving the viewport center",

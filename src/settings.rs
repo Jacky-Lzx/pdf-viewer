@@ -296,6 +296,20 @@ pub fn commands() -> &'static [Command] {
             ),
             ("zoom_out", "Zoom out", true, "Minus", "Minus|Cmd+Minus"),
             (
+                "text_embolden_increase",
+                "Increase PDF text weight",
+                false,
+                "Alt+Equals",
+                "Alt+Equals",
+            ),
+            (
+                "text_embolden_decrease",
+                "Decrease PDF text weight",
+                false,
+                "Alt+Minus",
+                "Alt+Minus",
+            ),
+            (
                 "zoom",
                 "Set an exact zoom percentage",
                 true,
