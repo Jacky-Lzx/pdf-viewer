@@ -99,6 +99,12 @@ def run(binary):
                 window = wait_for(lambda: keyboard.focus("alpha.pdf"), "recent picker reader window")
                 expect(paths[0], 0, "initial document")
                 picker("manuals plan")
+                for edge, arrow in [(0xFF57, 0xFF52), (0xFF50, 0xFF54)]:
+                    keyboard.key(edge)
+                    keyboard.key(arrow, shift=True)
+                    keyboard.key("c", ctrl=True)
+                    assert keyboard.clipboard() == "manuals plan", "Shift+arrows select filter text"
+                keyboard.key(0xFF57)
                 burst_motion(["k", "j"])
                 expect(paths[2], 2, "same-frame up at the top then down reaches the second result")
                 picker("alpha"); keyboard.key(0xFF0D)
@@ -224,7 +230,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, viewport-sized PageUp/PageDown, Ctrl+Home/End, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, Shift+arrow text selection, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, viewport-sized PageUp/PageDown, Ctrl+Home/End, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

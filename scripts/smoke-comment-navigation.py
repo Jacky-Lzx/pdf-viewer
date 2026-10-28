@@ -61,6 +61,12 @@ def run(binary):
                 keyboard.click((1000, 114))
                 for char in "Row":
                     keyboard.key(char.lower(), shift=char.isupper())
+                for edge, arrow in [(0xFF57, 0xFF52), (0xFF50, 0xFF54)]:
+                    keyboard.key(edge)
+                    keyboard.key(arrow, shift=True)
+                    keyboard.key("c", ctrl=True)
+                    assert keyboard.clipboard() == "Row", "Shift+arrows select comment filter text"
+                keyboard.key(0xFF57)
                 for _ in range(79):
                     keyboard.key("j", ctrl=True, delay=0.015)
                 wait_for(lambda: selected_card((1180, 820)), "last comment selected")
@@ -84,7 +90,7 @@ def run(binary):
                 assert document.read_bytes() == original, "navigation does not write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 virtual comments, keyboard selection, filter/editor focus, "
+                print("PASS: 80 virtual comments, Shift+arrow text selection, keyboard selection, filter/editor focus, "
                       "full card after resize, manual scroll retention and resumed keyboard navigation")
             except Exception:
                 log.flush()

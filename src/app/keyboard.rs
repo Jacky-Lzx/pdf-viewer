@@ -2,6 +2,9 @@ use super::{MarkAction, Pagewing, input_dialogs, set_theme, shortcuts, zoom};
 use crate::{links::LinkTarget, navigation::Fit};
 use eframe::egui::{self, Key, Vec2};
 
+#[cfg(test)]
+mod tests;
+
 impl Pagewing {
     pub(super) fn keys(&mut self, context: &egui::Context) {
         // Apply button actions before routing this frame's keyboard input.
@@ -417,15 +420,8 @@ impl Pagewing {
                 if key == Key::Enter && filter_focused {
                     picker.confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if filter_focused
-                    && (matches!(key, Key::ArrowUp | Key::ArrowDown)
-                        || (modifiers.ctrl && matches!(key, Key::J | Key::K)))
+                } else if filter_focused && let Some(delta) = shortcuts::filter_step(key, modifiers)
                 {
-                    let delta = if matches!(key, Key::ArrowUp | Key::K) {
-                        -1
-                    } else {
-                        1
-                    };
                     picker.motions.push(Motion::Step(delta));
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
@@ -457,19 +453,8 @@ impl Pagewing {
                 if key == Key::Enter && modifiers.is_none() {
                     self.comments.filter_confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if (matches!(key, Key::ArrowUp | Key::ArrowDown) && modifiers.is_none())
-                    || (modifiers.ctrl
-                        && !modifiers.alt
-                        && !modifiers.shift
-                        && matches!(key, Key::J | Key::K))
-                {
-                    self.comments
-                        .filter_motions
-                        .push(if matches!(key, Key::ArrowUp | Key::K) {
-                            -1
-                        } else {
-                            1
-                        });
+                } else if let Some(delta) = shortcuts::filter_step(key, modifiers) {
+                    self.comments.filter_motions.push(delta);
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                     });
@@ -488,14 +473,7 @@ impl Pagewing {
                 if key == Key::Enter {
                     self.outline.confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if matches!(key, Key::ArrowUp | Key::ArrowDown)
-                    || (modifiers.ctrl && matches!(key, Key::J | Key::K))
-                {
-                    let delta = if matches!(key, Key::ArrowUp | Key::K) {
-                        -1
-                    } else {
-                        1
-                    };
+                } else if let Some(delta) = shortcuts::filter_step(key, modifiers) {
                     self.outline.motions.push(delta);
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)

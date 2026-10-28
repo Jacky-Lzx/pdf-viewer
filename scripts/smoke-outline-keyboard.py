@@ -61,6 +61,13 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "long-outline reader window")
                 expect(0, "initial document")
+                burst([("c", {})] + [(letter, {}) for letter in "chapter"])
+                for edge, arrow in [(0xFF57, 0xFF52), (0xFF50, 0xFF54)]:
+                    keyboard.key(edge)
+                    keyboard.key(arrow, shift=True)
+                    keyboard.key("c", ctrl=True)
+                    assert keyboard.clipboard() == "chapter", "Shift+arrows select chapter filter text"
+                keyboard.key(ESCAPE)
                 burst([("c", {}), ("k", {"ctrl": True}), ("j", {"ctrl": True})])
                 keyboard.key(ENTER)
                 expect(1, "same-frame up at the first chapter then down keeps event order")
@@ -129,7 +136,7 @@ def run(binary):
                 expect(0, "minimum-size navigation reaches the first chapter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

@@ -9,6 +9,25 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
     });
 }
 
+/// Filter navigation must leave selection keys and generated text to TextEdit.
+pub(super) fn filter_step(key: Key, modifiers: Modifiers) -> Option<isize> {
+    if modifiers.is_none() {
+        match key {
+            Key::ArrowUp => Some(-1),
+            Key::ArrowDown => Some(1),
+            _ => None,
+        }
+    } else if modifiers.ctrl && !modifiers.alt && !modifiers.shift && !modifiers.mac_cmd {
+        match key {
+            Key::K => Some(-1),
+            Key::J => Some(1),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// Reveal focus transitions and viewport changes without undoing manual scroll.
 pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
     if ui.is_sizing_pass() {
