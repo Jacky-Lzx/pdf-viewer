@@ -1,6 +1,9 @@
 use std::{ops::Range, sync::OnceLock};
 use unicode_segmentation::UnicodeSegmentation;
 
+#[path = "boundaries/ascii.rs"]
+mod ascii;
+
 pub(crate) fn line_range(text: &str, offset: usize) -> Range<usize> {
     let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
     let end = text[offset..]
@@ -30,13 +33,15 @@ pub(super) struct WordBoundaries {
 impl WordBoundaries {
     pub fn new(text: &str) -> Self {
         let mut bits = vec![0; (text.len() + 1).div_ceil(64)];
-        for offset in text
-            .split_word_bound_indices()
-            .map(|(offset, _)| offset)
-            .chain(std::iter::once(text.len()))
-        {
-            bits[offset / 64] |= 1 << (offset % 64);
+        bits[0] = 1;
+        if text.is_ascii() {
+            ascii::fill(text.as_bytes(), &mut bits);
+        } else {
+            for (offset, _) in text.split_word_bound_indices() {
+                bits[offset / 64] |= 1 << (offset % 64);
+            }
         }
+        bits[text.len() / 64] |= 1 << (text.len() % 64);
         Self {
             bits,
             line_breaks: OnceLock::new(),
@@ -118,6 +123,65 @@ impl WordBoundaries {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_unicode_boundaries(text: &str) {
+        let actual = WordBoundaries::new(text);
+        let mut expected = vec![0u64; (text.len() + 1).div_ceil(64)];
+        for offset in text
+            .split_word_bound_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(text.len()))
+        {
+            expected[offset / 64] |= 1 << (offset % 64);
+        }
+        assert_eq!(actual.bits, expected, "{text:?}");
+    }
+
+    #[test]
+    fn ascii_boundaries_match_unicode_for_all_strings_up_to_three_bytes() {
+        assert_unicode_boundaries("");
+        let mut bytes = [0; 3];
+        for first in 0..=127 {
+            bytes[0] = first;
+            assert_unicode_boundaries(std::str::from_utf8(&bytes[..1]).unwrap());
+            for second in 0..=127 {
+                bytes[1] = second;
+                assert_unicode_boundaries(std::str::from_utf8(&bytes[..2]).unwrap());
+                for third in 0..=127 {
+                    bytes[2] = third;
+                    assert_unicode_boundaries(std::str::from_utf8(&bytes).unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_runs_and_mixed_unicode_keep_the_same_word_bits_at_block_edges() {
+        for offset in [0, 1, 62, 63, 64, 65, 126, 127, 128, 129] {
+            for row in [
+                "can't can''t a.b a:b 1.2 1,2 1;2 a.2 1.a _12a_",
+                "\r\n \t  \x0b\x0c\0\x7f",
+                "a_a a_a.a_a a_._a 1_1.1_1",
+            ] {
+                let text = format!("{}{}", "a".repeat(offset), row.repeat(10));
+                assert_unicode_boundaries(&text);
+                for suffix in ["ß", "\u{301}", "\u{200d}😀", "אב\"אב", "カタカナ", "🇨🇳"]
+                {
+                    assert_unicode_boundaries(&format!("{text}{suffix}{row}"));
+                }
+            }
+        }
+        let mut seed = 1u64;
+        for length in 0..1024 {
+            let text: String = (0..length)
+                .map(|_| {
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    ((seed >> 32) as u8 & 127) as char
+                })
+                .collect();
+            assert_unicode_boundaries(&text);
+        }
+    }
 
     #[test]
     fn indexed_ranges_match_scanning_at_unicode_and_machine_word_boundaries() {

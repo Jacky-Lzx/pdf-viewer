@@ -428,6 +428,8 @@ cargo bench --locked --bench link_visibility -- 21 comment-neighbors
 cargo bench --locked --bench selection -- 9
 # 整词范围查询，比较重复分词与共享边界位图
 cargo bench --locked --bench word_selection -- 9
+# 词边界位图构建，比较通用 Unicode 分词与 ASCII 专用路径，含分配与容量校验
+cargo bench --locked --bench word_boundaries -- 17
 # 字形很少但文本层很长的页面，测量词/行查询与后台准备
 cargo bench --locked --bench sparse_selection -- 9
 # 搜索索引构建，比较原映射与 ASCII 直接偏移的耗时及容量

@@ -1,4 +1,4 @@
-#[allow(unused_imports)] // Test-only imports are unused in a harness-free bench.
+#[allow(dead_code, unused_imports)] // Test helpers are unused in a harness-free bench.
 #[path = "../src/text/boundaries.rs"]
 mod boundaries;
 

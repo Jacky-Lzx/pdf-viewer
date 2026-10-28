@@ -203,3 +203,7 @@ harness = false
 [[bench]]
 name = "search_word_misses"
 harness = false
+
+[[bench]]
+name = "word_boundaries"
+harness = false

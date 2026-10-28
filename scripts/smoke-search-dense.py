@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check more than 1,000 matches on one native PDF page and the global cap."""
+"""Check dense substring results and the whole-word global cap after reload."""
 import json
 import os
 from pathlib import Path
@@ -72,6 +72,10 @@ def run(binary):
                 expect(0, "reverse to first-page match number 1001")
                 counted(1001, reverse=True)
                 expect(1, "reverse counted wrap includes every first-page match")
+                keyboard.key("f", ctrl=True)
+                keyboard.key("w", alt=True)
+                wait_for(lambda: json.loads(config_path.read_text())["search_options"]["whole_word"], "whole-word mode saved before dense reload")
+                keyboard.key(0xFF1B)
                 write_document(12000)
                 keyboard.key("r", ctrl=True)
                 time.sleep(0.7)
@@ -96,7 +100,7 @@ def run(binary):
                 keyboard.key(0xFF1B)
                 keyboard.key("j", shift=True)
                 expect(1, "new no-match query cancels dense results and pending jumps")
-                print("PASS: 1501 matches across two pages, first-page match 1001, counted wrap, reload to 12000 first-page matches, global cap and replacement search")
+                print("PASS: 1501 substring matches across two pages, first-page match 1001, counted wrap, whole-word reload to 12000 first-page matches, global cap and replacement search")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
