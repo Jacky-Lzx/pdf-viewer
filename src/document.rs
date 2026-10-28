@@ -213,11 +213,22 @@ pub(crate) fn rasterize_untransformed<'a>(
 }
 
 /// Render premultiplied RGBA directly into the aligned final texture buffer.
+#[cfg(test)]
 pub(crate) fn rasterize_pixels<'a>(
     pdf: &'a Pdf,
     cache: &RenderCache<'a>,
     page: usize,
     width: u32,
+) -> Result<eframe::egui::ColorImage, String> {
+    rasterize_pixels_with_settings(pdf, cache, page, width, &RenderSettings::default())
+}
+
+pub(crate) fn rasterize_pixels_with_settings<'a>(
+    pdf: &'a Pdf,
+    cache: &RenderCache<'a>,
+    page: usize,
+    width: u32,
+    settings: &RenderSettings,
 ) -> Result<eframe::egui::ColorImage, String> {
     use hayro::{hayro_interpret::util::TransformExt, kurbo::Affine};
 
@@ -226,16 +237,27 @@ pub(crate) fn rasterize_pixels<'a>(
     let raster = RasterSize::new([w, h], width)?;
     let transform = Affine::scale_non_uniform(f64::from(raster.scale), f64::from(raster.scale))
         * page.initial_transform(true).to_kurbo();
-    render_pixels(page, cache, raster.size, transform)
+    render_pixels(page, cache, raster.size, transform, settings)
 }
 
 /// Render directly into a small viewport tile, without allocating a zoomed
 /// full-page surface. Crop boxes and intrinsic PDF rotation are applied first.
+#[cfg(test)]
 pub(crate) fn rasterize_tile<'a>(
     pdf: &'a Pdf,
     cache: &RenderCache<'a>,
     key: RenderKey,
     tile: Tile,
+) -> Result<eframe::egui::ColorImage, String> {
+    rasterize_tile_with_settings(pdf, cache, key, tile, &RenderSettings::default())
+}
+
+pub(crate) fn rasterize_tile_with_settings<'a>(
+    pdf: &'a Pdf,
+    cache: &RenderCache<'a>,
+    key: RenderKey,
+    tile: Tile,
+    settings: &RenderSettings,
 ) -> Result<eframe::egui::ColorImage, String> {
     use hayro::{hayro_interpret::util::TransformExt, kurbo::Affine};
     let page = pdf.pages().get(key.page).ok_or("Page is out of range")?;
@@ -257,7 +279,7 @@ pub(crate) fn rasterize_tile<'a>(
         * Affine::scale(f64::from(tile.scale()))
         * rotation
         * page.initial_transform(true).to_kurbo();
-    render_pixels(page, cache, tile.size.map(usize::from), transform)
+    render_pixels(page, cache, tile.size.map(usize::from), transform, settings)
 }
 
 fn render_pixels<'a>(
@@ -265,6 +287,7 @@ fn render_pixels<'a>(
     cache: &RenderCache<'a>,
     size: [usize; 2],
     transform: hayro::kurbo::Affine,
+    settings: &RenderSettings,
 ) -> Result<eframe::egui::ColorImage, String> {
     use eframe::egui::{Color32, ColorImage};
     use hayro::vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit};
@@ -274,7 +297,7 @@ fn render_pixels<'a>(
         page,
         cache,
         &InterpreterSettings::default(),
-        &RenderSettings::default(),
+        settings,
         &mut context,
         transform,
     );
@@ -467,6 +490,107 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn text_embolden_adds_weight_without_changing_opacity_graphics_or_other_text_modes() {
+        let pdf = Pdf::new(include_bytes!("../tests/fixtures/text-weight.pdf").to_vec()).unwrap();
+        let cache = RenderCache::new();
+        let original = rasterize_pixels(&pdf, &cache, 0, 800).unwrap();
+        let mut previous_ink = 0;
+        for weight in [0.0, 0.2, 0.4, 1.0] {
+            let settings = RenderSettings {
+                text_embolden: weight,
+                ..Default::default()
+            };
+            let image = rasterize_pixels_with_settings(&pdf, &cache, 0, 800, &settings).unwrap();
+            assert_eq!(image.size, original.size);
+            // The lower half contains stroke-only/invisible/clipping text,
+            // a vector rectangle and hairline, and a small RGB image.
+            assert_eq!(&image.pixels[200 * 800..], &original.pixels[200 * 800..]);
+            let ink: u64 = image.pixels[..100 * 800]
+                .iter()
+                .map(|p| u64::from(255 - p.r()))
+                .sum();
+            assert!(
+                ink > previous_ink,
+                "filled text must grow with strength {weight}"
+            );
+            previous_ink = ink;
+            // Translucent glyphs retain their original 50% opacity, including
+            // where the added border overlaps the old outline.
+            let alpha_min = |image: &eframe::egui::ColorImage| {
+                image.pixels[100 * 800..190 * 800]
+                    .iter()
+                    .map(|p| p.r())
+                    .min()
+                    .unwrap()
+            };
+            assert_eq!(alpha_min(&image), alpha_min(&original), "weight={weight}");
+        }
+        // The same outline cache can return to the unmodified rendering.
+        assert_eq!(
+            rasterize_pixels(&pdf, &cache, 0, 800).unwrap().pixels,
+            original.pixels
+        );
+    }
+
+    #[test]
+    fn emboldened_tiles_match_full_pages_in_every_rotation() {
+        use hayro::{hayro_interpret::util::TransformExt, kurbo::Affine};
+        let pdf = Pdf::new(include_bytes!("../tests/fixtures/text-weight.pdf").to_vec()).unwrap();
+        let cache = RenderCache::new();
+        let settings = RenderSettings {
+            text_embolden: 0.4,
+            ..Default::default()
+        };
+        let page = &pdf.pages()[0];
+        for rotation in 0..4 {
+            let size = if rotation % 2 == 0 {
+                [800, 480]
+            } else {
+                [480, 800]
+            };
+            // Rasterize the reference at the same rotation: rotating an already
+            // antialiased bitmap has different edge coverage from rotating paths.
+            let transform = Affine::translate((size[0] as f64 / 2.0, size[1] as f64 / 2.0))
+                * Affine::rotate(f64::from(rotation) * std::f64::consts::FRAC_PI_2)
+                * Affine::scale(2.0)
+                * Affine::translate((-200.0, -120.0))
+                * page.initial_transform(true).to_kurbo();
+            let full = render_pixels(page, &cache, size, transform, &settings).unwrap();
+            let key = RenderKey {
+                page: 0,
+                width: 800,
+                rotation,
+                night: false,
+                tile: None,
+            };
+            let tile = Tile {
+                scale_bits: 2.0_f32.to_bits(),
+                x: 17,
+                y: 23,
+                size: [301, 257],
+            };
+            let image = rasterize_tile_with_settings(&pdf, &cache, key, tile, &settings).unwrap();
+            let mut differing = 0;
+            let mut max_diff = 0;
+            for y in 0..257 {
+                for x in 0..301 {
+                    let expected = full.pixels[(y + 23) * full.size[0] + x + 17];
+                    let actual = image.pixels[y * 301 + x];
+                    for channel in 0..4 {
+                        let diff = actual[channel].abs_diff(expected[channel]);
+                        max_diff = max_diff.max(diff);
+                        differing += usize::from(diff > 3);
+                    }
+                }
+            }
+            assert!(
+                differing * 1000 < image.pixels.len(),
+                "rotation={rotation} max_diff={max_diff} differing={differing}"
+            );
         }
     }
 

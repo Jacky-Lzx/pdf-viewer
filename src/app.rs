@@ -220,7 +220,7 @@ impl Pagewing {
         let mut app = Self {
             #[cfg(target_os = "macos")]
             open_documents: None,
-            worker: Worker::with_colors(context.clone(), page_colors),
+            worker: Worker::with_appearance(context.clone(), page_colors, config.render_settings()),
             page_colors,
             state_writer: crate::state_writer::StateWriter::new(state_path, context.clone()),
             library,

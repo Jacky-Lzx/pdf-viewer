@@ -30,6 +30,7 @@ struct Appearance {
     night: bool,
     sidebar: bool,
     thumbnails: bool,
+    text_embolden: f32,
     white: PagePalette,
     inverted: InvertedPalette,
 }
@@ -75,6 +76,7 @@ impl Config {
                 night: library.night,
                 sidebar: library.sidebar,
                 thumbnails: library.thumbnails,
+                text_embolden: 0.0,
                 white: PagePalette::default(),
                 inverted: InvertedPalette::default(),
             },
@@ -106,6 +108,13 @@ impl Config {
         PageColors {
             white: self.appearance.white,
             inverted: self.appearance.inverted,
+        }
+    }
+
+    pub fn render_settings(&self) -> hayro::RenderSettings {
+        hayro::RenderSettings {
+            text_embolden: self.appearance.text_embolden,
+            ..Default::default()
         }
     }
 
@@ -145,6 +154,11 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), String> {
+        if !self.appearance.text_embolden.is_finite()
+            || !(0.0..=1.0).contains(&self.appearance.text_embolden)
+        {
+            return Err("appearance.text_embolden must be a number from 0.0 to 1.0".into());
+        }
         self.fit()?;
         self.bindings()?;
         Ok(())
@@ -325,6 +339,25 @@ mod tests {
         assert_eq!(library.shortcuts.label("next_page"), "X");
         assert_eq!(library.shortcuts.label("night"), "Unassigned");
         parse(include_str!("../assets/config.example.toml")).unwrap();
+    }
+
+    #[test]
+    fn text_embolden_defaults_validates_and_roundtrips() {
+        assert_eq!(parse("").unwrap().render_settings().text_embolden, 0.0);
+        for value in [0.0, 0.2, 1.0] {
+            let config = parse(&format!("[appearance]\ntext_embolden = {value}")).unwrap();
+            assert_eq!(config.render_settings().text_embolden, value);
+            let restored = parse(&toml::to_string_pretty(&config).unwrap()).unwrap();
+            assert_eq!(restored.render_settings().text_embolden, value);
+        }
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        let field = &schema["properties"]["appearance"]["properties"]["text_embolden"];
+        assert_eq!(field["minimum"], 0);
+        assert_eq!(field["maximum"], 1);
+        assert_eq!(field["default"], 0.0);
+        for value in ["-0.1", "1.1", "nan", "inf", "-inf", "true", "'0.2'"] {
+            assert!(parse(&format!("[appearance]\ntext_embolden = {value}")).is_err());
+        }
     }
 
     #[test]

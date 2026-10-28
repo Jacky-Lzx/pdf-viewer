@@ -7,6 +7,8 @@ dark = false
 night = false
 sidebar = false
 thumbnails = false
+# Display-only outline text weight, 0.0–1.0. Try 0.2 for thin serif fonts.
+text_embolden = 0.0
 
 # Output colors for black (foreground) and white (background) source pixels.
 [appearance.white]

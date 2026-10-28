@@ -25,6 +25,10 @@ tempfile = "3"
 shlex = "2.0.1"
 libc = "0.2"
 
+[patch.crates-io]
+# Glyph-only display weight; see vendor/hayro/PAGEWING.md.
+hayro = { path = "vendor/hayro" }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication"] }

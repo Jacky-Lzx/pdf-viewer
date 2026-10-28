@@ -24,6 +24,13 @@ schema 校验字段、值类型、枚举和数值范围；快捷键的具体按�
 
 `[appearance]` 的 `dark`（深色界面）、`night`（页面反色）、`sidebar`（侧栏）、`thumbnails`（页面预览）均为布尔值，默认 `false`。这些值在每次启动时应用，阅读过程中仍可临时切换。
 
+`text_embolden` 调节文字的显示加粗强度，范围 `0.0`–`1.0`，默认 `0.0` 保持原样。觉得 Times New Roman 等衬线字体偏细时，可先在已有的 `[appearance]` 表中加入 `text_embolden = 0.2`，仍偏细再试 `0.3` 或 `0.4`，修改后重启阅读器。加粗按字号等比例扩展字形轮廓，不改变字距、排版、文字选择和搜索位置；主页面、双页/连续阅读、缩略图、高倍缩放瓦片，以及白色/反转模式均生效。它只影响有填充的轮廓字体（如 TrueType、Type 1、CFF），不处理扫描图片中的文字、Type 3 字形、纯描边文字、文字裁剪轮廓或已转为普通矢量路径的文字，也不会加粗图片和图表线条。源 PDF 与 `--render` 导出保持原样。
+
+```toml
+[appearance]
+text_embolden = 0.2
+```
+
 `I` 在白色模式和反转模式间切换，分别使用 `[appearance.white]` 与 `[appearance.inverted]`；`D` 独立切换界面主题。两个配色表都支持 `foreground`（原 PDF 黑色像素的显示颜色）、`background`（原 PDF 白色像素/纸张的显示颜色）和可选的 `canvas`（纸张外围的底色）。颜色必须为 `"#RRGGBB"`，大小写均可。省略 `canvas` 时沿用界面主题底色。
 
 白色模式默认黑字白纸，反转模式默认白字黑纸；只配置部分字段时，其余字段仍使用对应模式的默认值。下面将反转模式配置为 [Catppuccin Mocha](https://catppuccin.com/palette/) 的 Text、Base 和 Mantle，并在启动时启用：

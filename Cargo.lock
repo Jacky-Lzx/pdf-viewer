@@ -1171,8 +1171,6 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4675ff5acd7ca41c0c34ccd2a3a154f5c86d8b5ec92bef0a114bfb194969e2af"
 dependencies = [
  "bytemuck",
  "fearless_simd 1.2.0",

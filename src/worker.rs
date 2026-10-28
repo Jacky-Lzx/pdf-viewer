@@ -203,6 +203,14 @@ impl Pending {
 
 type Shared = Arc<(Mutex<Pending>, Condvar)>;
 
+// Fixed for a worker's lifetime, so every page/tile/thumbnail cache has the
+// same appearance without adding startup preferences to individual render keys.
+#[derive(Clone, Copy, Default)]
+struct RenderAppearance {
+    colors: crate::page_colors::PageColors,
+    settings: hayro::RenderSettings,
+}
+
 pub struct Worker {
     shared: Shared,
     pub events: Receiver<Event>,
@@ -214,10 +222,21 @@ impl Worker {
         Self::with_colors(context, crate::page_colors::PageColors::default())
     }
 
+    #[cfg(test)]
     pub fn with_colors(context: egui::Context, colors: crate::page_colors::PageColors) -> Self {
-        Self::with_loader_and_colors(context, colors, |path, password, cancelled| {
-            document::load_cancellable(path, password, cancelled)
-        })
+        Self::with_appearance(context, colors, hayro::RenderSettings::default())
+    }
+
+    pub fn with_appearance(
+        context: egui::Context,
+        colors: crate::page_colors::PageColors,
+        settings: hayro::RenderSettings,
+    ) -> Self {
+        Self::with_loader_and_appearance(
+            context,
+            RenderAppearance { colors, settings },
+            |path, password, cancelled| document::load_cancellable(path, password, cancelled),
+        )
     }
 
     #[cfg(test)]
@@ -227,12 +246,12 @@ impl Worker {
         + Send
         + 'static,
     ) -> Self {
-        Self::with_loader_and_colors(context, crate::page_colors::PageColors::default(), load)
+        Self::with_loader_and_appearance(context, RenderAppearance::default(), load)
     }
 
-    fn with_loader_and_colors(
+    fn with_loader_and_appearance(
         context: egui::Context,
-        colors: crate::page_colors::PageColors,
+        appearance: RenderAppearance,
         mut load: impl FnMut(
             &std::path::Path,
             &str,
@@ -353,7 +372,7 @@ impl Worker {
                     }
                     if let Some((pdf, active_id, watch)) = &mut active
                         && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            session(pdf, *active_id, watch, &state, &tx, &context, colors);
+                            session(pdf, *active_id, watch, &state, &tx, &context, appearance);
                         }))
                         .is_err()
                     {
@@ -499,7 +518,7 @@ fn session(
     shared: &Shared,
     tx: &SyncSender<Event>,
     context: &egui::Context,
-    colors: crate::page_colors::PageColors,
+    appearance: RenderAppearance,
 ) {
     let render_cache = RenderCache::new();
     let interpreter_cache = InterpreterCache::new();
@@ -640,9 +659,21 @@ fn session(
                 let start = Instant::now();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if let Some(tile) = key.tile {
-                        document::rasterize_tile(pdf, &render_cache, key, tile)
+                        document::rasterize_tile_with_settings(
+                            pdf,
+                            &render_cache,
+                            key,
+                            tile,
+                            &appearance.settings,
+                        )
                     } else {
-                        document::rasterize_pixels(pdf, &render_cache, key.page, key.width)
+                        document::rasterize_pixels_with_settings(
+                            pdf,
+                            &render_cache,
+                            key.page,
+                            key.width,
+                            &appearance.settings,
+                        )
                     }
                 }));
                 let relevant = {
@@ -663,7 +694,7 @@ fn session(
                         crate::texture_pixels::prepare_with_palette(
                             image,
                             if key.tile.is_some() { 0 } else { key.rotation },
-                            colors.palette(key.night),
+                            appearance.colors.palette(key.night),
                         )
                     })
                 });
@@ -1148,6 +1179,73 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn text_embolden_reaches_pages_thumbnails_and_rotated_tiles_in_both_modes() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text-weight.pdf");
+        let settings = hayro::RenderSettings {
+            text_embolden: 0.3,
+            ..Default::default()
+        };
+        let colors = crate::page_colors::PageColors::default();
+        let worker = Worker::with_appearance(egui::Context::default(), colors, settings);
+        worker.open(1, path.clone(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        let pdf = document::load(&path, "").unwrap();
+        let cache = RenderCache::new();
+        for rotation in 0..4 {
+            for night in [false, true] {
+                for tiled in [false, true] {
+                    let key = RenderKey {
+                        page: 0,
+                        width: 800,
+                        rotation,
+                        night,
+                        tile: tiled.then_some(document::Tile {
+                            scale_bits: 2.0_f32.to_bits(),
+                            x: 0,
+                            y: 0,
+                            size: if rotation % 2 == 0 {
+                                [800, 480]
+                            } else {
+                                [480, 800]
+                            },
+                        }),
+                    };
+                    let source = if let Some(tile) = key.tile {
+                        document::rasterize_tile_with_settings(&pdf, &cache, key, tile, &settings)
+                            .unwrap()
+                    } else {
+                        document::rasterize_pixels_with_settings(&pdf, &cache, 0, 800, &settings)
+                            .unwrap()
+                    };
+                    let expected = crate::texture_pixels::prepare_with_palette(
+                        source,
+                        if tiled { 0 } else { rotation },
+                        colors.palette(night),
+                    );
+                    worker.update(|pending| {
+                        pending.replace_renders(vec![key]);
+                        pending.replace_thumbnails(vec![key]);
+                    });
+                    for thumbnail in [false, true] {
+                        let image = match receive(&worker) {
+                            Event::Rendered {
+                                key: actual, image, ..
+                            } if !thumbnail && actual == key => image,
+                            Event::Thumbnail {
+                                key: actual,
+                                image: Some(image),
+                                ..
+                            } if thumbnail && actual == key => image,
+                            _ => panic!("Expected a prepared image for {key:?}"),
+                        };
+                        assert_eq!(image.pixels, expected.pixels);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

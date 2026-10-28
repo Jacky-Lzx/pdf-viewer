@@ -30,6 +30,13 @@
           "description": "Use page previews in the sidebar.",
           "default": false
         },
+        "text_embolden": {
+          "type": "number",
+          "description": "Display-only weight for filled outline text, from 0 (original) to 1 (strong). Try 0.2 for thin serif fonts. Does not affect images, ordinary vector paths, or Type 3 glyphs. Restart to apply.",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.0
+        },
         "white": {
           "type": "object",
           "description": "White PDF palette. Each source RGB channel is mapped between foreground (black) and background (white).",
