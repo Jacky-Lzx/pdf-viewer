@@ -1,6 +1,7 @@
 mod annotations;
 mod app;
 mod bitmap;
+mod bookmark_index;
 mod cache;
 mod cli;
 mod comment_cards;

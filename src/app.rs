@@ -663,15 +663,25 @@ impl Pagewing {
         if self.nav.count == 0 {
             return;
         }
-        if !self.reading.bookmarks.remove(&self.nav.page) {
-            self.reading.bookmarks.insert(self.nav.page);
+        let present = !self.reading.bookmarks.contains(&self.nav.page);
+        self.set_bookmark(self.nav.page, present);
+        if present {
             self.notify("Bookmark added");
         } else {
             self.notify("Bookmark removed");
         }
-        self.refresh_bookmarks();
         self.reveal_page = Some(self.nav.page);
-        self.dirty = true;
+    }
+
+    fn set_bookmark(&mut self, page: usize, present: bool) {
+        if crate::bookmark_index::set(
+            &mut self.reading.bookmarks,
+            &mut self.bookmark_pages,
+            page,
+            present,
+        ) {
+            self.dirty = true;
+        }
     }
 
     fn refresh_bookmarks(&mut self) {

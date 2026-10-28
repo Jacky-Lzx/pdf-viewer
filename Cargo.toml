@@ -155,3 +155,7 @@ harness = false
 [[bench]]
 name = "search_selection"
 harness = false
+
+[[bench]]
+name = "bookmark_edits"
+harness = false

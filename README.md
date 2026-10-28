@@ -368,6 +368,8 @@ cargo bench --locked --bench word_selection -- 9
 cargo bench --locked --bench sparse_selection -- 9
 # 搜索索引构建，比较原映射与 ASCII 直接偏移的耗时及容量
 cargo bench --locked --bench search_index -- 9
+# 书签编辑：比较每次重建有序索引与单点增删
+cargo bench --locked --bench bookmark_edits -- 9
 # 搜索摘要，比较临时字符串拼接与直接截取上下文
 cargo bench --locked --bench search_snippet -- 9
 # 搜索结果文字和高亮格式，比较重建、有界缓存、换行任务复制和分配次数

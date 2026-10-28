@@ -45,10 +45,8 @@ impl Pagewing {
             self.jump(page);
         }
         if let Some(page) = remove {
-            self.reading.bookmarks.remove(&page);
-            self.refresh_bookmarks();
+            self.set_bookmark(page, false);
             self.notify("Bookmark removed");
-            self.dirty = true;
         }
         target.is_some()
     }
