@@ -1,4 +1,4 @@
-use super::{Pagewing, appearance};
+use super::{Pagewing, RowAction, appearance, removable_row};
 use crate::app::MarkAction;
 use eframe::egui;
 
@@ -8,34 +8,22 @@ impl Pagewing {
         appearance::section(ui, "MARKS");
         let mut target = None;
         let mut remove = None;
-        let row_height = Self::sidebar_row_height(ui);
         for (&name, mark) in &self.reading.marks {
             ui.push_id(("mark", name), |ui| {
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("×").on_hover_text("Delete mark").clicked() {
-                            remove = Some(name);
-                        }
-                        if ui
-                            .add_sized(
-                                egui::vec2(ui.available_width(), row_height),
-                                egui::Button::selectable(
-                                    mark.page == self.nav.page,
-                                    format!("'{name}   {}", self.labels.sidebar_caption(mark.page)),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_ui(|ui| {
-                                ui.set_max_width(ui.spacing().tooltip_width);
-                                ui.label(self.labels.sidebar_tooltip(mark.page));
-                                ui.label("Restore page, zoom, rotation and scroll position");
-                            })
-                            .clicked()
-                        {
-                            target = Some(name);
-                        }
-                    });
-                });
+                match removable_row(
+                    ui,
+                    mark.page == self.nav.page,
+                    format!("'{name}   {}", self.labels.sidebar_caption(mark.page)),
+                    "Delete mark",
+                    |ui| {
+                        ui.label(self.labels.sidebar_tooltip(mark.page));
+                        ui.label("Restore page, zoom, rotation and scroll position");
+                    },
+                ) {
+                    Some(RowAction::Jump) => target = Some(name),
+                    Some(RowAction::Remove) => remove = Some(name),
+                    None => {}
+                }
             });
         }
         if let Some(name) = target {

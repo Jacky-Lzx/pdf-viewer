@@ -7,6 +7,42 @@ mod marks;
 mod pages;
 mod results;
 
+enum RowAction {
+    Jump,
+    Remove,
+}
+
+fn removable_row(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: impl Into<egui::WidgetText>,
+    delete_tooltip: &str,
+    tooltip: impl FnOnce(&mut egui::Ui),
+) -> Option<RowAction> {
+    let mut action = None;
+    let row_height = Pagewing::sidebar_row_height(ui);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let remove = ui.small_button("×").on_hover_text(delete_tooltip);
+            let jump = ui
+                .add_sized(
+                    egui::vec2(ui.available_width(), row_height),
+                    egui::Button::selectable(selected, label).truncate(),
+                )
+                .on_hover_ui(|ui| {
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    tooltip(ui);
+                });
+            if jump.clicked() {
+                action = Some(RowAction::Jump);
+            } else if remove.clicked() {
+                action = Some(RowAction::Remove);
+            }
+        });
+    });
+    action
+}
+
 /// Reveal only the part of a row outside the current list viewport.
 fn reveal_offset(offset: f32, top: f32, row_height: f32, height: f32) -> f32 {
     offset.max((top + row_height - height).max(0.0)).min(top)

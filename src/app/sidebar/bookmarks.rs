@@ -1,5 +1,5 @@
-use super::{Pagewing, reveal_offset};
-use eframe::egui::{self, Vec2};
+use super::{Pagewing, RowAction, removable_row, reveal_offset};
+use eframe::egui;
 
 impl Pagewing {
     pub(super) fn bookmark_list(&mut self, ui: &mut egui::Ui) -> bool {
@@ -20,30 +20,35 @@ impl Pagewing {
             scroll = scroll.vertical_scroll_offset(reveal_offset(offset, top, row_height, height));
         }
         let mut target = None;
+        let mut remove = None;
         scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
             for row in range {
                 let page = self.bookmark_pages[row];
-                if ui
-                    .add_sized(
-                        Vec2::new(ui.available_width(), row_height),
-                        egui::Button::selectable(
-                            page == self.nav.page,
-                            self.labels.sidebar_caption(page),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_ui(|ui| {
-                        ui.set_max_width(ui.spacing().tooltip_width);
-                        ui.label(self.labels.sidebar_tooltip(page));
-                    })
-                    .clicked()
-                {
-                    target = Some(page);
-                }
+                ui.push_id(("bookmark", page), |ui| {
+                    match removable_row(
+                        ui,
+                        page == self.nav.page,
+                        self.labels.sidebar_caption(page),
+                        "Delete bookmark",
+                        |ui| {
+                            ui.label(self.labels.sidebar_tooltip(page));
+                        },
+                    ) {
+                        Some(RowAction::Jump) => target = Some(page),
+                        Some(RowAction::Remove) => remove = Some(page),
+                        None => {}
+                    }
+                });
             }
         });
         if let Some(page) = target {
             self.jump(page);
+        }
+        if let Some(page) = remove {
+            self.reading.bookmarks.remove(&page);
+            self.refresh_bookmarks();
+            self.notify("Bookmark removed");
+            self.dirty = true;
         }
         target.is_some()
     }
@@ -110,6 +115,146 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    fn sidebar_frame(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                time: Some(context.input(|input| input.time) + 0.25),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                app.toolbar(context);
+                app.status(context);
+                app.sidebar(context);
+                egui::CentralPanel::default().show(context, |_| {});
+            },
+        )
+    }
+
+    fn settle_sidebar(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+    ) -> egui::FullOutput {
+        let mut output = egui::FullOutput::default();
+        for _ in 0..6 {
+            output = sidebar_frame(app, context, size, Vec::new());
+        }
+        output
+    }
+
+    fn click_sidebar(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+        pos: egui::Pos2,
+    ) {
+        for pressed in [true, false] {
+            sidebar_frame(
+                app,
+                context,
+                size,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    fn delete_button(output: &egui::FullOutput, page: usize) -> egui::Rect {
+        let label = row(output, page).expect("bookmark caption must be visible");
+        let (text, clip) = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "×" => {
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    (label.y_range().intersects(rect.y_range())).then_some((rect, shape.clip_rect))
+                }
+                _ => None,
+            })
+            .expect("each bookmark must have its own delete button");
+        let button = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.rect.contains_rect(text) => Some(rect.rect),
+                _ => None,
+            })
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap();
+        assert!(
+            clip.contains_rect(button.shrink(0.5)),
+            "delete button clipped: {button:?}, {clip:?}"
+        );
+        assert!(label.right() < button.left());
+        button
+    }
+
+    #[test]
+    fn delete_actions_fit_narrow_sidebars_and_preserve_reading_position() {
+        use crate::navigation::Fit;
+        for size in [
+            egui::vec2(1180.0, 820.0),
+            egui::vec2(240.0, 400.0),
+            egui::vec2(240.0, 240.0),
+            egui::vec2(360.0, 540.0),
+        ] {
+            let (_directory, context, mut app) = app();
+            app.library.sidebar = true;
+            app.nav.jump(2);
+            app.reading.bookmarks = [4, 79].into_iter().collect();
+            app.refresh_bookmarks();
+            app.reading.fit = Fit::Custom(1.75);
+            app.reading.rotation = 1;
+            app.reading.continuous = true;
+            app.reading.facing = false;
+            app.pan = egui::vec2(37.0, 53.0);
+            app.pending_offset = Some([0.4, 0.6]);
+            let output = settle_sidebar(&mut app, &context, size);
+            let delete = delete_button(&output, 79);
+            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(delete));
+            app.dirty = false;
+            click_sidebar(&mut app, &context, size, delete.center());
+            assert_eq!(app.nav.page, 2, "deleting another page must not navigate");
+            assert_eq!(app.pan, egui::vec2(37.0, 53.0));
+            assert_eq!(app.pending_offset, Some([0.4, 0.6]));
+            assert_eq!(app.reading.fit, Fit::Custom(1.75));
+            assert_eq!(app.reading.rotation, 1);
+            assert!(app.reading.continuous);
+            assert!(!app.reading.facing);
+            assert!(app.dirty, "deletion must be persisted");
+            assert_eq!(app.bookmark_pages, [4]);
+            assert_eq!(app.reading.bookmarks, [4].into_iter().collect());
+            assert_eq!(app.message.as_ref().unwrap().0, "Bookmark removed");
+            assert!(app.reveal_page.is_none());
+            let output = settle_sidebar(&mut app, &context, size);
+            click_sidebar(&mut app, &context, size, row(&output, 4).unwrap().center());
+            assert_eq!(app.nav.page, 4, "remaining row must keep its destination");
+            let output = settle_sidebar(&mut app, &context, size);
+            let delete = delete_button(&output, 4);
+            click_sidebar(&mut app, &context, size, delete.center());
+            assert_eq!(
+                app.nav.page, 4,
+                "deleting current bookmark must not navigate"
+            );
+            assert!(app.reading.bookmarks.is_empty());
+            assert!(app.bookmark_pages.is_empty());
+        }
     }
 
     #[test]

@@ -85,6 +85,16 @@ def run(binary):
                 expect(0, "return to the first visible bookmark")
                 wait_for(lambda: (y := selected_bookmark_y()) is not None and abs(y - first_y) <= 2,
                          "returning within the viewport keeps row positions")
+                keyboard.click((235, first_y + 2 * row_step))
+                expect(0, "delete another page's bookmark without leaving the current page", removed=2, count=599)
+                keyboard.click((100, first_y + 2 * row_step))
+                expect(3, "deletion refreshes the destination of the following virtual row", removed=2, count=599)
+                keyboard.key("3"); keyboard.key("g", shift=True)
+                expect(2, "navigate back to the removed bookmark's page", removed=2, count=599)
+                keyboard.key("b")
+                expect(2, "restore the deleted bookmark with its keyboard shortcut")
+                keyboard.key("g"); keyboard.key("g")
+                expect(0, "return to the first page after sidebar deletion")
                 keyboard.key("4"); keyboard.key("1"); keyboard.key("g", shift=True)
                 expect(40, "a distant middle bookmark is selected")
                 middle_y = wait_for(selected_bookmark_y, "distant middle bookmark is visible")
@@ -168,7 +178,7 @@ def run(binary):
                 expect(10, "an empty bookmark list leaves the page unchanged", count=0)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 600 long-label bookmarks, nearest scrolling, stable adjacent rows, manual scrolling, visible rows, clicks, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
+                print("PASS: 600 long-label bookmarks, nearest scrolling, stable adjacent rows, manual scrolling, visible rows, clicks, direct deletion without navigation, refreshed row destinations, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
