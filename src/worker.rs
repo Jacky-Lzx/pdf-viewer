@@ -15,6 +15,8 @@ use std::{
     time::Instant,
 };
 
+mod scheduling;
+
 /// Recovery depends on whether one render failed or the whole session stopped.
 pub enum Failure {
     Open(LoadError),
@@ -558,6 +560,7 @@ fn session(
     let link_reader = crate::links::LinkReader::new(pdf);
     let mut texts = crate::text_cache::TextCache::default();
     let mut search: Option<SearchProgress> = None;
+    let mut background = scheduling::Background::default();
     loop {
         let job = {
             let (lock, wake) = &**shared;
@@ -601,11 +604,10 @@ fn session(
                 if std::mem::take(&mut pending.comments) {
                     break Job::Comments;
                 }
-                if let Some(progress) = &search {
-                    break Job::Search(progress.page);
-                }
-                if let Some(key) = pending.thumbnails.pop_front() {
-                    break Job::Thumbnail(key, pending.thumbnail_revision);
+                if let Some(job) =
+                    background.next(&mut pending, search.as_ref().map(|progress| progress.page))
+                {
+                    break job;
                 }
                 pending = wake
                     .wait_timeout(pending, watch.remaining(Instant::now()))
@@ -854,6 +856,7 @@ fn session(
                         &mut progress.cursor,
                         limit,
                     );
+                    background.searched();
                     texts.refresh(page, &text);
                     progress.hits += batch.hits.len();
                     if batch.complete {
@@ -1192,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn page_rendering_and_search_finish_before_queued_thumbnails() {
+    fn page_rendering_and_short_search_finish_before_queued_thumbnails() {
         let worker = Worker::new(egui::Context::default());
         worker.open(1, sample(), String::new());
         assert!(matches!(receive(&worker), Event::Opened { .. }));
@@ -1216,7 +1219,7 @@ mod tests {
             match receive(&worker) {
                 Event::Search { complete: true, .. } => break,
                 Event::Search { .. } => {}
-                _ => panic!("Thumbnails must follow document search"),
+                _ => panic!("Thumbnails must follow a short document search"),
             }
         }
         assert!(matches!(
@@ -1426,6 +1429,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn long_search_and_previews_both_advance_without_delaying_interactive_jobs() {
+        let file = dense_sample(12000);
+        let worker = Worker::new(egui::Context::default());
+        worker.open(1, file.path().into(), String::new());
+        assert!(matches!(receive(&worker), Event::Opened { .. }));
+        let first = render_key(1);
+        let second = RenderKey {
+            rotation: 1,
+            ..first
+        };
+        worker.update(|pending| {
+            pending.replace_thumbnails(vec![first, second]);
+            pending.replace_renders(vec![first]);
+            pending.copy = Some(1);
+            pending.search = Some(SearchRequest {
+                revision: 9,
+                query: "dense".into(),
+                options: SearchOptions::default(),
+            });
+        });
+        assert!(matches!(receive(&worker), Event::Text { page: 1, .. }));
+        assert!(matches!(receive(&worker), Event::Rendered { key, .. } if key == first));
+        let (mut complete, mut previews, mut hits, mut batches) = (false, 0, 0, 0);
+        while !complete || previews < 2 {
+            match receive(&worker) {
+                Event::Search {
+                    revision: 9,
+                    hits: batch,
+                    complete: done,
+                    limited,
+                    ..
+                } => {
+                    hits += batch.len();
+                    batches += 1;
+                    if done {
+                        assert!(limited);
+                        complete = true;
+                    }
+                }
+                Event::Thumbnail {
+                    key,
+                    image: Some(_),
+                    ..
+                } => {
+                    assert!(!complete, "previews must not wait for the whole search");
+                    assert!(
+                        (1..=8).contains(&batches),
+                        "both tasks must advance: {batches} search batches"
+                    );
+                    assert_eq!(key, if previews == 0 { first } else { second });
+                    previews += 1;
+                    batches = 0;
+                }
+                _ => panic!("Unexpected worker event"),
+            }
+        }
+        assert_eq!(
+            hits, 10000,
+            "yielding must preserve every accepted search hit"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop and restart a real long-document search, retaining a stable clipboard snapshot."""
+"""Stop/restart long searches; keep partial results and render previews while scanning."""
 import ctypes
 import json
 import os
@@ -17,10 +17,10 @@ PAGES = 8000
 TAB, ENTER = 0xFF09, 0xFF0D
 
 
-def long_pdf():
+def long_pdf(page_graphics=b""):
     # Shared content keeps the PDF small, but every page requires a real text
     # extraction. One hit per page stays below the 10,000-result cap.
-    stream = (b"BT /F1 10 Tf 40 760 Td (Needle) Tj\n"
+    stream = (page_graphics + b"BT /F1 10 Tf 40 760 Td (Needle) Tj\n"
               + b"0 -8 Td (Padding text for the long document search workload.) Tj\n" * 100
               + b"ET")
     objects = [
@@ -49,7 +49,9 @@ def run(binary):
     with tempfile.TemporaryDirectory(prefix="pagewing-search-stop-") as directory:
         root = Path(directory)
         document = root / "long-search.pdf"
-        document.write_bytes(long_pdf())
+        # Keep the color marker clear of the dense text so preview sampling
+        # cannot mistake antialiased glyphs over the marker for missing pixels.
+        document.write_bytes(long_pdf(b"q 0.1 0.65 0.3 rg 340 420 200 120 re f Q\n"))
         config = root / "config/pagewing/library.json"
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({"sidebar": False}))
@@ -82,6 +84,19 @@ def run(binary):
                 return int(next(line.split(": ", 1)[1] for line in report.splitlines()
                                 if line.startswith("Available results: ")))
 
+            def preview_ready():
+                # Only the PDF has this saturated green rectangle. Looking in
+                # the sidebar excludes the already-rendered main reading page.
+                colored = 0
+                for y in range(150, 700, 12):
+                    for x in range(30, 180, 12):
+                        red, green, blue = keyboard.pixel((x, y))
+                        if red < 45 and green > 150 and blue < 90:
+                            colored += 1
+                            if colored >= 8:
+                                return True
+                return False
+
             try:
                 window = wait_for(lambda: keyboard.focus(document.name), "long-search reader window")
                 initial = wait_for(reading, "initial saved reading state")
@@ -108,6 +123,19 @@ def run(binary):
                 restarted = copy_from_run(stopped_expected=False)
                 assert "Query: Needle\n" in restarted and count(restarted) > 0
                 assert "[Search stopped by user;" not in restarted
+                keyboard.key(0xFF1B)
+                keyboard.key("t")  # Open/reveal previews after scanning starts.
+                wait_for(preview_ready, "actual PDF preview pixels during search")
+                keyboard.key("f", ctrl=True)
+                for _ in range(6):  # Copy results, including offscreen snippets.
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                progress = wait_for(
+                    lambda: (report if (report := keyboard.clipboard()) != restarted
+                             and report.startswith("Pagewing search snippets\n") else None),
+                    "fresh search snapshot after the preview appears")
+                assert "[Search in progress;" in progress, progress[:500]
+                assert 0 < count(progress) < PAGES, progress[:500]
                 keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
@@ -119,7 +147,7 @@ def run(binary):
                 current = reading()
                 for field in ["page", "fit", "rotation", "continuous", "facing", "offset"]:
                     assert current.get(field) == initial.get(field), (field, initial, current)
-                print("PASS: 8,000-page native search Stop/Restart, stable partial snapshots, explicit clipboard status, keyboard Enter/Space, 240-pixel focus reveal and preserved reading view")
+                print("PASS: 8,000-page native search Stop/Restart, stable partial snapshots, previews rendered before search completion, explicit clipboard status, keyboard Enter/Space, 240-pixel focus reveal and preserved reading view")
             except Exception:
                 log.flush()
                 log.seek(0)
