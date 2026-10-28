@@ -33,7 +33,7 @@ impl RecentPicker {
                     .to_string_lossy();
                 let label = format!("{name}   ·   {parent}");
                 Entry {
-                    folded: caseless::default_case_fold_str(&display),
+                    folded: crate::case_fold::fold(&display),
                     path,
                     label,
                     display,
@@ -54,7 +54,7 @@ impl RecentPicker {
     }
 
     pub fn filter(&mut self) {
-        let query = caseless::default_case_fold_str(&self.query);
+        let query = crate::case_fold::fold(&self.query);
         let words: Vec<_> = query.split_whitespace().collect();
         self.visible.clear();
         self.visible.extend(

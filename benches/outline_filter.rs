@@ -1,6 +1,9 @@
 #[path = "support/allocations.rs"]
 mod allocation_counter;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/case_fold.rs"]
+mod case_fold;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/destination.rs"]
 mod destination;
 #[allow(dead_code, unused_imports)]
@@ -43,7 +46,7 @@ fn main() {
         return;
     }
     println!(
-        "{passes} alternating passes; median ms/100 complete refilters, query folding, matching, ancestor retention, selection, visible rows and checksum reads. Exact d900810 baseline versus reused filter markers; prepared titles, no PDF parsing, widgets or GPU. Allocation counts cover one warm refilter."
+        "{passes} alternating passes; median ms/100 complete refilters, query folding, matching, ancestor retention, selection, visible rows and checksum reads. Exact d900810 baseline versus current shared folding and reused filter markers; prepared titles, no PDF parsing, widgets or GPU. Allocation counts cover one warm refilter."
     );
     for count in [80, 10_000] {
         let entries: Vec<_> = (0..count)
@@ -127,7 +130,10 @@ fn main() {
                 after.0 + 1,
                 "warm refilters must reuse the marker allocation"
             );
-            assert_eq!(before.1, after.1);
+            assert!(
+                after.1 <= before.1,
+                "shared query folding must not add reallocations"
+            );
             println!(
                 "{count} titles, {kind}: previous {:.4}, reused {:.4} ms; (alloc,realloc) {before:?} -> {after:?}; {} visible, checksum {checksum}",
                 medians[0],

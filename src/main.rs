@@ -3,6 +3,7 @@ mod app;
 mod bitmap;
 mod bookmark_index;
 mod cache;
+mod case_fold;
 mod cli;
 mod comment_cards;
 mod comment_view;

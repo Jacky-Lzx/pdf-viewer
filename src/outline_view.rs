@@ -56,7 +56,7 @@ impl OutlineView {
             ancestors.push(index);
             prepared
                 .folded_titles
-                .push(caseless::default_case_fold_str(&entry.title));
+                .push(crate::case_fold::fold(&entry.title));
         }
         if cancelled() {
             return None;
@@ -155,7 +155,7 @@ impl OutlineView {
     pub fn refilter(&mut self) {
         self.visible.clear();
         if self.filtering() {
-            let query = caseless::default_case_fold_str(self.query.trim());
+            let query = crate::case_fold::fold(self.query.trim());
             let words: Vec<_> = query
                 .split_whitespace()
                 .map(memchr::memmem::Finder::new)

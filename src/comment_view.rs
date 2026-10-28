@@ -1,6 +1,5 @@
 //! Cached comment navigation, independent of widget layout and PDF writing.
 use crate::annotations::{Comments, ReviewStatus};
-use caseless::Caseless;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -125,7 +124,7 @@ impl CommentView {
             .as_ref()
             .is_some_and(|work| work.matches(&self.filter, page))
         {
-            let query = caseless::default_case_fold_str(&self.filter.query);
+            let query = crate::case_fold::fold(&self.filter.query);
             // Own the prepared keywords so later UI frames reuse them.
             let words = query
                 .split_whitespace()
@@ -296,20 +295,7 @@ fn folded_field<'a>(
     bytes: &mut usize,
 ) -> &'a str {
     if cached.is_none() {
-        scratch.clear();
-        scratch.reserve(text.len());
-        if text.is_ascii() {
-            scratch.push_str(text);
-            scratch.make_ascii_lowercase();
-        } else {
-            for ch in text.chars() {
-                if ch.is_ascii() {
-                    scratch.push(ch.to_ascii_lowercase());
-                } else {
-                    scratch.extend(std::iter::once(ch).default_case_fold());
-                }
-            }
-        }
+        crate::case_fold::fold_into(text, scratch);
         let remaining = SEARCH_BYTES - *bytes;
         if scratch.capacity() <= remaining {
             *bytes += scratch.capacity();

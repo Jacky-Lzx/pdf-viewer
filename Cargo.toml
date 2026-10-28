@@ -109,6 +109,10 @@ name = "outline_filter"
 harness = false
 
 [[bench]]
+name = "case_folding"
+harness = false
+
+[[bench]]
 name = "link_reading"
 harness = false
 

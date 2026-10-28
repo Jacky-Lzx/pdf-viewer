@@ -5,6 +5,9 @@ mod annotations;
 #[path = "../src/bitmap.rs"]
 mod bitmap;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/case_fold.rs"]
+mod case_fold;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/comment_view.rs"]
 mod comment_view;
 #[allow(dead_code, unused_imports)]
