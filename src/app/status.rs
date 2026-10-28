@@ -1,9 +1,85 @@
 use super::{MarkAction, Pagewing, appearance, spread, toolbar};
+use crate::state::ReadingMark;
 use eframe::egui::{self, RichText};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const NOTICE_DURATION: Duration = Duration::from_secs(5);
+
+pub(super) struct Notice {
+    pub(super) text: String,
+    at: Instant,
+    pub(super) recovery: Option<Recovery>,
+}
+
+pub(super) enum Recovery {
+    Bookmark(usize),
+    Mark { name: char, position: ReadingMark },
+}
+
+impl Recovery {
+    fn caption(&self) -> &'static str {
+        match self {
+            Self::Bookmark(_) => "Undo bookmark",
+            Self::Mark { .. } => "Undo mark",
+        }
+    }
+}
+
+impl Notice {
+    pub(super) fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            at: Instant::now(),
+            recovery: None,
+        }
+    }
+}
 
 impl Pagewing {
+    fn restorable_deletion(&self) -> Option<&Recovery> {
+        let notice = self.message.as_ref()?;
+        if notice.at.elapsed() >= NOTICE_DURATION || self.loading {
+            return None;
+        }
+        let recovery = notice.recovery.as_ref()?;
+        let valid = match recovery {
+            Recovery::Bookmark(page) => {
+                *page < self.nav.count && !self.reading.bookmarks.contains(page)
+            }
+            Recovery::Mark { name, position } => {
+                position.page < self.nav.count && !self.reading.marks.contains_key(name)
+            }
+        };
+        valid.then_some(recovery)
+    }
+
+    pub(super) fn restore_deleted(&mut self) {
+        if self.restorable_deletion().is_none() {
+            return;
+        }
+        let recovery = self.message.as_mut().unwrap().recovery.take().unwrap();
+        match recovery {
+            Recovery::Bookmark(page) => {
+                self.set_bookmark(page, true);
+                self.notify("Bookmark restored");
+            }
+            Recovery::Mark { name, position } => {
+                self.reading.marks.insert(name, position);
+                self.dirty = true;
+                self.notify(format!("Mark {name} restored"));
+            }
+        }
+    }
+
     pub(super) fn status(&mut self, context: &egui::Context) {
+        self.input_buttons.restore_deleted = None;
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|notice| notice.at.elapsed() >= NOTICE_DURATION)
+        {
+            self.message = None;
+        }
         egui::TopBottomPanel::bottom("status")
             .frame(appearance::panel(context, 2))
             .exact_height(36.0)
@@ -40,6 +116,24 @@ impl Pagewing {
                         ));
                     }
                     ui.separator();
+                    // Keep recovery reachable before long page labels, even in
+                    // a narrow window. The action also describes the notice.
+                    let recovery_caption = self.restorable_deletion().map(Recovery::caption);
+                    if let Some(caption) = recovery_caption {
+                        self.input_buttons.restore_deleted = Some(
+                            ui.push_id("undo-deletion", |ui| {
+                                ui.button(caption).on_hover_ui(|ui| {
+                                    if let Some(notice) = &self.message {
+                                        ui.label(&notice.text);
+                                    }
+                                    ui.label("Restore without leaving this page");
+                                })
+                            })
+                            .inner
+                            .id,
+                        );
+                        ui.separator();
+                    }
                     if self.nav.count > 0 {
                         let (first, second) = if self.reading.facing {
                             let pages = spread::page_range(self.nav.page, self.nav.count);
@@ -72,12 +166,12 @@ impl Pagewing {
                     if self.loading && self.reloading {
                         ui.spinner();
                         ui.label("Reloading document…");
-                    } else if let Some((message, at)) = &self.message
-                        && at.elapsed() < Duration::from_secs(5)
-                    {
-                        ui.label(message);
+                    } else if let Some(notice) = &self.message {
+                        if recovery_caption.is_none() {
+                            ui.label(&notice.text);
+                        }
                         context.request_repaint_after(
-                            Duration::from_secs(5).saturating_sub(at.elapsed()),
+                            NOTICE_DURATION.saturating_sub(notice.at.elapsed()),
                         );
                     } else if self.nav.count == 0 {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
@@ -92,3 +186,6 @@ impl Pagewing {
             });
     }
 }
+
+#[cfg(test)]
+mod tests;

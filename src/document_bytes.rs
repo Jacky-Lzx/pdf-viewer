@@ -50,6 +50,7 @@ impl<F: Fn() -> bool> Read for PipeReader<'_, F> {
         if output.is_empty() {
             return Ok(0);
         }
+        #[cfg(not(target_os = "macos"))]
         let mut descriptor = libc::pollfd {
             fd: self.file.as_raw_fd(),
             events: libc::POLLIN,
@@ -60,8 +61,13 @@ impl<F: Fn() -> bool> Read for PipeReader<'_, F> {
                 // The outer block reader discards all bytes on cancellation.
                 return Ok(0);
             }
+            // macOS poll/kqueue only reports a FIFO's buffered byte count;
+            // select also reports its socket's EOF when the last writer closes.
+            #[cfg(target_os = "macos")]
+            let ready = select_pipe(self.file.as_raw_fd())?;
             // SAFETY: descriptor is live and writable; the owned file remains
             // open for the entire poll/read pair. Only one descriptor is passed.
+            #[cfg(not(target_os = "macos"))]
             let ready = unsafe { libc::poll(&mut descriptor, 1, 50) };
             if ready < 0 {
                 let error = io::Error::last_os_error();
@@ -73,14 +79,40 @@ impl<F: Fn() -> bool> Read for PipeReader<'_, F> {
             if ready == 0 {
                 continue;
             }
-            // POLLHUP also reaches read: drain any final bytes before EOF.
-            // Polling first distinguishes no writer yet from a closed writer.
+            // Read on hangup too: drain any final bytes before EOF. Waiting
+            // first distinguishes no writer yet from a closed writer.
             match self.file.read(output) {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
                 result => return result,
             }
         }
     }
+}
+
+#[cfg(all(unix, any(target_os = "macos", test)))]
+fn select_pipe(fd: std::os::fd::RawFd) -> io::Result<libc::c_int> {
+    if fd < 0 || fd as usize >= libc::FD_SETSIZE {
+        return Err(io::Error::other("FIFO descriptor exceeds select capacity"));
+    }
+    // SAFETY: fd is within fd_set's bounds, the set and timeout are writable,
+    // and select borrows the descriptor without taking ownership.
+    let ready = unsafe {
+        let mut readers = std::mem::zeroed::<libc::fd_set>();
+        libc::FD_ZERO(&mut readers);
+        libc::FD_SET(fd, &mut readers);
+        let mut timeout = libc::timeval {
+            tv_sec: 0,
+            tv_usec: 50_000,
+        };
+        libc::select(
+            fd + 1,
+            &mut readers,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut timeout,
+        )
+    };
+    Ok(ready)
 }
 
 /// Keep filesystem reads bounded without copying through an intermediate buffer.
@@ -193,6 +225,24 @@ mod tests {
         }
 
         #[test]
+        fn select_distinguishes_a_pending_writer_from_an_empty_closed_writer() {
+            use std::os::fd::AsRawFd;
+            let (_root, path) = fifo();
+            let file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&path)
+                .unwrap();
+            assert_eq!(select_pipe(file.as_raw_fd()).unwrap(), 0);
+            let writer = OpenOptions::new().write(true).open(path).unwrap();
+            assert_eq!(select_pipe(file.as_raw_fd()).unwrap(), 0);
+            drop(writer);
+            assert_eq!(select_pipe(file.as_raw_fd()).unwrap(), 1);
+            assert!(select_pipe(libc::FD_SETSIZE as i32).is_err());
+            assert!(select_pipe(-1).is_err());
+        }
+
+        #[test]
         fn delayed_writers_preserve_fragmented_bytes_and_real_eof() {
             for length in [0, 17, BLOCK as usize * 2 + 13] {
                 let (_root, path) = fifo();
@@ -211,7 +261,14 @@ mod tests {
                 drop(writer);
                 let bytes = result.recv_timeout(Duration::from_secs(2));
                 cancelled.store(true, Ordering::Relaxed);
-                assert_eq!(bytes.unwrap().unwrap().unwrap(), data);
+                assert_eq!(
+                    bytes
+                        .expect("FIFO must finish after its writer closes")
+                        .unwrap()
+                        .unwrap(),
+                    data,
+                    "FIFO length {length}"
+                );
             }
         }
     }

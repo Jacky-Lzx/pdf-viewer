@@ -17,7 +17,7 @@ impl Pagewing {
             .recent
             .iter()
             .find(|item| item.path == path)
-            .cloned()
+            .map(|item| item.as_ref().clone())
             .unwrap_or(ReadingState {
                 path,
                 ..Default::default()
@@ -159,6 +159,9 @@ impl Pagewing {
         self.auto_reload_pending = false;
         self.automatic_reload = false;
         self.remember();
+        if let Some(message) = &mut self.message {
+            message.recovery = None;
+        }
         self.nav.clear_prefix();
         self.loading = true;
         self.reloading = self.nav.count > 0;
@@ -249,7 +252,7 @@ mod tests {
                 app.message
                     .as_ref()
                     .unwrap()
-                    .0
+                    .text
                     .contains("No recently closed")
             );
             assert!(

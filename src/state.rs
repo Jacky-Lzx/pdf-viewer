@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -98,7 +99,9 @@ pub fn normalized_offset(pan: [f32; 2], overflow: [f32; 2]) -> [f32; 2] {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Library {
-    pub recent: Vec<ReadingState>,
+    // Published records are immutable; background snapshots share their large
+    // bookmark/mark collections until the active document replaces its record.
+    pub recent: Vec<Arc<ReadingState>>,
     pub dark: bool,
     pub night: bool,
     pub sidebar: bool,
@@ -147,7 +150,7 @@ impl Library {
 
     pub fn remember(&mut self, state: ReadingState) {
         self.recent.retain(|item| item.path != state.path);
-        self.recent.insert(0, state);
+        self.recent.insert(0, Arc::new(state));
         self.recent.truncate(24);
     }
 }
@@ -161,6 +164,106 @@ pub fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshots_share_records_but_later_reading_edits_are_isolated() {
+        let mut library = Library::default();
+        library.remember(ReadingState {
+            path: "other.pdf".into(),
+            bookmarks: (0..600).collect(),
+            ..Default::default()
+        });
+        let mut current = ReadingState {
+            path: "active.pdf".into(),
+            page: 7,
+            bookmarks: (0..600).collect(),
+            marks: [(
+                'z',
+                ReadingMark {
+                    page: 79,
+                    fit: Fit::Custom(1.75),
+                    offset: [0.4, 0.6],
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        library.remember(current.clone());
+        let snapshot = library.clone();
+        let original = serde_json::to_value(&snapshot).unwrap();
+        for (live, saved) in library.recent.iter().zip(&snapshot.recent) {
+            assert!(
+                Arc::ptr_eq(live, saved),
+                "snapshot cloning must share records"
+            );
+        }
+        current.page = 8;
+        current.bookmarks.remove(&7);
+        current.marks.get_mut(&'z').unwrap().offset = [0.1, 0.2];
+        library.remember(current);
+        library.dark = true;
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
+        assert_eq!(library.recent[0].page, 8);
+        assert!(!library.recent[0].bookmarks.contains(&7));
+        assert_eq!(library.recent[0].marks[&'z'].offset, [0.1, 0.2]);
+        assert!(!Arc::ptr_eq(&library.recent[0], &snapshot.recent[0]));
+        assert!(Arc::ptr_eq(&library.recent[1], &snapshot.recent[1]));
+    }
+
+    #[test]
+    fn shared_snapshots_keep_the_legacy_json_record_shape() {
+        #[derive(Deserialize)]
+        struct LegacyLibrary {
+            recent: Vec<ReadingState>,
+        }
+        let fixture = r#"{"recent":[{"path":"文档.pdf","page":7,"bookmarks":[1,7],"marks":{"a":{"page":3,"rotation":1,"offset":[0.4,0.8]}}}],"dark":true}"#;
+        let library: Library = serde_json::from_str(fixture).unwrap();
+        let encoded = serde_json::to_value(library.clone()).unwrap();
+        assert_eq!(
+            encoded["recent"][0],
+            serde_json::to_value(library.recent[0].as_ref()).unwrap()
+        );
+        let legacy: LegacyLibrary = serde_json::from_value(encoded).unwrap();
+        assert_eq!(legacy.recent[0].path, PathBuf::from("文档.pdf"));
+        assert_eq!(legacy.recent[0].page, 7);
+        assert_eq!(legacy.recent[0].bookmarks, [1, 7].into());
+        assert_eq!(legacy.recent[0].marks[&'a'].offset, [0.4, 0.8]);
+    }
+
+    #[test]
+    fn replacing_and_trimming_records_does_not_change_an_older_snapshot() {
+        let mut library = Library::default();
+        for page in 0..24 {
+            library.remember(ReadingState {
+                path: format!("{page}.pdf").into(),
+                page,
+                ..Default::default()
+            });
+        }
+        let snapshot = library.clone();
+        library.remember(ReadingState {
+            path: "0.pdf".into(),
+            page: 99,
+            ..Default::default()
+        });
+        assert_eq!(library.recent.len(), 24);
+        assert_eq!(library.recent[0].page, 99);
+        assert_eq!(snapshot.recent[23].page, 0);
+        library.remember(ReadingState {
+            path: "new.pdf".into(),
+            ..Default::default()
+        });
+        assert_eq!(library.recent.len(), 24);
+        assert!(
+            !library
+                .recent
+                .iter()
+                .any(|record| record.path == Path::new("1.pdf"))
+        );
+        assert_eq!(snapshot.recent.len(), 24);
+        assert_eq!(snapshot.recent[22].path, Path::new("1.pdf"));
+    }
 
     #[test]
     fn renamed_app_imports_legacy_library_without_modifying_it() {

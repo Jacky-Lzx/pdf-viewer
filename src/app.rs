@@ -101,7 +101,7 @@ pub struct Pagewing {
     automatic_reload: bool,
     error: Option<errors::Notice>,
     configuration_error: Option<String>,
-    message: Option<(String, Instant)>,
+    message: Option<status::Notice>,
     pan: Vec2,
     overflow: Vec2,
     viewport: Vec2,
@@ -399,7 +399,7 @@ impl Pagewing {
     }
 
     fn notify(&mut self, text: impl Into<String>) {
-        self.message = Some((text.into(), Instant::now()));
+        self.message = Some(status::Notice::new(text));
     }
 
     fn choose_file(&mut self) {
@@ -663,15 +663,49 @@ impl Pagewing {
         if self.nav.count == 0 {
             return;
         }
-        if !self.reading.bookmarks.remove(&self.nav.page) {
-            self.reading.bookmarks.insert(self.nav.page);
+        let present = !self.reading.bookmarks.contains(&self.nav.page);
+        if present {
+            self.set_bookmark(self.nav.page, true);
             self.notify("Bookmark added");
         } else {
-            self.notify("Bookmark removed");
+            self.remove_bookmark(self.nav.page);
         }
-        self.refresh_bookmarks();
         self.reveal_page = Some(self.nav.page);
+    }
+
+    fn set_bookmark(&mut self, page: usize, present: bool) -> bool {
+        let changed = crate::bookmark_index::set(
+            &mut self.reading.bookmarks,
+            &mut self.bookmark_pages,
+            page,
+            present,
+        );
+        if changed {
+            if let Some(message) = &mut self.message {
+                message.recovery = None;
+            }
+            self.dirty = true;
+        }
+        changed
+    }
+
+    fn remove_bookmark(&mut self, page: usize) {
+        if !self.set_bookmark(page, false) {
+            return;
+        }
+        let mut notice = status::Notice::new("Bookmark removed");
+        notice.recovery = (!self.loading).then_some(status::Recovery::Bookmark(page));
+        self.message = Some(notice);
+    }
+
+    fn remove_mark(&mut self, name: char) {
+        let Some(position) = self.reading.marks.remove(&name) else {
+            return;
+        };
         self.dirty = true;
+        let mut notice = status::Notice::new(format!("Mark {name} removed"));
+        notice.recovery = (!self.loading).then_some(status::Recovery::Mark { name, position });
+        self.message = Some(notice);
     }
 
     fn refresh_bookmarks(&mut self) {

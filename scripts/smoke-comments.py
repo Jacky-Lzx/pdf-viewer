@@ -24,7 +24,9 @@ def comments_pdf(rows=0):
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Annots [7 0 R] >>",
         "<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Alice) /Contents (Root question) >>",
         f"<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /IRT 5 0 R /RT /R /T <{author}> /Contents (Nested needle jkg) >>",
-        "<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Bob) /Contents (Elsewhere comment) >>",
+        "<< /Type /Annot /Subtype /Highlight /Rect [50 620 110 670] "
+        "/QuadPoints [50 650 110 650 50 670 110 670 50 620 110 620 50 640 110 640] "
+        "/T (Bob) /Contents (Elsewhere comment) >>",
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Review) /State (Completed) /F 2 >>",
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Marked) /State (Marked) /F 2 >>",
     ]
@@ -138,7 +140,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, page navigation and save/reload")
+                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload and page navigation")
             except Exception:
                 log.flush()
                 log.seek(0)
