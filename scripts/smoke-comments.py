@@ -14,7 +14,7 @@ desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
-def comments_pdf(rows=0):
+def comments_pdf(rows=0, row_contents=None):
     author = (b"\xfe\xff" + "Straße".encode("utf-16-be")).hex()
     extra = " ".join(f"{10 + index} 0 R" for index in range(rows))
     objects = [
@@ -30,10 +30,14 @@ def comments_pdf(rows=0):
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Review) /State (Completed) /F 2 >>",
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Marked) /State (Marked) /F 2 >>",
     ]
-    objects.extend(
-        f"<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Reviewer) /Contents (Row {index}) >>"
-        for index in range(rows)
-    )
+    # Large-filter fixtures share one PDF string but decode separate comment
+    # fields, keeping the input file small while exercising the real scan.
+    for index in range(rows):
+        contents = f"(Row {index})" if row_contents is None else f"{10 + rows} 0 R"
+        objects.append(f"<< /Type /Annot /Subtype /Text /Rect [50 650 70 670] /T (Reviewer) /Contents {contents} >>")
+    if row_contents is not None:
+        contents = b"\xfe\xff" + row_contents.encode("utf-16-be")
+        objects.append(f"<{contents.hex()}>")
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
     for number, obj in enumerate(objects, 1):

@@ -125,6 +125,8 @@ require('tex-tools').setup({
 
 **Clear filters** 清除全部条件。筛选不会改变 PDF 上的批注显示或丢弃编辑草稿；保存批注及重载当前文档后保留条件，切换文档时重置。小窗口中整个面板也可滚动。通过快捷键、工具栏或面板的关闭按钮隐藏批注时会立即释放输入焦点，随后输入的阅读快捷键可直接使用；筛选和草稿继续保留。
 
+较大的批注列表筛选时会显示进度，仍可修改条件、打开帮助和操作窗口；更改条件会取消旧筛选。筛选框内的导航和回车会等待对应结果准备好，保留未保存的编辑草稿。批注尚在读取时也可先输入筛选词并按回车；筛选完成前暂停 Copy，避免复制不完整的结果。
+
 嵌套回复：选中已保存的批注，点击 **Reply**，输入回复后使用 **Save comment**（或 `Ctrl/Cmd+Enter`）保存。回复也可以继续回复，支持多层嵌套；深层回复的缩进会限制宽度，保留可读空间。回复以标准 PDF Text 批注及 `IRT` / `RT=R` 关系保存在原文件中，不会再创建文字高亮。已有 Acrobat 回复会自动组成线程。
 
 批注状态：编辑器提供 **Status** 选择器，支持 **None**（无状态）、**Accepted**（已接受）、**Rejected**（已拒绝）、**Cancelled**（已取消）、**Completed / resolved**（已完成／已解决），以及独立的 **Marked (Acrobat checkmark)** 勾选标记。点击 **Save comment** 后写入 PDF；只改状态也会作为未保存草稿保护。状态使用 Acrobat 的标准 `StateModel=Review` / `Marked` 与 `State` 文本字段，保存为独立的状态回复，侧栏不会把它们显示成空白 comment。**Status history** 可查看各作者的状态记录；Pagewing 添加自己的状态，保留其他审阅者的历史。界面优先显示 Pagewing 的状态，否则显示读取到的外部状态。这里“已解决”对应本地 PDF 的 **Completed**，不连接 Acrobat 云端审阅的 Resolve 操作。
@@ -372,6 +374,7 @@ night = []                 # 停用该动作的快捷键
 - 批注列表只绘制可见卡片，按需缓存最近遇到的最多 128 组卡片文字；命中时复用摘要、作者、页码标签和状态行，重新加载批注时释放旧缓存。
 - 构建批注线程顺序时在多个根节点间复用遍历栈，跳过已访问节点；深层回复、孤立回复和循环关系仍按原有顺序显示。
 - 批注筛选复用当前快照的命中与父级上下文标记数组，每次只准备一次关键词搜索器。作者已满足全部关键词时跳过正文准备；大小写折叠对 ASCII 使用快速路径，Unicode 保留完整展开规则。作者与正文分别按实际容量计入 8 MiB 检索缓存，超出时复用临时缓冲并完整匹配；重载或切换批注快照时释放缓存与缓冲，清除旧命中。
+- 长批注文字筛选按约 4 毫秒的软预算在批注之间让出界面线程，跨帧复用关键词和缓存。只在完整扫描后发布命中、父级上下文和选择；单条字段折叠、查询准备及最终树遍历仍是完整操作，预算不保证最大帧耗时。
 - 快捷键分发使用独立的精简动作快照，保留按键、复制和鼠标历史操作的事件顺序；常见输入复用最多保留 256 条动作容量的缓冲，超大输入批次完整执行后释放临时容量。
 - 读取多行高亮等批注时逐个计算四边形边界，省去完整临时坐标数组和每个四边形的临时点数组；保留坐标读取上限、裁剪/旋转变换与矩形回退。
 - 自动保存的库快照共享不可变的最近文档记录，避免反复复制其他文档的书签与命名位置；当前文档仍独立编辑并发布新记录，后台快照不受后续操作影响。状态文件继续使用原有 JSON 格式。
@@ -458,6 +461,8 @@ cargo bench --locked --bench comments -- 9 threads
 cargo bench --locked --bench comments -- 11 filters
 # 冷筛选和已有一次完整查询后的筛选，覆盖长 ASCII/Unicode 正文及缓存放不下的快照
 cargo bench --locked --bench comments -- 5 cold-filters
+# 比较完整与分批筛选的总计算时间、最长调用及批次数，包含最终上下文和可见行整理
+cargo bench --locked --bench comments -- 5 slices
 # 批注四边形：包含 PDF 数字数组读取、几何变换、结果构造及分配计数
 cargo bench --locked --bench annotation_geometry -- 9
 # 阅读视图渲染规划，比较重复计算、缓存命中与滚动失效，包含高分屏和紧张预算
@@ -517,6 +522,7 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-comments.py target/release/pa
 python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-focus.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-history.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-comment-navigation.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-comment-filter-load.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-comment-menus.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-input-burst.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-mouse-input.py target/release/pagewing

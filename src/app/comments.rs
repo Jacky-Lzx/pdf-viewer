@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, Vec2};
 
 mod editor;
 mod export;
+mod filtering;
 mod list;
 mod menus;
 
@@ -63,11 +64,15 @@ pub(super) struct CommentUi {
     input_pass: Option<u64>,
     pub filter_motions: Vec<crate::list_navigation::Motion>,
     pub filter_confirm: bool,
+    filter_navigation: Option<filtering::FilterNavigation>,
     region: Option<(egui::LayerId, egui::Rect)>,
 }
 
 impl CommentUi {
     pub fn set_comments(&mut self, comments: Comments) {
+        if self.loaded {
+            self.clear_filter_navigation();
+        }
         self.view.set_comments(&comments);
         self.cards.clear();
         self.visible = Default::default();
@@ -146,8 +151,7 @@ impl Pagewing {
     pub(super) fn set_comments_open(&mut self, context: &egui::Context, open: bool) {
         self.comments.open = open;
         if !open {
-            self.comments.filter_motions.clear();
-            self.comments.filter_confirm = false;
+            self.comments.clear_filter_navigation();
         }
         // Consume final text before hiding the panel, just as for a queued save.
         let pending = self.pending_comment_input(context);
@@ -356,6 +360,7 @@ impl Pagewing {
                             self.comments.loaded
                                 && !self.loading
                                 && !self.comments.busy()
+                                && self.comments.view.progress().is_none()
                                 && !self.comments.view.rows().is_empty(),
                             egui::Button::new("Copy").small(),
                         )
@@ -410,10 +415,15 @@ impl Pagewing {
                                 "Showing a limited number of annotations.",
                             );
                         }
-                        self.comments
-                            .view
-                            .update(&self.comments.comments, self.nav.page);
-                        if self.comments.loaded
+                        let focused = self.comment_filter_focused(context);
+                        self.comments.advance_filter(self.nav.page, focused, std::time::Duration::from_millis(4));
+                        if let Some((scanned, total)) = self.comments.view.progress() {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.weak(format!("Filtering comments… {scanned}/{total}"));
+                            });
+                            context.request_repaint();
+                        } else if self.comments.loaded
                             && self.comments.view.filter != CommentFilter::default()
                         {
                             ui.weak(format!(
@@ -464,7 +474,7 @@ impl Pagewing {
             });
         self.comments.region = Some((panel.response.layer_id, panel.response.rect));
         let save_requested = std::mem::take(&mut self.comments.save_requested);
-        if copy {
+        if copy && self.comments.view.progress().is_none() {
             self.copy_shown_comments(context);
         }
         if actions.discard {

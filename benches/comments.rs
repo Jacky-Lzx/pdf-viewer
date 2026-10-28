@@ -56,6 +56,7 @@ fn main() {
         Some("filters") => benchmark_filters(passes),
         Some("threads") => benchmark_threads(passes),
         Some("cold-filters") => benchmark_cold_filters(passes),
+        Some("slices") => benchmark_slices(passes),
         _ => {
             benchmark_threads(passes);
             benchmark_filters(passes);
@@ -75,26 +76,7 @@ fn benchmark_cold_filters(passes: usize) {
         ("long Unicode", 80, "Straße 中文 Σ ﬁ ".repeat(2048)),
         ("long Unicode", 2000, "Straße 中文 Σ ﬁ ".repeat(2048)),
     ] {
-        let comments = Comments {
-            items: (0..count)
-                .map(|index| Comment {
-                    page: index / 10,
-                    slot: Some(index % 10),
-                    parent: None,
-                    review: ReviewStatus::None,
-                    marked: false,
-                    states: Vec::new(),
-                    kind: "Text".into(),
-                    contents: format!("headmarker {body} tailmarker"),
-                    author: "Pagewing".into(),
-                    rects: Vec::new(),
-                    has_appearance: false,
-                    truncated: false,
-                    locked: false,
-                })
-                .collect(),
-            limited: false,
-        };
+        let comments = text_comments(count, &body);
         for (label, query, expected) in [
             ("author", "PAGEWING", count),
             ("start", "headmarker", count),
@@ -134,6 +116,94 @@ fn benchmark_cold_filters(passes: usize) {
                     samples[samples.len() / 2]
                 );
             }
+        }
+    }
+}
+
+fn text_comments(count: usize, body: &str) -> Comments {
+    Comments {
+        items: (0..count)
+            .map(|index| Comment {
+                page: index / 10,
+                slot: Some(index % 10),
+                parent: None,
+                review: ReviewStatus::None,
+                marked: false,
+                states: Vec::new(),
+                kind: "Text".into(),
+                contents: format!("headmarker {body} tailmarker"),
+                author: "Pagewing".into(),
+                rects: Vec::new(),
+                has_appearance: false,
+                truncated: false,
+                locked: false,
+            })
+            .collect(),
+        limited: false,
+    }
+}
+
+fn benchmark_slices(passes: usize) {
+    use std::time::Duration;
+    println!(
+        "{passes} passes, median ms; complete versus 4 ms slices. Sliced CPU time sums calls without frame waits; worst call includes initialization and final thread/context work. Excludes fixture creation, PDF parsing, UI and GPU."
+    );
+    for (name, count, body) in [
+        ("short mixed", 10_000, "Review Straße 中文 ".into()),
+        ("long Unicode", 2000, "Straße 中文 Σ ﬁ ".repeat(2048)),
+    ] {
+        let comments = text_comments(count, &body);
+        for query in ["PAGEWING", "tailmarker", "absentmarker"] {
+            let mut full = Vec::new();
+            let mut totals = Vec::new();
+            let mut largest = Vec::new();
+            let mut calls = Vec::new();
+            for _ in 0..passes {
+                let mut complete = CommentView::default();
+                complete.set_comments(&comments);
+                complete.filter.query = query.into();
+                let mut sliced = CommentView::default();
+                sliced.set_comments(&comments);
+                sliced.filter.query = query.into();
+                let start = Instant::now();
+                assert!(complete.update(black_box(&comments), 0));
+                full.push(start.elapsed().as_secs_f64() * 1000.0);
+                let mut total: f64 = 0.0;
+                let mut worst: f64 = 0.0;
+                let mut count = 0;
+                loop {
+                    let start = Instant::now();
+                    let ready =
+                        sliced.update_for(black_box(&comments), 0, Duration::from_millis(4));
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    total += elapsed;
+                    worst = worst.max(elapsed);
+                    count += 1;
+                    if ready {
+                        break;
+                    }
+                    assert!(sliced.progress().is_some());
+                    assert!(sliced.rows().is_empty());
+                }
+                assert_eq!(sliced.rows(), complete.rows());
+                assert_eq!(sliced.matches(), complete.matches());
+                assert_eq!(sliced.selected(), complete.selected());
+                totals.push(total);
+                largest.push(worst);
+                calls.push(count);
+            }
+            full.sort_by(f64::total_cmp);
+            totals.sort_by(f64::total_cmp);
+            largest.sort_by(f64::total_cmp);
+            calls.sort();
+            println!(
+                "  {count} {name}, {query}: complete {:.3} ms, sliced CPU {:.3} ms; median worst call {:.3} ms, maximum {:.3} ms; median calls {}",
+                full[passes / 2],
+                totals[passes / 2],
+                largest[passes / 2],
+                largest[passes - 1],
+                calls[passes / 2]
+            );
         }
     }
 }
