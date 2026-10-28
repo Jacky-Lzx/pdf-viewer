@@ -72,7 +72,7 @@ fn text_weight_keys_apply_configured_steps_counts_limits_and_input_isolation() {
     );
     app.adjust_text_embolden(false, 100);
     assert_eq!(app.text_embolden, 0.0);
-    assert!(app.message.as_ref().unwrap().0.contains("0.000"));
+    assert!(app.message.as_ref().unwrap().text.contains("0.000"));
     app.save();
     assert_eq!(std::fs::read_to_string(preferences).unwrap(), original);
 }
