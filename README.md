@@ -357,6 +357,8 @@ cargo bench --locked --bench search_snippet -- 9
 cargo bench --locked --bench search_result_text -- 9
 # 预览文字：比较 Painter::text 复制字符串与直接移入有宽度限制的布局
 cargo bench --locked --bench preview_caption -- 9
+# 页码文字：比较完整标签生成后截取与按可见前缀生成摘要
+cargo bench --locked --bench page_label_text -- 9
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
 cargo bench --locked --bench search_matching -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径

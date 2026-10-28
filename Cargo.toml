@@ -135,3 +135,7 @@ harness = false
 [[bench]]
 name = "preview_caption"
 harness = false
+
+[[bench]]
+name = "page_label_text"
+harness = false

@@ -3,7 +3,8 @@ use hayro::hayro_syntax::{
     object::{Array, Dict, Name, Object, String as PdfString},
 };
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::Write;
+
+const LABEL_EXCERPT_CHARACTERS: usize = 12;
 
 #[derive(Clone, Copy, Debug)]
 enum Style {
@@ -21,6 +22,12 @@ struct LabelRange {
     first: u64,
     prefix: String,
     style: Style,
+}
+
+struct LabelExcerpt<'a> {
+    prefix: &'a str,
+    suffix: String,
+    truncated: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -112,7 +119,7 @@ impl PageLabels {
         }
     }
 
-    pub fn label(&self, page: usize) -> Option<String> {
+    fn range(&self, page: usize) -> Option<&LabelRange> {
         if page >= self.count {
             return None;
         }
@@ -120,7 +127,11 @@ impl PageLabels {
             .ranges
             .partition_point(|range| range.page <= page)
             .checked_sub(1)?;
-        let range = &self.ranges[index];
+        Some(&self.ranges[index])
+    }
+
+    pub fn label(&self, page: usize) -> Option<String> {
+        let range = self.range(page)?;
         let suffix = number(range.style, range.first + (page - range.page) as u64);
         if range.prefix.is_empty() {
             return Some(suffix);
@@ -130,42 +141,108 @@ impl PageLabels {
 
     pub fn display_name(&self, page: usize) -> String {
         let physical = (page + 1).to_string();
-        match self.label(page) {
-            Some(mut label) if !label.is_empty() && label != physical => {
-                // Only inspect enough characters to decide whether to truncate.
-                // Reuse the label allocation for both its prefix and page number.
-                if let Some((end, _)) = label.char_indices().nth(12) {
-                    label.truncate(end);
-                    label.push('…');
-                }
-                let _ = write!(label, " · {}", page + 1);
-                label
+        let Some(excerpt) = self.excerpt(page, &physical) else {
+            return physical;
+        };
+        let ellipsis = if excerpt.truncated { "…" } else { "" };
+        let extra = ellipsis.len() + " · ".len() + physical.len();
+        let mut label = if excerpt.prefix.is_empty() {
+            let mut label = excerpt.suffix;
+            label.reserve(extra);
+            label
+        } else {
+            let mut label =
+                String::with_capacity(excerpt.prefix.len() + excerpt.suffix.len() + extra);
+            label.push_str(excerpt.prefix);
+            label.push_str(&excerpt.suffix);
+            label
+        };
+        label.push_str(ellipsis);
+        label.push_str(" · ");
+        label.push_str(&physical);
+        label
+    }
+
+    // Borrow the visible prefix and format a suffix only when it can appear.
+    // Check full-label equality first, including unusual numeric prefixes.
+    fn excerpt(&self, page: usize, physical: &str) -> Option<LabelExcerpt<'_>> {
+        let range = self.range(page)?;
+        let value = range.first + (page - range.page) as u64;
+        if range.prefix.is_empty() {
+            if matches!(range.style, Style::Decimal) && value == (page + 1) as u64 {
+                return None;
             }
-            _ => physical,
+            let mut suffix = number(range.style, value);
+            if suffix.is_empty() || suffix == physical {
+                return None;
+            }
+            let truncated = suffix.len() > LABEL_EXCERPT_CHARACTERS;
+            suffix.truncate(LABEL_EXCERPT_CHARACTERS);
+            return Some(LabelExcerpt {
+                prefix: "",
+                suffix,
+                truncated,
+            });
         }
+        let mut suffix = None;
+        if let Some(tail) = physical.strip_prefix(&range.prefix) {
+            let number = number(range.style, value);
+            if number == tail {
+                return None;
+            }
+            suffix = Some(number);
+        }
+        if let Some((end, _)) = range.prefix.char_indices().nth(LABEL_EXCERPT_CHARACTERS) {
+            return Some(LabelExcerpt {
+                prefix: &range.prefix[..end],
+                suffix: String::new(),
+                truncated: true,
+            });
+        }
+        if matches!(range.style, Style::None) {
+            return Some(LabelExcerpt {
+                prefix: &range.prefix,
+                suffix: String::new(),
+                truncated: false,
+            });
+        }
+        let remaining = LABEL_EXCERPT_CHARACTERS - range.prefix.chars().count();
+        if remaining == 0 && value > 0 {
+            return Some(LabelExcerpt {
+                prefix: &range.prefix,
+                suffix: String::new(),
+                truncated: true,
+            });
+        }
+        let mut suffix = suffix.unwrap_or_else(|| number(range.style, value));
+        // All PDF numbering styles produce ASCII, so the remaining scalar
+        // budget is also the byte limit for the formatted suffix.
+        let truncated = suffix.len() > remaining;
+        suffix.truncate(remaining);
+        Some(LabelExcerpt {
+            prefix: &range.prefix,
+            suffix,
+            truncated,
+        })
     }
 
     /// Keep the physical page first so narrow preview captions retain it.
     pub fn preview_caption(&self, page: usize) -> String {
         let mut caption = format!("Page {}", page + 1);
-        if let Some(label) = self.label(page)
-            && !label.is_empty()
-            && label != caption["Page ".len()..]
-        {
-            let end = label
-                .char_indices()
-                .nth(12)
-                .map_or(label.len(), |(end, _)| end);
-            caption.reserve(" · ".len() + end + '…'.len_utf8());
+        if let Some(excerpt) = self.excerpt(page, &caption["Page ".len()..]) {
+            caption.reserve(
+                " · ".len() + excerpt.prefix.len() + excerpt.suffix.len() + '…'.len_utf8(),
+            );
             caption.push_str(" · ");
-            caption.extend(label[..end].chars().map(|character| {
+            caption.extend(excerpt.prefix.chars().map(|character| {
                 if character.is_whitespace() {
                     ' '
                 } else {
                     character
                 }
             }));
-            if end < label.len() {
+            caption.push_str(&excerpt.suffix);
+            if excerpt.truncated {
                 caption.push('…');
             }
         }
@@ -589,5 +666,126 @@ mod tests {
         }
         assert_eq!(PageLabels::default().preview_caption(4), "Page 5");
         assert_eq!(PageLabels::default().preview_tooltip(4), "Go to page 5");
+    }
+
+    fn assert_excerpt_matches_full_label(labels: &PageLabels, page: usize) {
+        let physical = (page + 1).to_string();
+        let full = labels
+            .label(page)
+            .filter(|label| !label.is_empty() && label != &physical);
+        let (display, caption) = if let Some(full) = full {
+            let prefix: String = full.chars().take(12).collect();
+            let ellipsis = if full.chars().count() > 12 { "…" } else { "" };
+            let normalized: String = prefix
+                .chars()
+                .map(|character| {
+                    if character.is_whitespace() {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .collect();
+            (
+                format!("{prefix}{ellipsis} · {physical}"),
+                format!("Page {physical} · {normalized}{ellipsis}"),
+            )
+        } else {
+            (physical.clone(), format!("Page {physical}"))
+        };
+        assert_eq!(
+            labels.display_name(page),
+            display,
+            "page {page}, {labels:?}"
+        );
+        assert_eq!(
+            labels.preview_caption(page),
+            caption,
+            "page {page}, {labels:?}"
+        );
+    }
+
+    #[test]
+    fn bounded_excerpts_match_full_labels_across_numbering_styles_and_prefix_boundaries() {
+        let prefixes = [
+            String::new(),
+            "1".into(),
+            "12".into(),
+            "000".into(),
+            "123456789012".into(),
+            "1234567890123".into(),
+            "Appendix A: ".into(),
+            "中文😀".repeat(100),
+            "\n\r\t\u{2028} prefix ".into(),
+        ];
+        for style in [
+            Style::Decimal,
+            Style::Roman,
+            Style::LowerRoman,
+            Style::Letters,
+            Style::LowerLetters,
+            Style::None,
+        ] {
+            for prefix in &prefixes {
+                for first in [0, 1, 26, 27, 832, 833, 39_999, 40_000, u64::from(u32::MAX)] {
+                    let labels = PageLabels {
+                        count: 128,
+                        ranges: vec![LabelRange {
+                            page: 5,
+                            first,
+                            prefix: prefix.clone(),
+                            style,
+                        }],
+                    };
+                    for page in [0, 4, 5, 6, 7, 12, 37, 126, 127, 128] {
+                        assert_excerpt_matches_full_label(&labels, page);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_numeric_labels_equal_to_the_physical_page_keep_the_full_number() {
+        let page = usize::MAX - 1;
+        let physical = (page + 1).to_string();
+        for (prefix, style, first) in [
+            (physical.clone(), Style::None, 1),
+            (
+                physical[..physical.len() - 1].into(),
+                Style::Decimal,
+                u64::from(physical.as_bytes()[physical.len() - 1] - b'0'),
+            ),
+        ] {
+            let labels = PageLabels {
+                count: usize::MAX,
+                ranges: vec![LabelRange {
+                    page,
+                    first,
+                    prefix,
+                    style,
+                }],
+            };
+            assert_excerpt_matches_full_label(&labels, page);
+            assert_eq!(labels.display_name(page), physical);
+        }
+        for style in [
+            Style::Roman,
+            Style::LowerRoman,
+            Style::Letters,
+            Style::LowerLetters,
+        ] {
+            let labels = PageLabels {
+                count: 40_001,
+                ranges: vec![LabelRange {
+                    page: 0,
+                    first: 1,
+                    prefix: String::new(),
+                    style,
+                }],
+            };
+            assert_excerpt_matches_full_label(&labels, 39_999);
+            assert_eq!(labels.display_name(39_999), "40000");
+        }
     }
 }
