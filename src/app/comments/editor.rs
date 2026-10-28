@@ -92,20 +92,66 @@ impl Pagewing {
             return actions;
         };
         let busy = self.comments.busy();
-        ui.separator();
-        if !busy {
-            let unsaved = self.comments.unsaved();
-            ui.weak(match (unsaved, compact) {
-                (true, true) => "Unsaved",
-                (true, false) => "Unsaved changes",
-                (false, true) => "Saved",
-                (false, false) => "Saved in PDF",
-            });
-        }
+        let thread_actions = |ui: &mut egui::Ui| {
+            let reply = ui
+                .add_enabled(!busy && !comment.locked, egui::Button::new("Reply"))
+                .clicked();
+            let delete = ui
+                .add_enabled(
+                    !busy && !comment.locked,
+                    egui::Button::new(if comment.parent.is_some() {
+                        "Delete reply & replies"
+                    } else {
+                        "Delete comment & highlight"
+                    }),
+                )
+                .on_hover_text("Delete this annotation and all its replies from the current PDF.")
+                .clicked();
+            (reply, delete)
+        };
         ui.scope(|ui| {
             if compact {
+                // Keep all pinned actions available without consuming the whole
+                // content viewport in the minimum-height window.
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.spacing_mut().button_padding.y = 2.0;
                 ui.spacing_mut().button_padding.x = 1.0;
                 ui.spacing_mut().item_spacing.x = 2.0;
+            }
+            let unsaved = self.comments.unsaved();
+            if compact {
+                ui.add_space(1.0);
+                ui.horizontal(|ui| {
+                    if !busy {
+                        ui.weak(
+                            egui::RichText::new(if unsaved { "Unsaved" } else { "Saved" }).small(),
+                        );
+                    }
+                    if comment.slot.is_some() {
+                        (actions.reply, actions.delete) = ui
+                            .add_enabled_ui(!busy, |ui| {
+                                ui.menu_button(egui::RichText::new("More…").small(), |ui| {
+                                    let result = thread_actions(ui);
+                                    if result.0 || result.1 {
+                                        ui.close();
+                                    }
+                                    result
+                                })
+                                .inner
+                                .unwrap_or_default()
+                            })
+                            .inner;
+                    }
+                });
+            } else {
+                ui.separator();
+                if !busy {
+                    ui.weak(if unsaved {
+                        "Unsaved changes"
+                    } else {
+                        "Saved in PDF"
+                    });
+                }
             }
             ui.horizontal_wrapped(|ui| {
                 actions.save = ui
@@ -129,50 +175,16 @@ impl Pagewing {
                     .on_hover_text("Discard changes and close this editor")
                     .clicked();
             });
+            if comment.slot.is_some() && !compact {
+                (actions.reply, actions.delete) = ui.horizontal_wrapped(thread_actions).inner;
+            }
+            if busy {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Saving…");
+                });
+            }
         });
-        if comment.slot.is_some() {
-            let thread_actions = |ui: &mut egui::Ui| {
-                let reply = ui
-                    .add_enabled(!busy && !comment.locked, egui::Button::new("Reply"))
-                    .clicked();
-                let delete = ui
-                    .add_enabled(
-                        !busy && !comment.locked,
-                        egui::Button::new(if comment.parent.is_some() {
-                            "Delete reply & replies"
-                        } else {
-                            "Delete comment & highlight"
-                        }),
-                    )
-                    .on_hover_text(
-                        "Delete this annotation and all its replies from the current PDF.",
-                    )
-                    .clicked();
-                (reply, delete)
-            };
-            (actions.reply, actions.delete) = if compact {
-                ui.add_enabled_ui(!busy, |ui| {
-                    ui.menu_button("More…", |ui| {
-                        let result = thread_actions(ui);
-                        if result.0 || result.1 {
-                            ui.close();
-                        }
-                        result
-                    })
-                    .inner
-                    .unwrap_or_default()
-                })
-                .inner
-            } else {
-                ui.horizontal_wrapped(thread_actions).inner
-            };
-        }
-        if busy {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Saving…");
-            });
-        }
         actions
     }
 }

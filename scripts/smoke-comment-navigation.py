@@ -40,8 +40,9 @@ def run(binary):
                 width, height = size
                 rows = []
                 # The outer panel can scroll filters above the visible list.
+                gaps = (20, 40, 60) if width < 400 else (40, 80, 120)
                 for y in range(60, height - 45, 2):
-                    colors = [keyboard.pixel((width - gap, y)) for gap in (40, 80, 120)]
+                    colors = [keyboard.pixel((width - gap, y)) for gap in gaps]
                     if all(g > r + 8 and g > b + 6 for r, g, b in colors):
                         rows.append(y)
                 return rows
@@ -142,8 +143,31 @@ def run(binary):
                 assert document.read_bytes() == original, "navigation does not write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
+                # Start without an editor so Tab must generate cards beyond
+                # the original virtual range, rather than using filter motions.
+                application = subprocess.Popen([str(binary), str(document)], env=environment,
+                                               stdout=log, stderr=log)
+                window = wait_for(keyboard.focus, "reopened comment Tab navigation window")
+                resize((1180, 820))
+                filter_comments()
+                for _ in range(10):
+                    keyboard.key(0xFF09)
+                    if selected_card((1180, 820)):
+                        break
+                else:
+                    raise AssertionError("Tab must reach the first comment card")
+                for _ in range(24):
+                    keyboard.key(0xFF09)
+                wait_for(lambda: selected_card((1180, 820)), "Tab reveals a later virtual card")
+                resize((240, 240))
+                wait_for(lambda: selected_card((240, 240)), "the focused card stays visible in a minimum-size window")
+                keyboard.key(" ")
+                expect_body("Row 24", "Space opens the retained virtual card after resizing")
+                assert document.read_bytes() == original, "focus traversal does not write the PDF"
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
                 print("PASS: 80 virtual comments, Shift+arrow text selection, viewport-sized PageUp/PageDown, Ctrl+Home/End and ordered boundary actions, keyboard selection, filter/editor focus, "
-                      "full card after resize, minimum window editor focus, manual scroll retention and resumed keyboard navigation")
+                      "full card after resize, minimum window editor focus, manual scroll retention, resumed keyboard navigation and Tab through virtual cards with retained minimum-window activation")
             except Exception:
                 log.flush()
                 log.seek(0)

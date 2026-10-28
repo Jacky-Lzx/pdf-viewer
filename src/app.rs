@@ -9,6 +9,7 @@ mod help;
 mod input_dialogs;
 mod keyboard;
 mod lifecycle;
+mod list_focus;
 mod properties;
 mod recent;
 mod reload;

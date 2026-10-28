@@ -1,5 +1,5 @@
-use super::focus::ListFocus;
 use super::{Pagewing, appearance, reveal_offset};
+use crate::app::list_focus::ListFocus;
 use crate::{navigation::Fit, thumbnails::PreviewLayout};
 use eframe::egui::{self, Color32, Vec2};
 

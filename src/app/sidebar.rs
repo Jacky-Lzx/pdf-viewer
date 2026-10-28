@@ -1,9 +1,8 @@
-use super::{Pagewing, appearance, tooltips::LazyTooltip};
+use super::{Pagewing, appearance, list_focus, list_focus::reveal_offset, tooltips::LazyTooltip};
 use eframe::egui::{self, RichText, Vec2};
 
 mod bookmarks;
 mod contents;
-mod focus;
 mod marks;
 mod pages;
 mod results;
@@ -40,7 +39,7 @@ fn removable_row(
                     ui.set_max_width(ui.spacing().tooltip_width);
                     tooltip(ui);
                 });
-            focused = focus::row_focus(&jump).or_else(|| focus::row_focus(&remove));
+            focused = list_focus::row_focus(&jump).or_else(|| list_focus::row_focus(&remove));
             if jump.clicked() {
                 action = Some(RowAction::Jump);
             } else if remove.clicked() {
@@ -49,11 +48,6 @@ fn removable_row(
         });
     });
     RowResponse { action, focused }
-}
-
-/// Reveal only the part of a row outside the current list viewport.
-fn reveal_offset(offset: f32, top: f32, row_height: f32, height: f32) -> f32 {
-    offset.max((top + row_height - height).max(0.0)).min(top)
 }
 
 impl Pagewing {

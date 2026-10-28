@@ -1,4 +1,5 @@
 use super::{CommentFilter, Pagewing, ReviewStatus};
+use crate::app::list_focus::ListFocus;
 use crate::comment_cards::card_lines;
 use eframe::egui::{self, Vec2};
 
@@ -126,7 +127,10 @@ impl Pagewing {
                 previous != Some(layout)
             });
         let reveal = !ui.is_sizing_pass() && std::mem::take(&mut self.comments.view.reveal);
-        let target = if reveal || (resized && keyboard_focus) {
+        let mut focus = ListFocus::new(ui, "pagewing-comment-list", row_height, viewport_height);
+        let target = if focus.has_focus() {
+            None
+        } else if reveal || (resized && keyboard_focus) {
             self.comments.view.selected_row()
         } else if resized {
             self.comments.editor.as_ref().and_then(|editor| {
@@ -145,7 +149,7 @@ impl Pagewing {
             .min_scrolled_height(MIN_HEIGHT)
             .max_height(list_height);
         let busy = self.comments.busy();
-        let response = list.show_rows(
+        let response = focus.scroll(ui, list).show_rows(
             ui,
             row_height,
             self.comments.view.rows().len(),
@@ -180,27 +184,32 @@ impl Pagewing {
                     let lines = self.comments.cards.get_or_insert_with(index, matched, || {
                         card_lines(comment, self.labels.display_name(comment.page), matched)
                     });
-                    ui.horizontal(|ui| {
-                        ui.add_space(depth.min(6) as f32 * 14.0);
-                        if ui
-                            .add_enabled_ui(!self.loading && !busy, |ui| {
-                                comment_card(ui, lines, active, matched, row_height)
-                            })
-                            .inner
-                            .on_hover_ui(|ui| {
-                                ui.set_max_width(ui.spacing().tooltip_width);
-                                ui.label(&comment.author);
-                                ui.label(if comment.contents.is_empty() {
-                                    "(no comment)"
-                                } else {
-                                    &comment.contents
-                                });
-                            })
-                            .clicked()
-                        {
-                            selected = Some(index);
-                        }
-                    });
+                    ui.scope_builder(
+                        egui::UiBuilder::new().id(("comment-card", self.id, index)),
+                        |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(depth.min(6) as f32 * 14.0);
+                                let response = ui
+                                    .add_enabled_ui(!self.loading && !busy, |ui| {
+                                        comment_card(ui, lines, active, matched, row_height)
+                                    })
+                                    .inner
+                                    .on_hover_ui(|ui| {
+                                        ui.set_max_width(ui.spacing().tooltip_width);
+                                        ui.label(&comment.author);
+                                        ui.label(if comment.contents.is_empty() {
+                                            "(no comment)"
+                                        } else {
+                                            &comment.contents
+                                        });
+                                    });
+                                focus.observe(&response, row);
+                                if response.clicked() {
+                                    selected = Some(index);
+                                }
+                            });
+                        },
+                    );
                 }
             },
         );
@@ -209,6 +218,7 @@ impl Pagewing {
             // Revealing a virtual card must also reveal its list viewport.
             ui.scroll_to_rect(response.inner_rect, None);
         }
+        focus.finish(ui);
         selected
     }
 }

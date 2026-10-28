@@ -424,7 +424,10 @@ impl Pagewing {
                         } else {
                             remaining
                         };
-                        selected = self.comment_list(ui, list_height);
+                        selected = ui.scope_builder(
+                            egui::UiBuilder::new().id(("comment-list", self.id)),
+                            |ui| self.comment_list(ui, list_height),
+                        ).inner;
                         let confirm = !ui.is_sizing_pass()
                             && std::mem::take(&mut self.comments.filter_confirm)
                             && self.comment_filter_focused(context);
@@ -437,6 +440,14 @@ impl Pagewing {
                         // InputState retains text events after TextEdit handles
                         // them. Later actions must inspect the actual draft.
                         self.comments.input_pass = None;
+                        // TextEdit reveals its caret itself. Revealing its
+                        // whole field here would override the active card's
+                        // resize request in the surrounding scroll area.
+                        if !context.memory(|memory| {
+                            memory.has_focus(egui::Id::new("pagewing-comment-input"))
+                        }) {
+                            shortcuts::reveal_focused_control(ui, ui.clip_rect().size());
+                        }
                     });
             });
         self.comments.region = Some((panel.response.layer_id, panel.response.rect));

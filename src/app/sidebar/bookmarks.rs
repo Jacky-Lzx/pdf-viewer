@@ -1,5 +1,5 @@
-use super::focus::ListFocus;
 use super::{Pagewing, RowAction, removable_row, reveal_offset};
+use crate::app::list_focus::ListFocus;
 use eframe::egui;
 
 impl Pagewing {

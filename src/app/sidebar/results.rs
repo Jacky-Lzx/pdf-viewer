@@ -1,5 +1,5 @@
-use super::focus::ListFocus;
 use super::{Pagewing, appearance, reveal_offset};
+use crate::app::list_focus::ListFocus;
 use eframe::egui::{self, Color32, RichText, Vec2};
 
 #[derive(Clone, Copy)]

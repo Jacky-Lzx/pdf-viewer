@@ -1,5 +1,9 @@
-use super::reveal_offset;
 use eframe::egui::{self, Id, Response, ScrollArea, Ui, Vec2};
+
+/// Reveal only the part of a row outside the current list viewport.
+pub(super) fn reveal_offset(offset: f32, top: f32, row_height: f32, height: f32) -> f32 {
+    offset.max((top + row_height - height).max(0.0)).min(top)
+}
 
 pub(super) fn row_focus(response: &Response) -> Option<Id> {
     if !response.has_focus() {
@@ -81,6 +85,10 @@ impl ListFocus {
         }
     }
 
+    pub fn has_focus(&self) -> bool {
+        self.tracked.is_some()
+    }
+
     pub fn scroll(&self, ui: &Ui, scroll: ScrollArea) -> ScrollArea {
         let Some(row) = self.reveal else {
             return scroll;
@@ -109,7 +117,9 @@ impl ListFocus {
     }
 
     pub fn finish(mut self, ui: &Ui) {
-        if ui.is_sizing_pass() {
+        // A responsive footer can discard this pass before its final height
+        // is known. Revealing against both layouts would add the scroll twice.
+        if ui.is_sizing_pass() || ui.ctx().will_discard() {
             return;
         }
         self.current.focused = self

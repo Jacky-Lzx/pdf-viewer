@@ -699,6 +699,146 @@ fn fully_visible_cards(context: &Context, output: &egui::FullOutput, body: &str)
         .count()
 }
 
+fn focused_card(
+    context: &Context,
+    output: &egui::FullOutput,
+    body: &str,
+) -> Option<egui::Response> {
+    let label = output.shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.text() == body => {
+            Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+        }
+        _ => None,
+    })?;
+    context
+        .memory(|memory| memory.focused())
+        .and_then(|id| context.read_response(id))
+        .filter(|response| response.rect.height() <= 100.0 && response.rect.contains_rect(label))
+}
+
+#[test]
+fn tab_reaches_virtual_comment_cards_and_keeps_the_target_when_resizing() {
+    let (_root, context, mut app) = many_comments();
+    let original = std::fs::read(&app.reading.path).unwrap();
+    let page = app.nav.page;
+    let size = Vec2::new(1180.0, 820.0);
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+    frame(&mut app, &context, Vec::new());
+    let mut focused = None;
+    for _ in 0..50 {
+        frame(&mut app, &context, key(Key::Tab, Modifiers::NONE));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(&mut app, &context, Vec::new());
+        }
+        if let Some(response) = focused_card(&context, &output, "Row 24") {
+            focused = Some(response.id);
+            break;
+        }
+    }
+    let focused = focused.expect("Tab must reach a comment beyond the initial virtual range");
+    for resized in [Vec2::new(500.0, 400.0), Vec2::new(240.0, 240.0), size] {
+        for _ in 0..6 {
+            frame_size(&mut app, &context, Vec::new(), resized);
+        }
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        assert_eq!(
+            app.nav.page, page,
+            "Tab and resizing must preserve the reading page"
+        );
+        assert!(
+            app.comments.editor.is_none(),
+            "focusing must not open the editor"
+        );
+        let response = context.read_response(focused).unwrap();
+        assert!(
+            response
+                .interact_rect
+                .contains_rect(response.rect.shrink(1.0)),
+            "the focused comment must be fully visible at {resized:?}"
+        );
+    }
+    for target in (0..24).rev() {
+        frame(&mut app, &context, key(Key::Tab, Modifiers::SHIFT));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(&mut app, &context, Vec::new());
+        }
+        assert!(
+            focused_card(&context, &output, &format!("Row {target}")).is_some(),
+            "Shift+Tab must reach the preceding virtual card: Row {target}"
+        );
+    }
+    frame(&mut app, &context, key(Key::Space, Modifiers::NONE));
+    assert_eq!(app.comments.editor.as_ref().unwrap().contents, "Row 0");
+    assert_eq!(std::fs::read(&app.reading.path).unwrap(), original);
+}
+
+#[test]
+fn focused_comment_card_takes_resize_priority_over_an_open_editor() {
+    let (_root, context, mut app) = many_comments();
+    let original = std::fs::read(&app.reading.path).unwrap();
+    let page = app.nav.page;
+    app.edit_comment(0, &context);
+    for _ in 0..4 {
+        frame(&mut app, &context, Vec::new());
+    }
+    let mut focused = None;
+    for _ in 0..8 {
+        frame(&mut app, &context, key(Key::Tab, Modifiers::SHIFT));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(&mut app, &context, Vec::new());
+        }
+        if let Some(response) = focused_card(&context, &output, "Row 1") {
+            focused = Some(response.id);
+            break;
+        }
+    }
+    let focused = focused.expect("Shift+Tab must move from the editor into the list");
+    app.comments.editor.as_mut().unwrap().contents = "Unsaved draft".into();
+    for size in [Vec2::new(500.0, 400.0), Vec2::new(240.0, 240.0)] {
+        for _ in 0..6 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        let response = context.read_response(focused).unwrap();
+        assert!(
+            response
+                .interact_rect
+                .contains_rect(response.rect.shrink(1.0)),
+            "{size:?}: card={:?}, visible={:?}",
+            response.rect,
+            response.interact_rect
+        );
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Unsaved draft"
+        );
+        assert_eq!(app.nav.page, page);
+    }
+    frame_size(
+        &mut app,
+        &context,
+        key(Key::Space, Modifiers::NONE),
+        Vec2::new(240.0, 240.0),
+    );
+    assert_eq!(
+        app.comments.editor.as_ref().unwrap().contents,
+        "Unsaved draft"
+    );
+    assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+    app.comments.editor.as_mut().unwrap().contents = "Row 0".into();
+    frame_size(
+        &mut app,
+        &context,
+        key(Key::Space, Modifiers::NONE),
+        Vec2::new(240.0, 240.0),
+    );
+    assert_eq!(app.comments.editor.as_ref().unwrap().contents, "Row 1");
+    assert_eq!(std::fs::read(&app.reading.path).unwrap(), original);
+}
+
 #[test]
 fn page_navigation_uses_visible_card_geometry_and_keeps_drafts_safe() {
     let (_root, context, mut app) = many_comments();
@@ -875,9 +1015,15 @@ fn opening_and_resizing_the_editor_reveals_its_comment_card() {
     }
     // Opening a page overlay may choose a card outside the virtual rows.
     app.edit_comment(79, &context);
-    for size in [Vec2::new(1180.0, 820.0), Vec2::new(640.0, 480.0)] {
+    for size in [
+        Vec2::new(1180.0, 820.0),
+        Vec2::new(500.0, 400.0),
+        Vec2::new(640.0, 480.0),
+    ] {
+        frame_size(&mut app, &context, key(Key::A, Modifiers::COMMAND), size);
+        frame_size(&mut app, &context, key(Key::C, Modifiers::COMMAND), size);
         let mut output = egui::FullOutput::default();
-        for _ in 0..4 {
+        for _ in 0..30 {
             output = frame_size(&mut app, &context, Vec::new(), size);
         }
         assert!(

@@ -54,8 +54,9 @@ pub(super) fn filter_motion(
 }
 
 /// Reveal focus transitions and viewport changes without undoing manual scroll.
+/// Call after laying out the scroll content: this may reduce its scroll margin.
 pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
-    if ui.is_sizing_pass() {
+    if ui.is_sizing_pass() || ui.ctx().will_discard() {
         return;
     }
     let state_id = ui.id().with("focused-control");
@@ -78,6 +79,13 @@ pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
             && response.layer_id == ui.layer_id()
             && ui.min_rect().contains_rect(response.rect)
         {
+            // ScrollArea reserves item spacing on either side of its target.
+            // Reduce only that end-of-layout margin when a control nearly
+            // fills the viewport, so both edges can remain visible.
+            if viewport.y > 0.0 {
+                let margin = ((ui.clip_rect().height() - response.rect.height()) * 0.5).max(0.0);
+                ui.spacing_mut().item_spacing.y = ui.spacing().item_spacing.y.min(margin);
+            }
             response.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
         }
     }
