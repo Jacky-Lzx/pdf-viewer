@@ -130,13 +130,21 @@ pub struct Comments {
 impl Comments {
     /// Iterative preorder keeps arbitrary nesting and malformed cycles stack safe.
     pub fn thread_rows(&self) -> Vec<(usize, usize)> {
-        let indices: HashMap<_, _> = self
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| Some((c.id()?, i)))
-            .collect();
-        let mut children = vec![Vec::new(); self.items.len()];
+        if self.items.iter().all(|comment| comment.parent.is_none()) {
+            return (0..self.items.len()).map(|index| (index, 0)).collect();
+        }
+        let mut indices = HashMap::with_capacity(self.items.len());
+        indices.extend(
+            self.items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| Some((c.id()?, i))),
+        );
+        // Link siblings in reverse source order so the LIFO traversal visits
+        // them in source order, without allocating a child list per parent.
+        const NONE: usize = usize::MAX;
+        let mut last_child = vec![NONE; self.items.len()];
+        let mut previous_sibling = vec![NONE; self.items.len()];
         let mut roots = Vec::new();
         for (index, comment) in self.items.iter().enumerate() {
             if let Some(parent) = comment
@@ -145,7 +153,8 @@ impl Comments {
                 .copied()
                 .filter(|p| *p != index)
             {
-                children[parent].push(index);
+                previous_sibling[index] = last_child[parent];
+                last_child[parent] = index;
             } else {
                 roots.push(index);
             }
@@ -165,12 +174,11 @@ impl Comments {
                     continue;
                 }
                 rows.push((index, depth));
-                stack.extend(
-                    children[index]
-                        .iter()
-                        .rev()
-                        .map(|&child| (child, depth + 1)),
-                );
+                let mut child = last_child[index];
+                while child != NONE {
+                    stack.push((child, depth + 1));
+                    child = previous_sibling[child];
+                }
             }
         }
         rows
@@ -1475,6 +1483,36 @@ mod tests {
                 assert_eq!(expected.len(), count);
             }
         }
+    }
+
+    #[test]
+    fn wide_threads_keep_source_order_with_parents_after_their_replies() {
+        let count = 10_000;
+        let roots = [count / 2, count - 1];
+        let comments = Comments {
+            items: (0..count)
+                .map(|index| {
+                    let mut comment = draft();
+                    comment.slot = Some(index);
+                    comment.parent = (!roots.contains(&index)).then_some(CommentId {
+                        page: 0,
+                        slot: roots[index % 2],
+                    });
+                    comment
+                })
+                .collect(),
+            limited: false,
+        };
+        let mut expected = Vec::with_capacity(count);
+        for (group, root) in roots.into_iter().enumerate() {
+            expected.push((root, 0));
+            expected.extend(
+                (0..count)
+                    .filter(|index| !roots.contains(index) && index % 2 == group)
+                    .map(|index| (index, 1)),
+            );
+        }
+        assert_eq!(comments.thread_rows(), expected);
     }
 
     #[test]

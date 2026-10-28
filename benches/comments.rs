@@ -438,7 +438,7 @@ fn benchmark_cards(passes: usize, name: &str, comments: &[Comment]) {
     );
 }
 
-// Captured allocation-heavy implementation from 3fc3fb1.
+// Captured implementation from 09b91ed: shared traversal stack, per-parent child lists.
 fn previous_thread_rows(comments: &Comments) -> Vec<(usize, usize)> {
     use std::collections::HashMap;
     let indices: HashMap<_, _> = comments
@@ -463,8 +463,14 @@ fn previous_thread_rows(comments: &Comments) -> Vec<(usize, usize)> {
     }
     let mut rows = Vec::with_capacity(comments.items.len());
     let mut visited = vec![false; comments.items.len()];
+    let mut stack = Vec::new();
     for root in roots.into_iter().chain(0..comments.items.len()) {
-        let mut stack = vec![(root, 0)];
+        if visited[root] {
+            continue;
+        }
+        // Each traversal drains the stack. Reuse its storage for the next
+        // root, including the fallback roots that expose malformed cycles.
+        stack.push((root, 0));
         while let Some((index, depth)) = stack.pop() {
             if std::mem::replace(&mut visited[index], true) {
                 continue;
@@ -486,7 +492,7 @@ fn benchmark_threads(passes: usize) {
         "Thread preparation: {passes} alternating passes, 100 operations/sample; µs/preorder including ID lookup, adjacency construction, traversal and output release. Prepared comments; excludes PDF parsing, text, filters, UI and GPU."
     );
     for count in [0, 1, 80, 10_000] {
-        for shape in ["flat", "chains", "wide", "cycle"] {
+        for shape in ["flat", "chains", "deep", "wide", "cycle", "orphan"] {
             let comments = Comments {
                 items: (0..count)
                     .map(|index| Comment {
@@ -494,6 +500,8 @@ fn benchmark_threads(passes: usize) {
                         slot: Some(index),
                         parent: match shape {
                             "chains" if index % 10 != 0 => Some(index - 1),
+                            "deep" if index > 0 => Some(index - 1),
+                            "orphan" => Some(count),
                             "wide" if index > 0 => Some(0),
                             "cycle" => Some(if index == 0 { count - 1 } else { index - 1 }),
                             _ => None,
@@ -522,6 +530,16 @@ fn benchmark_threads(passes: usize) {
             let new_allocations = allocations(|| {
                 black_box(comments.thread_rows());
             });
+            if shape == "flat" {
+                assert_eq!(new_allocations, (usize::from(count > 0), 0));
+            } else {
+                // ID table, two link arrays, roots, output, visited and stack.
+                // Roots and stack can grow, but parents never allocate lists.
+                assert!(
+                    new_allocations.0 <= 7,
+                    "{count} {shape}: {new_allocations:?}"
+                );
+            }
             let mut times = [Vec::with_capacity(passes), Vec::with_capacity(passes)];
             for pass in 0..passes {
                 for order in 0..2 {

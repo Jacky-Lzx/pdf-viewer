@@ -450,7 +450,7 @@ cargo bench --locked --bench outline_filter -- 9
 cargo bench --locked --bench link_reading -- 9
 # 批注线程排序、导航、页面索引及可见卡片文字，比较耗时并统计分配次数
 cargo bench --locked --bench comments -- 7
-# 仅比较线程排序的新旧实现，覆盖平铺、短链、宽树和循环
+# 仅比较线程排序的新旧实现，覆盖平铺、短链、深链、宽树、循环和缺失父批注，检查分配次数
 cargo bench --locked --bench comments -- 9 threads
 # 条件变化时的完整批注筛选，覆盖文字、状态、勾选与当前页，统计预热后的耗时和分配
 cargo bench --locked --bench comments -- 11 filters
