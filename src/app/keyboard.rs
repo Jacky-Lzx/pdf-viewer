@@ -16,6 +16,7 @@ impl Pagewing {
         // Otherwise a click that releases search focus can send following text
         // to reader commands before the new input has opened.
         match self.input_buttons.clicked(context) {
+            Some(shortcuts::InputButton::ReadingControls) => self.toggle_reading_controls(context),
             Some(shortcuts::InputButton::Help) => {
                 if self.help {
                     self.close_help(context);
@@ -898,6 +899,7 @@ impl Pagewing {
                         context.input(|input| input.viewport().fullscreen.unwrap_or(false));
                     context.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
+                Key::F9 => self.toggle_reading_controls(context),
                 _ => self.nav.clear_prefix(),
             }
             if !matches!(key, Key::G | Key::Z) {

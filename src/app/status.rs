@@ -77,12 +77,30 @@ impl Pagewing {
 
     pub(super) fn status(&mut self, context: &egui::Context) {
         self.input_buttons.restore_deleted = None;
+        self.input_buttons.page = None;
+        self.input_buttons.zoom = None;
+        self.input_buttons.view_menu = None;
+        self.status_region = None;
         if self
             .message
             .as_ref()
             .is_some_and(|notice| notice.at.elapsed() >= NOTICE_DURATION)
         {
             self.message = None;
+        }
+        // Keep transient feedback and recovery visible in the reading view,
+        // including unfinished Vim commands and selection/link modes.
+        if self.controls_hidden
+            && self.message.is_none()
+            && !self.loading
+            && self.mark_action.is_none()
+            && !self.hints.active
+            && !self.selection.active
+            && self.nav.prefix.is_empty()
+            && !self.nav.pending_g
+            && !self.nav.pending_z
+        {
+            return;
         }
         let panel = egui::TopBottomPanel::bottom("status")
             .frame(appearance::panel(context, 2))
@@ -140,7 +158,7 @@ impl Pagewing {
                         );
                         ui.separator();
                     }
-                    if self.nav.count > 0 {
+                    if !self.controls_hidden && self.nav.count > 0 {
                         let (first, second) = if self.reading.facing {
                             let pages = spread::page_range(self.nav.page, self.nav.count);
                             (pages.start, (pages.len() == 2).then_some(pages.end - 1))
@@ -184,12 +202,14 @@ impl Pagewing {
                     } else if self.nav.count == 0 {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
                     }
-                    toolbar::right_group(ui, 290.0, |ui| {
-                        ui.add_space(12.0);
-                        if self.nav.count > 0 {
-                            self.view_controls(ui);
-                        }
-                    });
+                    if !self.controls_hidden {
+                        toolbar::right_group(ui, 290.0, |ui| {
+                            ui.add_space(12.0);
+                            if self.nav.count > 0 {
+                                self.view_controls(ui);
+                            }
+                        });
+                    }
                 });
             });
         self.status_region = Some((panel.response.layer_id, panel.response.rect));

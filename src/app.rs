@@ -14,6 +14,7 @@ mod lifecycle;
 mod list_focus;
 mod menu_focus;
 mod properties;
+mod reading_controls;
 mod recent;
 mod reload;
 mod search;
@@ -149,6 +150,7 @@ pub struct Pagewing {
     help: bool,
     help_filter: help::HelpFilter,
     input_buttons: shortcuts::InputButtons,
+    controls_hidden: bool,
     recent_picker: Option<crate::recent::RecentPicker>,
     password_input: Option<input_dialogs::PasswordInput>,
     saved: Instant,
@@ -321,6 +323,7 @@ impl Pagewing {
             help: false,
             help_filter: help::HelpFilter::default(),
             input_buttons: shortcuts::InputButtons::default(),
+            controls_hidden: false,
             recent_picker: None,
             password_input: None,
             saved: Instant::now(),
@@ -1193,6 +1196,7 @@ impl Pagewing {
                     );
                 }
             });
+        self.controls_restore_button(context, canvas.response.rect);
         if self.file_changed && self.nav.count > 0 {
             self.file_change_notice(context, canvas.response.rect);
         }

@@ -119,6 +119,7 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
     ("f, then a label", "Follow a visible PDF link"),
     ("F, then a label", "Copy a visible web-link address"),
     ("F11", "Toggle fullscreen"),
+    ("F9", "Toggle reading controls"),
     ("? / F1 / Escape", "Find keyboard shortcuts / close dialog"),
     ("Right-click web link", "Copy link address"),
     (

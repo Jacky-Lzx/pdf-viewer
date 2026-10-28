@@ -139,6 +139,7 @@ night = []
 | `goto` | Go to page dialog |
 | `help` | Keyboard shortcuts |
 | `fullscreen` | Toggle fullscreen |
+| `reading_controls` | Toggle reading controls |
 
 ## 错误与阅读记录
 

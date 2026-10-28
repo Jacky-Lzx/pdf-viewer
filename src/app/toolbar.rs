@@ -8,6 +8,10 @@ impl Pagewing {
 
     pub(super) fn toolbar(&mut self, context: &egui::Context) {
         self.input_buttons = shortcuts::InputButtons::default();
+        self.toolbar_region = None;
+        if self.controls_hidden {
+            return;
+        }
         let panel = egui::TopBottomPanel::top("toolbar")
             .frame(appearance::panel(context, 4))
             .exact_height(56.0)
@@ -104,6 +108,20 @@ impl Pagewing {
                         ui.separator();
                         self.history_controls(ui);
                     }
+                    self.input_buttons.reading_controls = Some(
+                        appearance::action_button(
+                            ui,
+                            "hide-reading-controls",
+                            egui::Button::new("Hide controls"),
+                        )
+                        .on_hover_text_lazy(|| {
+                            format!(
+                                "More room for reading · {}",
+                                self.library.shortcuts.label("reading_controls")
+                            )
+                        })
+                        .id,
+                    );
                     right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
                         ui.add_space(12.0);
                         self.input_buttons.help = Some(

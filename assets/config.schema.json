@@ -587,6 +587,14 @@
             "minLength": 1
           }
         },
+        "reading_controls": {
+          "description": "Toggle reading controls. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "fullscreen": {
           "description": "Toggle fullscreen. Replaces all default bindings; [] disables this action.",
           "type": "array",

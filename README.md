@@ -271,9 +271,12 @@ night = []                 # 停用该动作的快捷键
 | `:+5 Enter` / `:-5 Enter` | 从当前页前进 / 后退 5 个物理页，超过边界时停在首页或末页 |
 | `:50% Enter` | 在页码对话框中跳到文档的 50%，也可点击底栏页码后输入 `50%` |
 | `F11` | 全屏 |
+| `F9` | 隐藏 / 恢复阅读控制栏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
 
 顶部工具栏的 **Back to previous view / Forward to next view** 箭头可恢复跳转前后的页码、缩放、旋转、显示模式和页内滚动；没有可恢复位置时按钮禁用。搜索词和未保存的批注草稿会保留，关闭文档后清空历史。按钮支持 Tab 聚焦、Enter / Space 激活，窄窗口会自动滚动工具栏以显示当前焦点。
+
+点击顶部 **Hide controls** 或在阅读时按 `F9`，可隐藏顶部工具栏和底部常驻状态栏，给页面多留约 92px 高度；画布右上角的 **Show controls** 随时可用鼠标恢复。搜索、目录和批注侧栏保留，通知、撤销删除和操作状态按需显示，错误提示仍可访问。单页、连续和双页布局沿用当前页及可滚动方向的相对位置；页面已能完整显示时停在相应方向的起点。此开关仅对当前窗口生效；输入框中保留文本编辑按键，`reading_controls` 可重映射或停用快捷键。
 
 底部状态栏提供 **− / 缩放比例 / +**；点击 **View** 菜单可集中选择单页（Single page）、连续滚动（Continuous）、双页并排（Two pages side by side），以及适合整页、宽度、高度和实际大小。双页模式从第 1 页起按 1–2、3–4 配对，共用缩放比例；翻页切换整组，末尾落单页居中显示。显示模式会随文档、命名位置和历史记录保存与恢复。
 
@@ -524,6 +527,7 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-help.py target/release/pagewi
 python3 scripts/with-xvfb.py python3 scripts/smoke-comments.py target/release/pagewing
 # 顶部和底部控件焦点在宽/窄布局与动态状态间保留，激活按钮不同时滚动页面
 python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-focus.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-reading-controls.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-history.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-comment-navigation.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-comment-filter-load.py target/release/pagewing
