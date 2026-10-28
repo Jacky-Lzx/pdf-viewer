@@ -2,6 +2,7 @@ use super::*;
 use crate::navigation::{Fit, Navigation};
 
 mod focus;
+mod hold;
 
 fn app() -> (tempfile::TempDir, egui::Context, Pagewing) {
     let directory = tempfile::tempdir().unwrap();
@@ -22,6 +23,7 @@ fn frame(
 ) -> egui::FullOutput {
     context.run(
         egui::RawInput {
+            time: Some(context.input(|input| input.time) + 0.25),
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(width, 400.0),

@@ -720,7 +720,7 @@ impl Pagewing {
         );
         if changed {
             if let Some(message) = &mut self.message {
-                message.recovery = None;
+                message.cancel_recovery();
             }
             self.dirty = true;
         }

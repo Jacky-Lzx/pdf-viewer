@@ -5,9 +5,19 @@ use std::time::{Duration, Instant};
 
 const NOTICE_DURATION: Duration = Duration::from_secs(5);
 
+fn holds_notice(response: &egui::Response) -> bool {
+    response.has_focus()
+        || (response.ctx.pointer_hover_pos().is_some()
+            && response
+                .ctx
+                .rect_contains_pointer(response.layer_id, response.interact_rect))
+}
+
 pub(super) struct Notice {
     pub(super) text: String,
     at: Instant,
+    held: bool,
+    control: Option<egui::Id>,
     pub(super) recovery: Option<Recovery>,
 }
 
@@ -30,19 +40,53 @@ impl Notice {
         Self {
             text: text.into(),
             at: Instant::now(),
+            held: false,
+            control: None,
             recovery: None,
+        }
+    }
+
+    pub(super) fn cancel_recovery(&mut self) {
+        self.recovery = None;
+        self.control = None;
+        self.held = false;
+    }
+
+    fn remaining(&self, now: Instant) -> Option<Duration> {
+        (!self.held).then(|| NOTICE_DURATION.saturating_sub(now.saturating_duration_since(self.at)))
+    }
+
+    fn hold(&mut self, held: bool, now: Instant) {
+        if self.held {
+            // Leaving an active action starts a fresh full reading interval.
+            self.at = now;
+            self.held = held;
+        } else if held && self.remaining(now) != Some(Duration::ZERO) {
+            // An already expired notice cannot be revived by a stale widget.
+            self.held = true;
         }
     }
 }
 
 impl Pagewing {
+    pub(super) fn update_notice_interaction(&mut self, context: &egui::Context) {
+        let Some(id) = self.message.as_ref().and_then(|notice| notice.control) else {
+            return;
+        };
+        let held = self.restorable_deletion().is_some()
+            && context
+                .read_response(id)
+                .is_some_and(|response| holds_notice(&response));
+        self.message.as_mut().unwrap().hold(held, Instant::now());
+    }
+
     pub(super) fn status_control_focused(&self, context: &egui::Context) -> bool {
         shortcuts::focused_in_region(context, self.status_region)
     }
 
     fn restorable_deletion(&self) -> Option<&Recovery> {
         let notice = self.message.as_ref()?;
-        if notice.at.elapsed() >= NOTICE_DURATION || self.loading {
+        if notice.remaining(Instant::now()) == Some(Duration::ZERO) || self.loading {
             return None;
         }
         let recovery = notice.recovery.as_ref()?;
@@ -76,6 +120,7 @@ impl Pagewing {
     }
 
     pub(super) fn status(&mut self, context: &egui::Context) {
+        self.update_notice_interaction(context);
         self.input_buttons.restore_deleted = None;
         self.input_buttons.page = None;
         self.input_buttons.zoom = None;
@@ -84,7 +129,7 @@ impl Pagewing {
         if self
             .message
             .as_ref()
-            .is_some_and(|notice| notice.at.elapsed() >= NOTICE_DURATION)
+            .is_some_and(|notice| notice.remaining(Instant::now()) == Some(Duration::ZERO))
         {
             self.message = None;
         }
@@ -142,20 +187,23 @@ impl Pagewing {
                     // a narrow window. The action also describes the notice.
                     let recovery_caption = self.restorable_deletion().map(Recovery::caption);
                     if let Some(caption) = recovery_caption {
-                        self.input_buttons.restore_deleted = Some(
-                            appearance::action_button(
-                                ui,
-                                "undo-deletion",
-                                egui::Button::new(caption),
-                            )
-                            .on_hover_ui(|ui| {
-                                if let Some(notice) = &self.message {
-                                    ui.label(&notice.text);
-                                }
-                                ui.label("Restore without leaving this page");
-                            })
-                            .id,
-                        );
+                        let response = appearance::action_button(
+                            ui,
+                            "undo-deletion",
+                            egui::Button::new(caption),
+                        )
+                        .on_hover_ui(|ui| {
+                            if let Some(notice) = &self.message {
+                                ui.label(&notice.text);
+                            }
+                            ui.label("Restore without leaving this page");
+                        });
+                        self.input_buttons.restore_deleted = Some(response.id);
+                        if !ui.is_sizing_pass() {
+                            let notice = self.message.as_mut().unwrap();
+                            notice.control = Some(response.id);
+                            notice.hold(holds_notice(&response), Instant::now());
+                        }
                         ui.separator();
                     }
                     if !self.controls_hidden && self.nav.count > 0 {
@@ -196,9 +244,9 @@ impl Pagewing {
                         if recovery_caption.is_none() {
                             ui.label(&notice.text);
                         }
-                        context.request_repaint_after(
-                            NOTICE_DURATION.saturating_sub(notice.at.elapsed()),
-                        );
+                        if let Some(remaining) = notice.remaining(Instant::now()) {
+                            context.request_repaint_after(remaining);
+                        }
                     } else if self.nav.count == 0 {
                         ui.weak("j k  scroll    J K  pages    /  find    ?  help");
                     }

@@ -89,8 +89,11 @@ def run(binary):
                 expect(0, "delete another page's bookmark without leaving the current page", removed=2, count=599)
                 attributes = desktop["WindowAttributes"]()
                 assert keyboard.x11.XGetWindowAttributes(keyboard.display, window, ctypes.byref(attributes))
+                keyboard.xtst.XTestFakeMotionEvent(keyboard.display, -1, 125, attributes.height - 18, 0)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(5.5)  # Hover keeps Undo alive beyond its ordinary five-second timeout.
                 keyboard.click((125, attributes.height - 18))
-                expect(0, "undo sidebar deletion without navigating to the deleted bookmark")
+                expect(0, "hovered Undo survives its timeout and restores without navigating")
                 keyboard.click((235, first_y + 2 * row_step))
                 expect(0, "delete the restored bookmark again", removed=2, count=599)
                 keyboard.click((100, first_y + 2 * row_step))
@@ -184,7 +187,7 @@ def run(binary):
                 expect(10, "an empty bookmark list leaves the page unchanged", count=0)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 600 long-label bookmarks, nearest scrolling, stable adjacent rows, manual scrolling, visible rows, clicks, direct deletion and undo without navigation, refreshed row destinations, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
+                print("PASS: 600 long-label bookmarks, nearest scrolling, stable adjacent rows, manual scrolling, visible rows, clicks, direct deletion, hover-held undo beyond five seconds without navigation, refreshed row destinations, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

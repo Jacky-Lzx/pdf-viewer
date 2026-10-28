@@ -8,6 +8,9 @@ mod tests;
 
 impl Pagewing {
     pub(super) fn keys(&mut self, context: &egui::Context) {
+        // Refresh a held Undo before dispatching its activation. A quiet window
+        // may have spent longer than the notice timeout between input frames.
+        self.update_notice_interaction(context);
         let search_input_focused = self.search_open
             && (self.search_focus
                 || context

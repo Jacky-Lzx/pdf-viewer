@@ -161,7 +161,7 @@ impl Pagewing {
         self.automatic_reload = false;
         self.remember();
         if let Some(message) = &mut self.message {
-            message.recovery = None;
+            message.cancel_recovery();
         }
         self.nav.clear_prefix();
         self.loading = true;
