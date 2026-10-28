@@ -41,6 +41,7 @@ def run(binary):
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"recent": [{"path": str(clean), "page": 3}]}))
         keyboard = Keyboard()
+        keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
 
@@ -68,6 +69,18 @@ def run(binary):
                 expect(document, 0)
                 keyboard.key("s")
                 assert "Title: 中文 😀 reading" in details(), "s opens document information"
+                keyboard.click((490, 451)); keyboard.click((490, 451))
+                keyboard.key("c", ctrl=True)
+                wait_for(lambda: keyboard.clipboard() == "reading", "selected title word")
+                for width in (360, 1180):
+                    # Replace the clipboard before copying the same selection:
+                    # a missing copy must not pass by retaining the old word.
+                    assert "Title: 中文 😀 reading" in details()
+                    keyboard.x11.XResizeWindow(keyboard.display, window, width, 820)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.3)
+                    keyboard.key("c", ctrl=True)
+                    wait_for(lambda: keyboard.clipboard() == "reading", f"selected metadata after resize to {width}")
                 keyboard.key(0xFF1B)
                 application.send_signal(signal.SIGSTOP)
                 try:
@@ -114,7 +127,6 @@ def run(binary):
                 recent("pagewing-smoke")
                 expect(document, 2)
                 time.sleep(0.4)
-                keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
                 keyboard.x11.XResizeWindow(keyboard.display, window, 860, 540)
                 keyboard.x11.XFlush(keyboard.display)
                 keyboard.key("s")
@@ -133,7 +145,7 @@ def run(binary):
                 expect(document, 4)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: document information shortcut, Unicode/PDFDocEncoding metadata, exact document details, same-frame modal input, prefix reset, Find focus, reload, clean document switch, close/reopen, compact/minimum-size window and graceful quit")
+                print("PASS: document information shortcut, Unicode/PDFDocEncoding metadata, selected text survives stacked/column reflow, exact document details, same-frame modal input, prefix reset, Find focus, reload, clean document switch, close/reopen, compact/minimum-size window and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

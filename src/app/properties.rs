@@ -3,6 +3,14 @@ use eframe::egui;
 use std::borrow::Cow;
 use std::fmt::Write;
 
+/// Metadata selection follows its field across the stacked and column layouts.
+/// Document IDs keep a selection from being reused after opening/reloading.
+fn property_text(ui: &mut egui::Ui, id: impl std::hash::Hash, text: impl Into<egui::WidgetText>) {
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
+        ui.add(egui::Label::new(text).selectable(true).wrap());
+    });
+}
+
 impl Pagewing {
     pub(super) fn show_properties(&mut self, context: &egui::Context) {
         if self.nav.count == 0 {
@@ -78,8 +86,12 @@ impl Pagewing {
                     .show(ui, |ui| {
                         if stacked {
                             for (label, value) in self.property_rows() {
-                                ui.weak(label);
-                                ui.add(egui::Label::new(value).selectable(true).wrap());
+                                property_text(
+                                    ui,
+                                    ("property-name", self.id, label),
+                                    egui::RichText::new(label).weak(),
+                                );
+                                property_text(ui, ("property-value", self.id, label), value);
                                 ui.add_space(8.0);
                             }
                         } else {
@@ -91,14 +103,22 @@ impl Pagewing {
                                         egui::Layout::top_down(egui::Align::Min),
                                         |ui| {
                                             ui.set_min_width(84.0);
-                                            ui.weak(label);
+                                            property_text(
+                                                ui,
+                                                ("property-name", self.id, label),
+                                                egui::RichText::new(label).weak(),
+                                            );
                                         },
                                     );
                                     ui.allocate_ui_with_layout(
                                         egui::vec2(ui.available_width(), 0.0),
                                         egui::Layout::top_down(egui::Align::Min),
                                         |ui| {
-                                            ui.add(egui::Label::new(value).selectable(true).wrap());
+                                            property_text(
+                                                ui,
+                                                ("property-value", self.id, label),
+                                                value,
+                                            );
                                         },
                                     );
                                 });
@@ -122,6 +142,135 @@ impl Pagewing {
 mod tests {
     use super::*;
     use crate::navigation::Navigation;
+
+    fn frame(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: egui::Vec2,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                time: Some(context.input(|input| input.time) + 0.05),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                app.keys(context);
+                app.properties_window(context);
+                egui::CentralPanel::default().show(context, |_| {});
+            },
+        )
+    }
+
+    fn settle(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2) -> egui::FullOutput {
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(app, context, size, Vec::new());
+        }
+        output
+    }
+
+    fn copied(output: &egui::FullOutput) -> Option<&str> {
+        output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            })
+    }
+
+    fn reader() -> (tempfile::TempDir, egui::Context, Pagewing) {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.nav = Navigation::new(6, 2);
+        app.dimensions = vec![[600.0, 800.0]; 6];
+        app.reading.path = "document.pdf".into();
+        app.show_properties(&context);
+        (directory, context, app)
+    }
+
+    fn select_word(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2, value: &str) {
+        let output = settle(app, context, size);
+        let position = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == value => {
+                    Some(text.pos + egui::vec2(20.0, 7.0))
+                }
+                _ => None,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    context,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selected_metadata_keeps_its_text_when_fields_reflow_or_reorder() {
+        for (value, word) in [
+            ("MetadataNeedle selected metadata", "MetadataNeedle"),
+            ("Straße 中文 metadata", "Straße"),
+            ("中文 metadata", "中文"),
+        ] {
+            let (_directory, context, mut app) = reader();
+            app.info.fields = vec![("Title", value.into())];
+            let wide = egui::vec2(1180.0, 820.0);
+            select_word(&mut app, &context, wide, value);
+            let output = frame(&mut app, &context, wide, vec![egui::Event::Copy]);
+            assert_eq!(copied(&output), Some(word));
+            // Optional metadata before a selected field must not steal it.
+            app.info
+                .fields
+                .insert(0, ("Creator", "Different metadata".into()));
+            for size in [egui::vec2(360.0, 820.0), wide, egui::vec2(480.0, 820.0)] {
+                settle(&mut app, &context, size);
+                let output = frame(&mut app, &context, size, vec![egui::Event::Copy]);
+                assert_eq!(copied(&output), Some(word), "{value}, {size:?}");
+            }
+            assert!(app.properties_open);
+            assert_eq!(app.nav.page, 2);
+        }
+    }
+
+    #[test]
+    fn document_replacement_does_not_reuse_metadata_selection() {
+        let (_directory, context, mut app) = reader();
+        let wide = egui::vec2(1180.0, 820.0);
+        let value = "MetadataNeedle selected metadata";
+        app.info.fields = vec![("Title", value.into())];
+        select_word(&mut app, &context, wide, value);
+        let output = frame(&mut app, &context, wide, vec![egui::Event::Copy]);
+        assert_eq!(copied(&output), Some("MetadataNeedle"));
+        // Opening/reloading increments the document ID, even if the new field
+        // occupies the old position and has the same label.
+        app.id += 1;
+        app.info.fields = vec![("Title", "Replacement title must not be selected".into())];
+        settle(&mut app, &context, wide);
+        let output = frame(&mut app, &context, wide, vec![egui::Event::Copy]);
+        assert!(copied(&output).is_none());
+    }
 
     #[test]
     fn long_document_information_and_actions_fit_when_resizing() {

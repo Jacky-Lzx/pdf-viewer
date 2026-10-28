@@ -14,6 +14,13 @@ pub(super) fn window(
     if narrow || size.y < 420.0 {
         frame.inner_margin = 10.into();
     }
+    // Centering uses the previous window size on the first resize frame. Keep
+    // that old width from placing short selectable fields left of the screen;
+    // the measured new width restores normal centering on the next pass.
+    let previous_width = context
+        .memory(|memory| memory.area_rect(egui::Id::new(title)))
+        .map_or(0.0, |rect| rect.width());
+    let offset = ((previous_width - size.x) * 0.5).max(0.0);
     egui::Window::new(if narrow { compact_title } else { title })
         // A shorter title must retain focus, scroll and window state.
         .id(egui::Id::new(title))
@@ -25,7 +32,7 @@ pub(super) fn window(
             (size.x - 64.0).clamp(100.0, preferred_width),
             (size.y - 100.0).max(100.0),
         ))
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::new(offset, 0.0))
 }
 
 #[cfg(test)]
