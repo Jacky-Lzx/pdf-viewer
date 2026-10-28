@@ -78,6 +78,21 @@ def run(binary):
                         filled = 0
                 return False
 
+            def focused_preview_visible(height):
+                # The light theme's solid accent focus border is inset from
+                # the card's selected-page outline and darker than its fill.
+                # A continuous vertical band excludes text and header borders.
+                consecutive = 0
+                for y in range(70, height - 35, 2):
+                    red, green, blue = keyboard.pixel((16, y))
+                    if green < 180 and green > red + 8 and green > blue + 6:
+                        consecutive += 1
+                        if consecutive >= 16:
+                            return True
+                    else:
+                        consecutive = 0
+                return False
+
             try:
                 window = wait_for(keyboard.focus, "long-outline reader window")
                 expect(0, "initial document")
@@ -243,9 +258,30 @@ def run(binary):
                 expect_sidebar([0, 24], True, "insert an earlier bookmark while retaining focus")
                 keyboard.key(" ")
                 expect(24, "Space retains the focused bookmark after an earlier row is inserted")
+                keyboard.key("b")
+                keyboard.key("g"); keyboard.key("g")
+                keyboard.key("b")
+                expect_sidebar([], True, "clear bookmarks before keyboard preview traversal")
+                keyboard.key("t")
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "001 chapter"])
+                # Filter -> chapter -> List -> Previews -> scroll area ->
+                # first preview -> second preview, without activating either.
+                for _ in range(6):
+                    keyboard.key(0xFF09)
+                expect(0, "preview focus preserves the reading page")
+                wait_for(lambda: focused_preview_visible(820), "the second preview has a visible focus border")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                wait_for(lambda: focused_preview_visible(240), "the preview focus border survives minimum-size resizing")
+                keyboard.key(" ")
+                expect(1, "Space opens the visibly focused preview after resizing")
+                keyboard.key(ESCAPE)
+                wait_for(lambda: not focused_preview_visible(240), "Escape removes the preview focus border")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion, Escape back to reading, later virtual page focus after resizing and bookmark focus after earlier edits")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion, Escape back to reading, later virtual page focus after resizing, bookmark focus after earlier edits and visible preview focus before/after minimum-size resizing")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

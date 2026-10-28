@@ -199,6 +199,14 @@ impl Pagewing {
                     egui::Sense::click(),
                 );
                 focus.observe(&response, page);
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        page == self.nav.page,
+                        self.labels.sidebar_tooltip(page),
+                    )
+                });
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }
@@ -267,6 +275,16 @@ impl Pagewing {
                     self.labels.sidebar_caption(page),
                     ui.visuals().text_color(),
                 );
+                if response.has_focus() {
+                    // Keep keyboard focus distinct from the current page's
+                    // selection, and paint it above the image and caption.
+                    painter.rect_stroke(
+                        rect.shrink(1.0),
+                        4.0,
+                        egui::Stroke::new(2.0_f32, ui.style().interact(&response).fg_stroke.color),
+                        egui::StrokeKind::Inside,
+                    );
+                }
                 if response
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
@@ -373,6 +391,103 @@ mod tests {
             output = frame(app, context, size, Vec::new());
         }
         output
+    }
+
+    #[test]
+    fn keyboard_preview_focus_is_visible_and_names_its_target_without_navigating() {
+        let (_directory, context, mut app) = preview_app(false);
+        let size = egui::vec2(1180.0, 820.0);
+        app.nav.jump(0);
+        app.library.thumbnails = true;
+        app.outline.set_entries(vec![OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(Destination::page(0)),
+            depth: 0,
+        }]);
+        app.focus_contents();
+        settle(&mut app, &context, size);
+        let key = |key| {
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into()
+        };
+        let mut focused = None;
+        let mut named = false;
+        for _ in 0..20 {
+            let output = frame(&mut app, &context, size, key(egui::Key::Tab));
+            named |= output.platform_output.events.iter().any(|event| {
+                matches!(event, egui::output::OutputEvent::FocusGained(info)
+                    if info.typ == egui::WidgetType::Button
+                        && info.label.as_deref() == Some("Go to page 2")
+                        && info.selected == Some(false))
+            });
+            let output = settle(&mut app, &context, size);
+            let label = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Page 2" => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => None,
+            });
+            if let Some(id) = context.memory(|memory| memory.focused())
+                && context.read_response(id).is_some_and(|response| {
+                    response.rect.height() <= crate::thumbnails::ROW_HEIGHT
+                        && label.is_some_and(|label| response.rect.contains_rect(label))
+                })
+            {
+                focused = Some(id);
+                break;
+            }
+        }
+        let focused = focused.expect("Tab must reach the second preview card");
+        for dark in [false, true] {
+            context.set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            for size in [size, egui::vec2(240.0, 240.0)] {
+                let output = settle(&mut app, &context, size);
+                assert_eq!(app.nav.page, 0, "focus must not change the reading page");
+                assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+                let response = context.read_response(focused).unwrap();
+                assert!(
+                    output.shapes.iter().any(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) => {
+                            rect.rect == response.rect.shrink(1.0)
+                                && rect.stroke.width >= 2.0
+                                && rect.stroke.color
+                                    == context.style().visuals.widgets.active.fg_stroke.color
+                                && shape.clip_rect.contains_rect(rect.rect)
+                        }
+                        _ => false,
+                    }),
+                    "the focused preview must have a visible border at {size:?}, dark={dark}"
+                );
+            }
+        }
+        assert!(
+            named,
+            "focus feedback must identify the preview's page and selection state"
+        );
+        frame(&mut app, &context, size, key(egui::Key::Space));
+        assert_eq!(
+            app.nav.page, 1,
+            "Space activates the visibly focused preview"
+        );
+        frame(&mut app, &context, size, key(egui::Key::Escape));
+        let output = settle(&mut app, &context, size);
+        assert!(
+            !output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Rect(rect) if rect.stroke.width >= 2.0)
+            }),
+            "returning to the reader removes the preview's focus border"
+        );
     }
 
     #[test]
