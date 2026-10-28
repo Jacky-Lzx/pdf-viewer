@@ -39,7 +39,8 @@ def run(binary):
             def selected_rows(size):
                 width, height = size
                 rows = []
-                for y in range(210, height - 45, 2):
+                # The outer panel can scroll filters above the visible list.
+                for y in range(60, height - 45, 2):
                     colors = [keyboard.pixel((width - gap, y)) for gap in (40, 80, 120)]
                     if all(g > r + 8 and g > b + 6 for r, g, b in colors):
                         rows.append(y)
@@ -129,11 +130,20 @@ def run(binary):
                 resize(size)
                 wait_for(lambda: selected_card(size), "editor card remains visible after resizing")
                 assert copied() == "Row 78", "resizing preserves editor text and focus"
+                for size in [(240, 400), (240, 240)]:
+                    resize(size)
+                    keyboard.key(0xFF50, ctrl=True)
+                    keyboard.key(0xFF53, shift=True)
+                    keyboard.key("c", ctrl=True)
+                    assert keyboard.clipboard() == "R", f"minimum window {size} keeps editor selection active"
+                    assert copied() == "Row 78", f"minimum window {size} preserves editor text and focus"
+                resize((640, 480))
+                wait_for(lambda: selected_card((640, 480)), "selected card returns after minimum window sizes")
                 assert document.read_bytes() == original, "navigation does not write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 print("PASS: 80 virtual comments, Shift+arrow text selection, viewport-sized PageUp/PageDown, Ctrl+Home/End and ordered boundary actions, keyboard selection, filter/editor focus, "
-                      "full card after resize, manual scroll retention and resumed keyboard navigation")
+                      "full card after resize, minimum window editor focus, manual scroll retention and resumed keyboard navigation")
             except Exception:
                 log.flush()
                 log.seek(0)

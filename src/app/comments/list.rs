@@ -48,17 +48,20 @@ impl Pagewing {
                 .hint_text("Filter text or author…"),
         )
         .on_hover_text("Filter comments · ↑/↓ or Ctrl+J/K: select · PageUp/PageDown: move by visible cards · Ctrl/Cmd+Home/End: first/last · Enter: open");
-        ui.horizontal_wrapped(|ui| {
+        let width = ui.available_width();
+        let mut controls = |ui: &mut egui::Ui| {
+            let status = self
+                .comments
+                .view
+                .filter
+                .review
+                .map_or("All statuses", ReviewStatus::label);
             egui::ComboBox::from_id_salt("pagewing-comment-review-filter")
-                .selected_text(
-                    self.comments
-                        .view
-                        .filter
-                        .review
-                        .map_or("All statuses", ReviewStatus::label),
-                )
-                .width(100.0)
+                .selected_text(status)
+                .width(width.min(100.0))
+                .truncate()
                 .show_ui(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     ui.selectable_value(
                         &mut self.comments.view.filter.review,
                         None,
@@ -71,7 +74,9 @@ impl Pagewing {
                             status.label(),
                         );
                     }
-                });
+                })
+                .response
+                .on_hover_text(status);
             ui.checkbox(&mut self.comments.view.filter.marked, "Marked only");
             ui.checkbox(&mut self.comments.view.filter.current_page, "Current page");
             if self.comments.view.filter != CommentFilter::default()
@@ -79,7 +84,15 @@ impl Pagewing {
             {
                 self.comments.view.filter = CommentFilter::default();
             }
-        });
+        };
+        if width < 180.0 {
+            ui.scope(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                controls(ui);
+            });
+        } else {
+            ui.horizontal_wrapped(controls);
+        }
     }
 
     pub(super) fn comment_list(&mut self, ui: &mut egui::Ui, list_height: f32) -> Option<usize> {
@@ -132,7 +145,7 @@ impl Pagewing {
             .min_scrolled_height(MIN_HEIGHT)
             .max_height(list_height);
         let busy = self.comments.busy();
-        list.show_rows(
+        let response = list.show_rows(
             ui,
             row_height,
             self.comments.view.rows().len(),
@@ -191,6 +204,11 @@ impl Pagewing {
                 }
             },
         );
+        if resized && target.is_some() {
+            // The editor can scroll the outer panel in a small window.
+            // Revealing a virtual card must also reveal its list viewport.
+            ui.scroll_to_rect(response.inner_rect, None);
+        }
         selected
     }
 }

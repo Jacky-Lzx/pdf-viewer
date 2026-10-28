@@ -50,15 +50,21 @@ impl Pagewing {
             .changed();
         });
         ui.add_enabled_ui(!busy && !comment.locked, |ui| {
+            let status = format!("Status: {}", comment.review.label());
             egui::ComboBox::from_id_salt("pagewing-comment-status")
-                .selected_text(format!("Status: {}", comment.review.label()))
+                .selected_text(&status)
+                .width(ui.available_width().min(ui.spacing().combo_width))
+                .truncate()
                 .show_ui(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     for status in ReviewStatus::ALL {
                         changed |= ui
                             .selectable_value(&mut comment.review, status, status.label())
                             .changed();
                     }
-                });
+                })
+                .response
+                .on_hover_text(status);
             changed |= ui
                 .checkbox(&mut comment.marked, "Marked (Acrobat checkmark)")
                 .changed();

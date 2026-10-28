@@ -915,6 +915,43 @@ fn opening_and_resizing_the_editor_reveals_its_comment_card() {
 }
 
 #[test]
+fn growing_after_editor_selection_in_minimum_windows_reveals_its_card() {
+    let (_root, context, mut app) = many_comments();
+    app.comments.view.filter.query = "Row".into();
+    app.edit_comment(79, &context);
+    for size in [
+        Vec2::new(1180.0, 820.0),
+        Vec2::new(640.0, 480.0),
+        Vec2::new(240.0, 400.0),
+        Vec2::new(240.0, 240.0),
+    ] {
+        for _ in 0..4 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+        frame_size(&mut app, &context, key(Key::Home, Modifiers::COMMAND), size);
+        frame_size(
+            &mut app,
+            &context,
+            key(Key::ArrowRight, Modifiers::SHIFT),
+            size,
+        );
+        for _ in 0..30 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+    }
+    let mut output = egui::FullOutput::default();
+    for _ in 0..30 {
+        output = frame_size(&mut app, &context, Vec::new(), Vec2::new(640.0, 480.0));
+    }
+    assert!(
+        visible_selected_card(&context, &output, "Row 79").is_some(),
+        "growing the window must reveal the editor's card inside both scroll areas"
+    );
+    assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-comment-input"))));
+    assert_eq!(app.comments.editor.as_ref().unwrap().contents, "Row 79");
+}
+
+#[test]
 fn editor_actions_stay_visible_with_long_drafts_in_short_windows() {
     let (_root, context, mut app) = saved_comment_editor();
     app.comments.editor.as_mut().unwrap().contents = "Long draft line\n".repeat(100);
@@ -1719,4 +1756,108 @@ fn reader_tab_binding_still_toggles_sidebar_after_leaving_comment_controls() {
         "hidden controls cannot claim Tab"
     );
     assert!(!app.comments.open);
+}
+
+#[test]
+fn comment_filters_keep_the_panel_inside_narrow_windows_for_every_status() {
+    let (_root, context, mut app) = many_comments();
+    let template = app.comments.comments.items[0].clone();
+    for editing in [false, true] {
+        app.comments.editor = editing.then(|| template.clone());
+        app.comments.focus = false;
+        for size in [
+            Vec2::new(240.0, 240.0),
+            Vec2::new(240.0, 400.0),
+            Vec2::new(360.0, 540.0),
+            Vec2::new(480.0, 420.0),
+            Vec2::new(1180.0, 820.0),
+        ] {
+            for review in std::iter::once(None).chain(ReviewStatus::ALL.map(Some)) {
+                app.comments.view.filter.review = review;
+                if let Some(editor) = &mut app.comments.editor {
+                    editor.review = review.unwrap_or_default();
+                }
+                for _ in 0..4 {
+                    frame_size(&mut app, &context, Vec::new(), size);
+                }
+                let (_, panel) = app.comments.region.unwrap();
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                assert!(
+                    screen.contains_rect(panel),
+                    "{size:?}, {review:?}, editor {editing}: {panel:?} outside screen"
+                );
+                // The sidebar reserves 120 logical pixels for the canvas;
+                // its own page padding is excluded from Pagewing::viewport.
+                assert!(
+                    panel.left() >= 120.0,
+                    "{size:?}, {review:?}: {panel:?} collapsed the canvas"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn narrow_comment_status_menu_keeps_full_labels_selectable() {
+    let (_root, context, mut app) = many_comments();
+    for size in [Vec2::new(240.0, 400.0), Vec2::new(360.0, 540.0)] {
+        for _ in 0..4 {
+            frame_size(&mut app, &context, Vec::new(), size);
+        }
+        click_text_size(&mut app, &context, "All statuses", size);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        assert!(egui::Popup::is_any_open(&context));
+        let label = "Completed / resolved";
+        let label_rect = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => Some((
+                        egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        shape.clip_rect,
+                    )),
+                    _ => None,
+                })
+                .expect("the longest status keeps its full label in the menu")
+        };
+        let (text, clip) = label_rect(&output);
+        // Small windows scroll the menu; its last option must become fully
+        // readable and clickable rather than losing its wrapped lines.
+        frame_size(
+            &mut app,
+            &context,
+            vec![
+                Event::PointerMoved(clip.shrink(5.0).clamp(text.center())),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: Vec2::new(0.0, -400.0),
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            size,
+        );
+        for _ in 0..30 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        let (text, clip) = label_rect(&output);
+        assert!(
+            clip.contains_rect(text),
+            "{size:?}: {text:?} clipped by {clip:?}"
+        );
+        assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(text));
+        click_text_size(&mut app, &context, label, size);
+        assert_eq!(
+            app.comments.view.filter.review,
+            Some(ReviewStatus::Completed)
+        );
+        assert!(app.comments.view.rows().is_empty());
+        assert!(!egui::Popup::is_any_open(&context));
+        click_text_size(&mut app, &context, "Clear filters", size);
+        assert_eq!(app.comments.view.filter, CommentFilter::default());
+        assert_eq!(app.comments.view.rows().len(), 80);
+    }
 }
