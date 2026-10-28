@@ -88,11 +88,18 @@ def run(binary):
                 keyboard.key("m", ctrl=True, shift=True)
                 query("elsewhere")
                 assert copied() == "elsewhere", "filter input owns text editing shortcuts"
-                keyboard.click((1075, 84))  # Copy the filtered saved list.
+                keyboard.key(0xFF09, shift=True)  # Filter -> Copy.
+                keyboard.key(0xFF0D)
                 exported = keyboard.clipboard()
                 for expected in ["Page 2 · Highlight", "Author: Bob", "Elsewhere comment"]:
                     assert expected in exported, (expected, exported)
                 assert "Root question" not in exported
+                keyboard.key(0xFF09)  # Copy -> filter, without toggling the left sidebar.
+                assert copied() == "elsewhere", "Tab returns to filter text editing"
+                keyboard.key(0xFF09, shift=True)
+                keyboard.key(0x20)
+                assert keyboard.clipboard() == exported, "Space activates Copy without paging"
+                expect(0)
                 assert document.read_bytes() == original, "copying comments leaves the PDF intact"
                 query("elsewhere")
                 expect(0)
@@ -154,7 +161,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload, filtered clipboard export with thread context and page navigation")
+                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload, filtered clipboard export with thread context, keyboard activation/focus traversal and page navigation")
             except Exception:
                 log.flush()
                 log.seek(0)

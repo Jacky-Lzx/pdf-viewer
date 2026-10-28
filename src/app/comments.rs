@@ -60,6 +60,7 @@ pub(super) struct CommentUi {
     input_pass: Option<u64>,
     pub filter_motions: Vec<crate::list_navigation::Motion>,
     pub filter_confirm: bool,
+    region: Option<(egui::LayerId, egui::Rect)>,
 }
 
 impl CommentUi {
@@ -98,6 +99,27 @@ impl CommentUi {
 }
 
 impl Pagewing {
+    pub(super) fn comment_control_focused(&self, context: &egui::Context) -> bool {
+        if !self.comments.open {
+            return false;
+        }
+        let Some((layer, rect)) = self.comments.region else {
+            return false;
+        };
+        let Some(id) = context.memory(|memory| memory.focused()) else {
+            return false;
+        };
+        // Inspect last frame's focus geometry without treating this lookup as
+        // an outside pointer click on a text field.
+        let _focus = shortcuts::preserve_pointer_focus(context);
+        context.read_response(id).is_some_and(|response| {
+            response.enabled()
+                && response.layer_id == layer
+                && response.interact_rect.is_positive()
+                && rect.contains_rect(response.interact_rect)
+        })
+    }
+
     fn copy_shown_comments(&mut self, context: &egui::Context) {
         let report = export::render(&self.comments.comments, self.comments.view.rows(), |page| {
             self.labels.label(page)
@@ -292,6 +314,7 @@ impl Pagewing {
 
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
         self.input_buttons.close_comments = None;
+        self.comments.region = None;
         let save_requested = self.comments.save_requested;
         if (!self.comments.open && !save_requested && !self.pending_comment_input(context))
             || self.nav.count == 0
@@ -302,7 +325,7 @@ impl Pagewing {
         let mut copy = false;
         let mut actions = CommentActions::default();
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
-        egui::SidePanel::right("pagewing-comments-sidebar")
+        let panel = egui::SidePanel::right("pagewing-comments-sidebar")
             .frame(super::appearance::panel(context, 14))
             .default_width(320.0_f32.min(maximum))
             .width_range(220.0_f32.min(maximum)..=maximum)
@@ -433,6 +456,7 @@ impl Pagewing {
                         self.comments.input_pass = None;
                     });
             });
+        self.comments.region = Some((panel.response.layer_id, panel.response.rect));
         let save_requested = std::mem::take(&mut self.comments.save_requested);
         if copy {
             self.copy_shown_comments(context);

@@ -1620,3 +1620,103 @@ fn copying_saved_list_preserves_text_typed_in_the_pointer_press_batch() {
     );
     assert!(app.comments.unsaved());
 }
+
+#[test]
+fn focused_comment_copy_uses_activation_keys_without_scrolling_or_toggling_sidebar() {
+    for (size, activation) in [Vec2::new(1180.0, 820.0), Vec2::new(240.0, 240.0)]
+        .into_iter()
+        .flat_map(|size| [Key::Enter, Key::Space, Key::Tab].map(|key| (size, key)))
+    {
+        let (_root, context, mut app) = many_comments();
+        app.reading.fit = crate::navigation::Fit::Custom(2.0);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        let copy_center = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Copy" => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let copy_focused = |context: &Context| {
+            context
+                .memory(|memory| memory.focused())
+                .and_then(|id| context.read_response(id))
+                .is_some_and(|response| response.rect.contains(copy_center))
+        };
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+        frame_size(&mut app, &context, Vec::new(), size);
+        // A narrow panel also exposes its scroll area's focus stop. Traverse
+        // real controls rather than assuming one fixed Tab count at every size.
+        for _ in 0..4 {
+            frame_size(&mut app, &context, key(Key::Tab, Modifiers::SHIFT), size);
+            // egui applies backward traversal at the next frame boundary.
+            frame_size(&mut app, &context, Vec::new(), size);
+            if copy_focused(&context) {
+                break;
+            }
+        }
+        assert!(copy_focused(&context), "Copy must be reachable at {size:?}");
+        let pan = app.pan;
+        let sidebar = app.library.sidebar;
+        let output = frame_size(&mut app, &context, key(activation, Modifiers::NONE), size);
+        assert_eq!(
+            app.library.sidebar, sidebar,
+            "{activation:?} belongs to the focused control"
+        );
+        assert_eq!(app.pan, pan, "{activation:?} must not scroll the PDF");
+        assert_eq!(app.nav.page, 0);
+        if activation != Key::Tab {
+            assert!(output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text.contains("Row 79"))), "{activation:?} must activate Copy");
+        } else {
+            for _ in 0..3 {
+                if app.comment_filter_focused(&context) {
+                    break;
+                }
+                frame_size(&mut app, &context, key(Key::Tab, Modifiers::NONE), size);
+                assert_eq!(
+                    app.library.sidebar, sidebar,
+                    "scroll-area Tab stays in the controls"
+                );
+            }
+            assert!(
+                app.comment_filter_focused(&context),
+                "Tab returns to the filter"
+            );
+        }
+    }
+}
+
+#[test]
+fn reader_tab_binding_still_toggles_sidebar_after_leaving_comment_controls() {
+    let (_root, context, mut app) = many_comments();
+    context.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    frame(&mut app, &context, Vec::new());
+    let before = app.library.sidebar;
+    frame(&mut app, &context, key(Key::Tab, Modifiers::NONE));
+    assert_eq!(
+        app.library.sidebar, !before,
+        "reader Tab keeps its binding while comments are open"
+    );
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-comment-filter")));
+    frame(&mut app, &context, Vec::new());
+    frame(&mut app, &context, key(Key::Tab, Modifiers::SHIFT));
+    frame(&mut app, &context, Vec::new());
+    app.set_comments_open(&context, false);
+    let before = app.library.sidebar;
+    frame(&mut app, &context, key(Key::Tab, Modifiers::NONE));
+    assert_eq!(
+        app.library.sidebar, !before,
+        "hidden controls cannot claim Tab"
+    );
+    assert!(!app.comments.open);
+}

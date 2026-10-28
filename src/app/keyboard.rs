@@ -177,6 +177,20 @@ impl Pagewing {
                 // In the reader it retains its sidebar-toggle binding.
                 continue;
             }
+            if !popup_open
+                && !self.help
+                && !self.properties_open
+                && !modifiers.command
+                && !modifiers.ctrl
+                && !modifiers.alt
+                && (key == Key::Tab
+                    || (!typing && !modifiers.shift && matches!(key, Key::Enter | Key::Space)))
+                && self.comment_control_focused(context)
+            {
+                // Tab traverses comment controls; activation keys belong to
+                // their focused buttons rather than the reader underneath.
+                continue;
+            }
             // Adapt configured bindings to the existing reader commands, but
             // consume the original physical press so text cannot leak to egui.
             // Sequences and text fields retain their own keyboard vocabulary.
