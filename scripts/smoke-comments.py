@@ -82,6 +82,12 @@ def run(binary):
                 keyboard.key("a", ctrl=True)
                 text(value)
 
+            def toggle_filter(tabs):
+                keyboard.click((1000, 114))
+                for _ in range(tabs):
+                    keyboard.key(0xFF09)
+                keyboard.key(" ")
+
             try:
                 wait_for(keyboard.focus, "comments reader window")
                 expect(0)
@@ -143,12 +149,12 @@ def run(binary):
                 query("jkg STRASSE")
                 assert copied() == "jkg STRASSE", "Unicode folding query does not navigate or rotate"
                 expect(1)
-                keyboard.click((920, 180))  # Current page: reply lives on the other page.
+                toggle_filter(3)  # Current page: reply lives on the other page.
                 keyboard.key(0xFF1B)
                 keyboard.key("k", shift=True)
                 expect(0)
                 keyboard.key("m", ctrl=True, shift=True)
-                keyboard.click((1030, 145))  # Marked only; retain the root as context.
+                toggle_filter(2)  # Marked only; retain the root as context.
                 query("jkg STRASSE")
                 keyboard.click((1075, 84))
                 exported = keyboard.clipboard()

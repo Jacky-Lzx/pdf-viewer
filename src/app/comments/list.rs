@@ -1,4 +1,4 @@
-use super::{CommentFilter, Pagewing, ReviewStatus};
+use super::{CommentFilter, Pagewing};
 use crate::app::list_focus::ListFocus;
 use crate::comment_cards::card_lines;
 use eframe::egui::{self, Vec2};
@@ -51,33 +51,7 @@ impl Pagewing {
         .on_hover_text("Filter comments · ↑/↓ or Ctrl+J/K: select · PageUp/PageDown: move by visible cards · Ctrl/Cmd+Home/End: first/last · Enter: open");
         let width = ui.available_width();
         let mut controls = |ui: &mut egui::Ui| {
-            let status = self
-                .comments
-                .view
-                .filter
-                .review
-                .map_or("All statuses", ReviewStatus::label);
-            egui::ComboBox::from_id_salt("pagewing-comment-review-filter")
-                .selected_text(status)
-                .width(width.min(100.0))
-                .truncate()
-                .show_ui(ui, |ui| {
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                    ui.selectable_value(
-                        &mut self.comments.view.filter.review,
-                        None,
-                        "All statuses",
-                    );
-                    for status in ReviewStatus::ALL {
-                        ui.selectable_value(
-                            &mut self.comments.view.filter.review,
-                            Some(status),
-                            status.label(),
-                        );
-                    }
-                })
-                .response
-                .on_hover_text(status);
+            self.comment_review_filter(ui, width);
             ui.checkbox(&mut self.comments.view.filter.marked, "Marked only");
             ui.checkbox(&mut self.comments.view.filter.current_page, "Current page");
             if self.comments.view.filter != CommentFilter::default()

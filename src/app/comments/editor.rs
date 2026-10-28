@@ -51,20 +51,14 @@ impl Pagewing {
         });
         ui.add_enabled_ui(!busy && !comment.locked, |ui| {
             let status = format!("Status: {}", comment.review.label());
-            egui::ComboBox::from_id_salt("pagewing-comment-status")
-                .selected_text(&status)
-                .width(ui.available_width().min(ui.spacing().combo_width))
-                .truncate()
-                .show_ui(ui, |ui| {
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                    for status in ReviewStatus::ALL {
-                        changed |= ui
-                            .selectable_value(&mut comment.review, status, status.label())
-                            .changed();
-                    }
-                })
-                .response
-                .on_hover_text(status);
+            let response = super::menus::button(ui, "comment-status", &status, 220.0);
+            self.input_buttons.comment_status_menu = Some(response.id);
+            changed |= super::menus::choices(
+                ui,
+                &response,
+                &mut comment.review,
+                ReviewStatus::ALL.map(|review| (review, review.label())),
+            );
             changed |= ui
                 .checkbox(&mut comment.marked, "Marked (Acrobat checkmark)")
                 .changed();
@@ -83,7 +77,7 @@ impl Pagewing {
     }
 
     pub(super) fn comment_editor_actions(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         compact: bool,
     ) -> CommentActions {
@@ -128,19 +122,10 @@ impl Pagewing {
                         );
                     }
                     if comment.slot.is_some() {
-                        (actions.reply, actions.delete) = ui
-                            .add_enabled_ui(!busy, |ui| {
-                                ui.menu_button(egui::RichText::new("More…").small(), |ui| {
-                                    let result = thread_actions(ui);
-                                    if result.0 || result.1 {
-                                        ui.close();
-                                    }
-                                    result
-                                })
-                                .inner
-                                .unwrap_or_default()
-                            })
-                            .inner;
+                        let (id, more) = super::menus::more(ui, comment, !busy);
+                        self.input_buttons.comment_actions_menu = Some(id);
+                        actions.reply = more.reply;
+                        actions.delete = more.delete;
                     }
                 });
             } else {

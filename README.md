@@ -129,6 +129,8 @@ require('tex-tools').setup({
 
 批注状态：编辑器提供 **Status** 选择器，支持 **None**（无状态）、**Accepted**（已接受）、**Rejected**（已拒绝）、**Cancelled**（已取消）、**Completed / resolved**（已完成／已解决），以及独立的 **Marked (Acrobat checkmark)** 勾选标记。点击 **Save comment** 后写入 PDF；只改状态也会作为未保存草稿保护。状态使用 Acrobat 的标准 `StateModel=Review` / `Marked` 与 `State` 文本字段，保存为独立的状态回复，侧栏不会把它们显示成空白 comment。**Status history** 可查看各作者的状态记录；Pagewing 添加自己的状态，保留其他审阅者的历史。界面优先显示 Pagewing 的状态，否则显示读取到的外部状态。这里“已解决”对应本地 PDF 的 **Completed**，不连接 Acrobat 云端审阅的 Resolve 操作。
 
+批注的状态筛选、编辑器 **Status** 和紧凑窗口的 **More…** 菜单均支持键盘打开、方向键及 Tab / Shift+Tab 循环选择、Enter / 空格确认。最小窗口中会显露当前选项；状态菜单在调整窗口尺寸后保留选项焦点。Escape 先关闭菜单，保留面板、筛选与未保存草稿。
+
 删除批注：在右侧列表中选中已保存的条目，点击 **Delete comment & highlight**。程序会直接更新当前 PDF，删除整条批注及其高亮、关联弹窗、多层回复和状态历史，列表自动刷新，也会清理其他页面上引用该批注的回复。选中回复时显示 **Delete reply & replies**，只删除这条回复及其子回复，保留父批注和其他分支。FreeText 和超长批注也可整条删除，锁定批注不能删除。若只想删除 comment 文字并保留高亮，清空编辑框后点击 **Save comment**。尚未保存的新批注使用 **Discard / close editor** 放弃。
 
 隐藏 Comments 面板会保留草稿；**Discard / close editor** 放弃本条修改。存在未保存草稿时，切换、关闭、重新加载文档或退出会提示先保存或放弃，避免丢失输入。保存采用 PDF 标准 Highlight/Contents 字段和高亮外观流，其他 PDF 阅读器也可显示；编辑现有 comment 时保留其他批注及页面内容。保存会先完成临时文件写入，再替换当前 PDF；若磁盘文件已被其他程序修改，会报告错误并保留 comment 草稿，避免覆盖外部更改。加密 PDF 暂不支持保存批注；锁定批注不能修改，超长批注及 FreeText 的文字只读，但可添加回复及状态而不改动原文。批注扫描最多检查 100,000 个条目并展示 10,000 条，超出时显示提示。
@@ -509,6 +511,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-focus.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-history.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-menus.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-history.py target/release/pagewing

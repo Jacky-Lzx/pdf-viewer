@@ -5,7 +5,7 @@ use eframe::egui::{self, Event, Id, Key, Modifiers, Response, Ui};
 pub(super) struct MenuFocus {
     id: Id,
     items: Vec<Id>,
-    opening_target: Option<usize>,
+    opening_motion: Option<isize>,
 }
 
 impl MenuFocus {
@@ -20,6 +20,8 @@ impl MenuFocus {
         };
         let mut moved = false;
         let mut activated = false;
+        let mut opener_seen = false;
+        let mut opening_motion = 0isize;
         ui.input_mut(|input| {
             input.events.retain(|event| {
                 let Event::Key {
@@ -31,8 +33,12 @@ impl MenuFocus {
                 else {
                     return true;
                 };
-                if !keyboard_open && matches!(key, Key::Enter | Key::Space) && modifiers.is_none() {
-                    activated = true;
+                if matches!(key, Key::Enter | Key::Space) && modifiers.is_none() {
+                    if keyboard_open && !opener_seen {
+                        opener_seen = true;
+                    } else {
+                        activated = true;
+                    }
                 }
                 let next = match (*key, *modifiers) {
                     (Key::ArrowDown | Key::Tab, Modifiers::NONE) => Some(false),
@@ -40,7 +46,11 @@ impl MenuFocus {
                     _ => None,
                 };
                 let Some(reverse) = next else { return true };
-                if !items.is_empty() && !activated {
+                if keyboard_open && !activated {
+                    // A new popup has no cached IDs yet. Apply these motions
+                    // after all items exist instead of losing the first keys.
+                    opening_motion = opening_motion.saturating_add(if reverse { -1 } else { 1 });
+                } else if !items.is_empty() && !activated {
                     row = Some(if reverse {
                         row.map_or(items.len() - 1, |row| (row + items.len() - 1) % items.len())
                     } else {
@@ -66,20 +76,23 @@ impl MenuFocus {
         Self {
             id,
             items,
-            opening_target: keyboard_open.then_some(row.unwrap_or(0)),
+            opening_motion: keyboard_open.then_some(opening_motion),
         }
     }
 
     pub fn observe(&mut self, response: &Response) {
-        if self.opening_target == Some(self.items.len()) {
-            // Focus after constructing the item so the key that opened the
-            // menu cannot also activate its first option.
-            response.request_focus();
-        }
         self.items.push(response.id);
     }
 
     pub fn finish(self, ui: &Ui) {
+        if let Some(motion) = self.opening_motion
+            && !self.items.is_empty()
+        {
+            // Delay initial focus until construction finishes so the opener
+            // cannot also activate a choice. Reveal it on the following pass.
+            let row = motion.rem_euclid(self.items.len() as isize) as usize;
+            ui.memory_mut(|memory| memory.request_focus(self.items[row]));
+        }
         ui.data_mut(|data| data.insert_temp(self.id, self.items));
     }
 }

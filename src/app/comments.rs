@@ -7,6 +7,7 @@ use eframe::egui::{self, Color32, Vec2};
 mod editor;
 mod export;
 mod list;
+mod menus;
 
 // Match the inputs accepted by the multiline editor. This is deliberately
 // conservative for edits such as undo or Delete that may leave text unchanged:
@@ -305,6 +306,9 @@ impl Pagewing {
 
     pub(super) fn comments_sidebar(&mut self, context: &egui::Context) {
         self.input_buttons.close_comments = None;
+        self.input_buttons.comment_filter_menu = None;
+        self.input_buttons.comment_status_menu = None;
+        self.input_buttons.comment_actions_menu = None;
         self.comments.region = None;
         let save_requested = self.comments.save_requested;
         if (!self.comments.open && !save_requested && !self.pending_comment_input(context))

@@ -171,6 +171,9 @@ pub(super) struct InputButtons {
     pub page: Option<Id>,
     pub zoom: Option<Id>,
     pub view_menu: Option<Id>,
+    pub comment_filter_menu: Option<Id>,
+    pub comment_status_menu: Option<Id>,
+    pub comment_actions_menu: Option<Id>,
     pub restore_deleted: Option<Id>,
     pub reload_changed: Option<Id>,
     pub dismiss_change: Option<Id>,
@@ -182,10 +185,20 @@ pub(super) struct InputButtons {
 }
 
 impl InputButtons {
+    fn menus(&self) -> impl Iterator<Item = Id> {
+        [
+            self.search_history,
+            self.view_menu,
+            self.comment_filter_menu,
+            self.comment_status_menu,
+            self.comment_actions_menu,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
     pub fn control_menu_open(&self, context: &egui::Context) -> bool {
-        [self.search_history, self.view_menu]
-            .into_iter()
-            .flatten()
+        self.menus()
             .any(|id| egui::Popup::is_id_open(context, id.with("popup")))
     }
 
@@ -210,7 +223,7 @@ impl InputButtons {
     pub fn clicked(&self, context: &eframe::egui::Context) -> Option<InputButton> {
         // Menu activation stays in egui so the newly shown popup can focus its
         // first item. Its open state must change before reader keys are routed.
-        for id in [self.search_history, self.view_menu].into_iter().flatten() {
+        for id in self.menus() {
             if context
                 .read_response(id)
                 .is_some_and(|response| response.clicked())
