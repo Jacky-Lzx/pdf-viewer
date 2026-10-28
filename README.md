@@ -269,6 +269,8 @@ night = []                 # 停用该动作的快捷键
 
 底部状态栏提供 **− / 缩放比例 / +**；点击 **View** 菜单可集中选择单页（Single page）、连续滚动（Continuous）、双页并排（Two pages side by side），以及适合整页、宽度、高度和实际大小。双页模式从第 1 页起按 1–2、3–4 配对，共用缩放比例；翻页切换整组，末尾落单页居中显示。显示模式会随文档、命名位置和历史记录保存与恢复。
 
+**View** 和搜索 **History** 菜单支持方向键、Tab / Shift+Tab 按条目顺序循环选择，Enter 或空格确认，Escape 仅关闭当前菜单。键盘打开菜单时聚焦首项，窄窗口自动滚动以显示当前选项；调整窗口尺寸后保留焦点。菜单打开期间，阅读翻页键不会穿透到 PDF。View 的全部布局及缩放选项在 240 × 240 窗口中均可访问。
+
 在 **View** 菜单选择 **Continuous** 或按 `Shift+C` 开启连续滚动：页面按纵向排列，滚轮、触控板、拖动和 `j/k`、半屏 / 整屏滚动均可跨页，页码及侧栏随阅读位置更新。模式按文档保存，重新打开时恢复页码和滚动位置；旧阅读记录默认使用单页模式。连续模式仅渲染可见页面并预取相邻页，多个可见页共享 96 MiB 页面纹理缓存。搜索高亮、内部链接、缩放、旋转和单页文本选择同样可用；`f/F` 链接提示针对当前页，文本选择不跨页。`zt/zz/zb` 仍对齐当前页，`Ctrl+e/y` 在连续模式中也可跨页。
 
 鼠标滚轮或触控板滚动，拖动平移，按 `p` 恢复适合整页。高倍缩放时按屏幕像素密度渲染可见区域的高清图块，平移后自动更新。键盘缩放保持视口中心；`Alt`（macOS 上为 Option）+滚轮或触控板捏合缩放保持指针下的位置。`v` 进入文本选择模式，拖选会高亮选区，支持反向、跨行和旋转后的文字；文本顺序取决于 PDF 的文本层。支持 PDF 文件拖入、加密文档密码输入、文档目录跳转、搜索结果高亮、书签、最近文档和阅读位置恢复。命名位置显示在侧栏，可点击返回或删除。重启后恢复页码与页内滚动，窗口尺寸变化时按相对滚动位置恢复。侧栏目录支持逐章节折叠、全部展开/折叠和 Unicode 标题筛选；筛选会显示命中条目的祖先，清空后恢复原来的折叠状态。目录支持 GoTo 动作和命名目标；内部链接和目录会应用 `XYZ` 的页内位置与缩放，以及 `Fit`、`FitH`、`FitV` 和 `FitR` 目标视图，支持裁剪框、文档自带旋转、阅读旋转及同页重新定位；网页链接在系统浏览器中打开；右键点击网页链接可复制地址，菜单内按回车复制、`Escape` 关闭，选择文字时保留文本操作。
@@ -488,6 +490,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection-scroll.p
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-load.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-options.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-history.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-view-menu.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-phrases.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-results.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py target/release/pagewing

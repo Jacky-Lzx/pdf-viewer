@@ -126,7 +126,7 @@ pub(super) enum InputButton {
     Find,
     History(bool),
     Search(SearchButton),
-    SearchHistory,
+    Menu(Id),
     Comments,
     CloseComments,
     Page,
@@ -170,6 +170,7 @@ pub(super) struct InputButtons {
     pub close_comments: Option<Id>,
     pub page: Option<Id>,
     pub zoom: Option<Id>,
+    pub view_menu: Option<Id>,
     pub restore_deleted: Option<Id>,
     pub reload_changed: Option<Id>,
     pub dismiss_change: Option<Id>,
@@ -181,6 +182,13 @@ pub(super) struct InputButtons {
 }
 
 impl InputButtons {
+    pub fn control_menu_open(&self, context: &egui::Context) -> bool {
+        [self.search_history, self.view_menu]
+            .into_iter()
+            .flatten()
+            .any(|id| egui::Popup::is_id_open(context, id.with("popup")))
+    }
+
     pub fn search_has_focus(&self, context: &eframe::egui::Context) -> bool {
         context.memory(|memory| {
             [
@@ -200,6 +208,16 @@ impl InputButtons {
     }
 
     pub fn clicked(&self, context: &eframe::egui::Context) -> Option<InputButton> {
+        // Menu activation stays in egui so the newly shown popup can focus its
+        // first item. Its open state must change before reader keys are routed.
+        for id in [self.search_history, self.view_menu].into_iter().flatten() {
+            if context
+                .read_response(id)
+                .is_some_and(|response| response.clicked())
+            {
+                return Some(InputButton::Menu(id));
+            }
+        }
         for (id, action) in [
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),
@@ -217,7 +235,6 @@ impl InputButtons {
                 InputButton::Search(SearchButton::Results),
             ),
             (self.search_copy, InputButton::Search(SearchButton::Copy)),
-            (self.search_history, InputButton::SearchHistory),
             (self.close_search, InputButton::Search(SearchButton::Close)),
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),
@@ -236,9 +253,7 @@ impl InputButtons {
                 continue;
             };
             if response.clicked() {
-                if action != InputButton::SearchHistory
-                    && !response.clicked_by(eframe::egui::PointerButton::Primary)
-                {
+                if !response.clicked_by(eframe::egui::PointerButton::Primary) {
                     // Activation keys belong to the button, not reader commands
                     // or the newly opened input.
                     context.input_mut(|input| {
@@ -261,6 +276,25 @@ impl InputButtons {
         }
         None
     }
+}
+
+/// `keys` already toggled the menu; drawing must not toggle it again after
+/// subsequent keys such as Escape. Keyboard opening selects its first item.
+pub(super) fn show_menu<R>(
+    ui: &mut Ui,
+    response: &egui::Response,
+    content: impl FnOnce(&mut Ui, bool) -> R,
+) -> Option<egui::InnerResponse<R>> {
+    let state_id = response.id.with("menu-open");
+    let was_open = ui.data(|data| data.get_temp::<bool>(state_id).unwrap_or(false));
+    let keyboard_open =
+        !was_open && response.clicked() && !response.clicked_by(egui::PointerButton::Primary);
+    let inner = egui::Popup::menu(response)
+        .open_memory(None)
+        .show(|ui| content(ui, keyboard_open));
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(response));
+    ui.data_mut(|data| data.insert_temp(state_id, open));
+    inner
 }
 
 #[derive(Debug, PartialEq, Eq)]

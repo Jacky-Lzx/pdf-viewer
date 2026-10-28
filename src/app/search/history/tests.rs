@@ -14,11 +14,7 @@ fn frame(
             ..Default::default()
         },
         |context| {
-            app.keys(context);
-            app.toolbar(context);
-            app.search_bar(context);
-            app.status(context);
-            app.canvas(context);
+            eframe::App::update(app, context, &mut eframe::Frame::_new_kittest());
         },
     )
 }
@@ -331,6 +327,51 @@ fn arrow_navigation_reveals_long_history_entries_instead_of_leaving_focus_clippe
         app.query, "query 00",
         "all 16 entries must be reachable by direction keys"
     );
+}
+
+#[test]
+fn history_tab_wrap_and_resizing_retain_the_same_query_instead_of_background_controls() {
+    let (_root, context, mut app) = fixture();
+    let desktop = egui::vec2(1180.0, 820.0);
+    let small = egui::vec2(240.0, 240.0);
+    app.query_history.remember("older");
+    app.query_history.remember("newer");
+    app.query = "draft".into();
+    settle(&mut app, &context, desktop);
+    context.memory_mut(|memory| memory.request_focus(app.input_buttons.search_history.unwrap()));
+    frame(&mut app, &context, desktop, key(egui::Key::Enter));
+    settle(&mut app, &context, desktop);
+    let first = context.memory(|memory| memory.focused()).unwrap();
+    frame(&mut app, &context, desktop, key(egui::Key::ArrowUp));
+    settle(&mut app, &context, desktop);
+    let clear = context.memory(|memory| memory.focused()).unwrap();
+    assert_ne!(first, clear);
+    frame(&mut app, &context, desktop, key(egui::Key::Tab));
+    settle(&mut app, &context, desktop);
+    assert_eq!(context.memory(|memory| memory.focused()), Some(first));
+    let mut reverse = key(egui::Key::Tab);
+    for event in &mut reverse {
+        if let egui::Event::Key { modifiers, .. } = event {
+            *modifiers = egui::Modifiers::SHIFT;
+        }
+    }
+    frame(&mut app, &context, desktop, reverse);
+    settle(&mut app, &context, desktop);
+    assert_eq!(context.memory(|memory| memory.focused()), Some(clear));
+    frame(&mut app, &context, desktop, key(egui::Key::ArrowUp));
+    settle(&mut app, &context, desktop);
+    let older = context.memory(|memory| memory.focused()).unwrap();
+    for size in [small, desktop, small] {
+        settle(&mut app, &context, size);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(older));
+        let response = context.read_response(older).unwrap();
+        assert!(response.interact_rect.contains_rect(response.rect));
+        assert!(context.content_rect().contains_rect(response.rect));
+    }
+    frame(&mut app, &context, small, key(egui::Key::Enter));
+    assert_eq!(app.query, "older");
+    assert_eq!(app.nav.page, 2);
+    assert!(!egui::Popup::is_any_open(&context));
 }
 
 #[test]

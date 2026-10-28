@@ -143,12 +143,19 @@ impl Pagewing {
         self.pending_focus = rect;
     }
 
+    pub(super) fn search_control_focused(&self, context: &egui::Context) -> bool {
+        self.search_open
+            && (self.input_buttons.search_has_focus(context)
+                || shortcuts::focused_in_region(context, self.search_region))
+    }
+
     pub(super) fn search_bar(&mut self, context: &egui::Context) {
         if !self.search_open {
+            self.search_region = None;
             self.copy_search_requested = false;
             return;
         }
-        egui::TopBottomPanel::top("search")
+        let panel = egui::TopBottomPanel::top("search")
             .frame(appearance::panel(context, 4))
             .exact_height(42.0)
             .show(context, |ui| {
@@ -219,6 +226,7 @@ impl Pagewing {
                     }
                 });
             });
+        self.search_region = Some((panel.response.layer_id, panel.response.rect));
     }
 
     fn copy_search_results(&mut self, context: &egui::Context) {

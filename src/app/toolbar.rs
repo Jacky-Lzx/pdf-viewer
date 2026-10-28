@@ -1,5 +1,4 @@
 use super::{Pagewing, appearance, set_theme, shortcuts, tooltips::LazyTooltip};
-use crate::navigation::Fit;
 use eframe::egui::{self, RichText, scroll_area::ScrollAreaOutput};
 
 impl Pagewing {
@@ -203,75 +202,7 @@ impl Pagewing {
             self.zoom(1.0 / 1.2);
         }
         ui.separator();
-        let mode = if self.reading.facing {
-            "Two pages"
-        } else if self.reading.continuous {
-            "Continuous"
-        } else {
-            "Single page"
-        };
-        ui.menu_button(format!("View: {mode}"), |ui| {
-            ui.label("Page layout");
-            for (label, continuous, facing) in [
-                ("Single page", false, false),
-                ("Continuous", true, false),
-                ("Two pages side by side", false, true),
-            ] {
-                if ui
-                    .selectable_label(
-                        self.reading.continuous == continuous && self.reading.facing == facing,
-                        label,
-                    )
-                    .clicked()
-                {
-                    self.set_display_mode(continuous, facing);
-                    ui.close();
-                }
-            }
-            ui.separator();
-            ui.label("Page size");
-            for (label, fit) in [
-                (
-                    format!("Fit page · {}", self.library.shortcuts.label("fit_page")),
-                    Fit::Page,
-                ),
-                (
-                    format!("Fit width · {}", self.library.shortcuts.label("fit_width")),
-                    Fit::Width,
-                ),
-                (
-                    format!(
-                        "Fit height · {}",
-                        self.library.shortcuts.label("fit_height")
-                    ),
-                    Fit::Height,
-                ),
-                (
-                    format!(
-                        "Actual size · {}",
-                        self.library.shortcuts.label("actual_size")
-                    ),
-                    Fit::Custom(1.0),
-                ),
-            ] {
-                if ui
-                    .selectable_label(self.reading.fit == fit, label)
-                    .clicked()
-                {
-                    if fit == Fit::Custom(1.0) {
-                        self.actual_size();
-                    } else {
-                        self.resolve_view();
-                        self.reading.fit = fit;
-                        self.pan = egui::Vec2::ZERO;
-                        self.dirty = true;
-                    }
-                    ui.close();
-                }
-            }
-        })
-        .response
-        .on_hover_text("Choose page layout and size");
+        self.view_menu(ui);
     }
 }
 

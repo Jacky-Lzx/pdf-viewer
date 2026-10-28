@@ -159,3 +159,34 @@ fn bottom_bar_tab_and_view_activation_leave_reading_commands_alone() {
         assert_eq!(app.library.sidebar, sidebar);
     }
 }
+
+#[test]
+fn clicking_view_menu_owns_later_reader_keys_in_the_same_frame() {
+    let (_directory, context, mut app) = app();
+    app.dimensions = vec![[600.0, 800.0]; app.nav.count];
+    app.viewport = egui::vec2(400.0, 320.0);
+    app.reading.fit = Fit::Custom(2.0);
+    app.pan = egui::vec2(37.0, 53.0);
+    frame(&mut app, &context, 1180.0, Vec::new());
+    context.memory_mut(|memory| memory.request_focus(app.input_buttons.zoom.unwrap()));
+    frame(&mut app, &context, 1180.0, Vec::new());
+    for _ in 0..2 {
+        frame(&mut app, &context, 1180.0, key(Key::Tab, Modifiers::NONE));
+    }
+    let id = context.memory(|memory| memory.focused()).unwrap();
+    let pos = context.read_response(id).unwrap().rect.center();
+    let mut events = vec![Event::PointerMoved(pos)];
+    for pressed in [true, false] {
+        events.push(Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    events.extend(key(Key::J, Modifiers::SHIFT));
+    frame(&mut app, &context, 1180.0, events);
+    assert_eq!(app.nav.page, 2, "View owns later keys in its opening batch");
+    assert_eq!(app.pan, egui::vec2(37.0, 53.0));
+    assert!(egui::Popup::is_any_open(&context));
+}

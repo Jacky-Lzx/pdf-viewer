@@ -11,6 +11,7 @@ mod input_dialogs;
 mod keyboard;
 mod lifecycle;
 mod list_focus;
+mod menu_focus;
 mod properties;
 mod recent;
 mod reload;
@@ -24,6 +25,7 @@ mod sync;
 mod tiles;
 mod toolbar;
 mod tooltips;
+mod view_menu;
 mod viewport;
 mod welcome;
 mod zoom;
@@ -83,6 +85,7 @@ pub struct Pagewing {
     outline: crate::outline_view::OutlineView,
     sidebar_region: Option<(egui::LayerId, egui::Rect)>,
     toolbar_region: Option<(egui::LayerId, egui::Rect)>,
+    search_region: Option<(egui::LayerId, egui::Rect)>,
     status_region: Option<(egui::LayerId, egui::Rect)>,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
@@ -253,6 +256,7 @@ impl Pagewing {
             outline: crate::outline_view::OutlineView::default(),
             sidebar_region: None,
             toolbar_region: None,
+            search_region: None,
             status_region: None,
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
@@ -1472,7 +1476,10 @@ impl eframe::App for Pagewing {
                 self.pan,
                 self.viewport,
             )
+            && !self.input_buttons.control_menu_open(context)
         {
+            // Document context menus depend on page geometry. Menus anchored
+            // to reader controls retain their focus while the viewport resizes.
             egui::Popup::close_all(context);
         }
         if let Some(due) = self.search_due {
