@@ -105,17 +105,16 @@ pub(super) enum Icon {
     Help,
 }
 
-/// Toolbar controls keep their action identity when responsive labels or
-/// selection controls appear, disappear, or change their place in the row.
-pub(super) fn toolbar_button(
+/// Action controls keep their identity when surrounding labels or optional
+/// controls appear, disappear, or change their place in a responsive row.
+pub(super) fn action_button(
     ui: &mut egui::Ui,
     action: impl std::hash::Hash,
     button: egui::Button<'_>,
 ) -> egui::Response {
-    ui.scope_builder(
-        egui::UiBuilder::new().id(("reader-toolbar", action)),
-        |ui| ui.add(button),
-    )
+    ui.scope_builder(egui::UiBuilder::new().id(("reader-action", action)), |ui| {
+        ui.add(button)
+    })
     .inner
 }
 
@@ -125,7 +124,7 @@ pub(super) fn toolbar_tool(
     label: &str,
     selected: bool,
 ) -> egui::Response {
-    let response = toolbar_button(
+    let response = action_button(
         ui,
         icon,
         egui::Button::new("")

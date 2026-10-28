@@ -198,9 +198,10 @@ impl Pagewing {
                     || (!typing && !modifiers.shift && matches!(key, Key::Enter | Key::Space)))
                 && (self.comment_control_focused(context)
                     || self.sidebar_control_focused(context)
-                    || self.toolbar_control_focused(context))
+                    || self.toolbar_control_focused(context)
+                    || self.status_control_focused(context))
             {
-                // Toolbar and sidebar controls own focus traversal and button
+                // Reader bars and sidebars own focus traversal and button
                 // activation, leaving the reading view and shortcuts alone.
                 continue;
             }

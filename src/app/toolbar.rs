@@ -21,7 +21,7 @@ impl Pagewing {
                         ui.label(RichText::new("Pagewing").size(19.0).strong());
                     }
                     ui.add_space(16.0);
-                    if appearance::toolbar_button(ui, "open", egui::Button::new("Open"))
+                    if appearance::action_button(ui, "open", egui::Button::new("Open"))
                         .on_hover_text_lazy(|| self.library.shortcuts.label("open"))
                         .clicked()
                     {
@@ -63,7 +63,7 @@ impl Pagewing {
                             .id,
                         );
                         if !self.selection.rects.is_empty()
-                            && appearance::toolbar_button(
+                            && appearance::action_button(
                                 ui,
                                 "add-comment",
                                 egui::Button::new("Add comment"),
@@ -160,6 +160,14 @@ impl Pagewing {
     }
 
     pub(super) fn view_controls(&mut self, ui: &mut egui::Ui) {
+        // Notices, recovery actions and numeric prefixes precede this group.
+        // Its permanent controls keep their IDs as that status content changes.
+        ui.scope_builder(egui::UiBuilder::new().id("reader-view-controls"), |ui| {
+            self.view_controls_row(ui)
+        });
+    }
+
+    fn view_controls_row(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("+")
             .on_hover_text_lazy(|| self.library.shortcuts.label("zoom_in"))

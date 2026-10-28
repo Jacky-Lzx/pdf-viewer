@@ -170,7 +170,7 @@ night = []                 # 停用该动作的快捷键
 
 ## 键盘操作
 
-窗口最小尺寸为 240 × 240 像素，支持同时缩窄宽度和高度。工具栏按钮保留各自的键盘焦点，缩窗或出现选区操作后会显露聚焦项；`Tab` / `Shift+Tab` 在控件间移动，`Enter` / 空格激活，`Escape` 将焦点交回阅读区。
+窗口最小尺寸为 240 × 240 像素，支持同时缩窄宽度和高度。顶部工具栏及底部页码、缩放、View 按钮保留各自的键盘焦点，缩窗、出现选区操作或状态提示变化后会显露聚焦项；`Tab` / `Shift+Tab` 在控件间移动，`Enter` / 空格激活，`Escape` 将焦点交回阅读区。
 
 顶部工具栏和搜索栏在按钮放不下时可横向滚动：将指针移到栏内使用鼠标滚轮、触控板左右滑动，或拖动栏底部的横向滚动条。底部缩放与 View 显示模式菜单在窄窗口中也可横向滚动访问；侧栏内容可纵向滚动。
 
@@ -490,7 +490,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py targ
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-file-watch.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
-# 工具栏焦点在宽/窄布局间保留，激活按钮不同时滚动页面
+# 顶部和底部控件焦点在宽/窄布局与动态状态间保留，激活按钮不同时滚动页面
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-focus.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing

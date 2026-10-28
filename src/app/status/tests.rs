@@ -1,6 +1,8 @@
 use super::*;
 use crate::navigation::{Fit, Navigation};
 
+mod focus;
+
 fn app() -> (tempfile::TempDir, egui::Context, Pagewing) {
     let directory = tempfile::tempdir().unwrap();
     let context = egui::Context::default();

@@ -1,4 +1,4 @@
-use super::{MarkAction, Pagewing, appearance, spread, toolbar};
+use super::{MarkAction, Pagewing, appearance, shortcuts, spread, toolbar};
 use crate::state::ReadingMark;
 use eframe::egui::{self, RichText};
 use std::time::{Duration, Instant};
@@ -36,6 +36,10 @@ impl Notice {
 }
 
 impl Pagewing {
+    pub(super) fn status_control_focused(&self, context: &egui::Context) -> bool {
+        shortcuts::focused_in_region(context, self.status_region)
+    }
+
     fn restorable_deletion(&self) -> Option<&Recovery> {
         let notice = self.message.as_ref()?;
         if notice.at.elapsed() >= NOTICE_DURATION || self.loading {
@@ -80,7 +84,7 @@ impl Pagewing {
         {
             self.message = None;
         }
-        egui::TopBottomPanel::bottom("status")
+        let panel = egui::TopBottomPanel::bottom("status")
             .frame(appearance::panel(context, 2))
             .exact_height(36.0)
             .show(context, |ui| {
@@ -121,15 +125,17 @@ impl Pagewing {
                     let recovery_caption = self.restorable_deletion().map(Recovery::caption);
                     if let Some(caption) = recovery_caption {
                         self.input_buttons.restore_deleted = Some(
-                            ui.push_id("undo-deletion", |ui| {
-                                ui.button(caption).on_hover_ui(|ui| {
-                                    if let Some(notice) = &self.message {
-                                        ui.label(&notice.text);
-                                    }
-                                    ui.label("Restore without leaving this page");
-                                })
+                            appearance::action_button(
+                                ui,
+                                "undo-deletion",
+                                egui::Button::new(caption),
+                            )
+                            .on_hover_ui(|ui| {
+                                if let Some(notice) = &self.message {
+                                    ui.label(&notice.text);
+                                }
+                                ui.label("Restore without leaving this page");
                             })
-                            .inner
                             .id,
                         );
                         ui.separator();
@@ -142,7 +148,9 @@ impl Pagewing {
                             (self.nav.page, None)
                         };
                         self.input_buttons.page = Some(
-                            ui.add(
+                            appearance::action_button(
+                                ui,
+                                "page",
                                 egui::Button::new(self.labels.status_caption(
                                     first,
                                     second,
@@ -184,6 +192,7 @@ impl Pagewing {
                     });
                 });
             });
+        self.status_region = Some((panel.response.layer_id, panel.response.rect));
     }
 }
 

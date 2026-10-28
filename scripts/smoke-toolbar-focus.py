@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check toolbar focus identity, keyboard activation and resizing on X11."""
+"""Check reader bar focus identity, keyboard activation and resizing on X11."""
 import ctypes
 import json
 import os
@@ -85,10 +85,52 @@ def run(binary):
                 keyboard.key(0xFF09)
                 wait_for(lambda: state() and state()["sidebar"], "Escape returns Tab to the reader shortcut")
                 assert book()["page"] == 0 and book()["bookmarks"] == [0]
+                keyboard.key(0xFF09)
+                wait_for(lambda: state() and not state()["sidebar"], "hide sidebar before bottom controls")
+
+                def focus_status(tabs):
+                    resize(1180, 820)
+                    keyboard.key("f", ctrl=True)
+                    # Aa, Word, Prev, Next, Results, Close, Page, +, Zoom, -, View.
+                    # Copy is disabled for this absent query.
+                    for _ in range(tabs):
+                        keyboard.key(0xFF09)
+                    keyboard.key("4")  # Numeric status text appears before the controls.
+                    for size in [(240, 240), (1180, 820), (240, 240)]:
+                        resize(*size)
+                    assert not state()["sidebar"], "bottom Tab must not toggle the sidebar"
+
+                focus_status(7)
+                keyboard.key(0xFF0D)
+                keyboard.key("2")
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "2", "retained Page button opens its editable dialog"
+                keyboard.key(0xFF1B)
+                assert book()["page"] == 0, "Page activation must not submit the reader count"
+
+                focus_status(9)
+                keyboard.key(" ")
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert float(keyboard.clipboard()) == 200.0, "retained Zoom button opens the percentage dialog"
+                keyboard.key(0xFF1B)
+
+                focus_status(10)
+                keyboard.key(" ")
+
+                def zoomed_out():
+                    value = book()
+                    fit = value.get("fit") if value else None
+                    return value if isinstance(fit, dict) and abs(fit.get("Custom", 0) - 2.0 / 1.2) < 1e-5 else None
+
+                after_zoom = wait_for(zoomed_out, "Space applies one bottom-bar zoom step")
+                assert after_zoom["page"] == 0 and after_zoom["rotation"] == before["rotation"]
+                assert after_zoom["bookmarks"] == [0] and not state()["sidebar"]
                 assert document.read_bytes() == original, "toolbar interaction must not write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: real toolbar Shift+Tab, Bookmark focus retained through wide/compact/minimum resizing, Space activation without page/pan changes, Find activation/query retention, Escape restores reader Tab, unchanged PDF")
+                print("PASS: reader bar Tab/Shift+Tab, retained Bookmark/Page/Zoom/minus targets across status-prefix and wide/compact/minimum resizing, keyboard dialogs and one zoom step, no toolbar page/pan changes, Find/query retention, Escape restores reader Tab, unchanged PDF")
             except Exception:
                 log.flush()
                 log.seek(0)
