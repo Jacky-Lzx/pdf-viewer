@@ -168,6 +168,8 @@ night = []                 # 停用该动作的快捷键
 
 搜索框与搜索按钮之间可用 Tab / Shift+Tab 移动焦点，Enter 或 Space 激活按钮。横向控件栏会在焦点变化或窗口变窄时显露当前控件；手动滚动后保留滚动位置。切换 Aa / Word 后焦点回到搜索框，可继续输入查询；按钮上的空格不会滚动页面或写进搜索词。
 
+词组搜索按顺序匹配文字，词间的空格可匹配换行、缩进、连续空格或不换行空格。例如 `alpha extraordinary omega` 可以找到分布在三行的词组；不会匹配连在一起或顺序相反的词。选中文字后打开 Find，会将选区中的空白整理为单个空格填入搜索框，支持多行选区；空选区保留原查询。复制原文仍保留换行。词组限于同一页，按 PDF 文本层的提取顺序搜索。
+
 侧栏搜索结果会在摘要中标出当前命中的原文，支持 Unicode 大小写折叠，例如 `STRASSE` 对应 `Straße`。结果行保留少量前文，让命中词靠近行首；悬停可查看较完整的上下文。浅色与深色界面均提供高亮，点击结果跳转到对应页面。
 
 **Results** 会打开侧栏并显露当前匹配项；尚未选择匹配项时显示首条结果，保留阅读页码。`n` / `N` 会同步显露结果区，相邻行已可见时只移动选择。窗口缩放或字体放大后，原本可见的当前结果会继续保持可见；手动滚离后保留滚动位置，再按 **Results** 可返回当前匹配项。
@@ -322,7 +324,7 @@ night = []                 # 停用该动作的快捷键
 - 按物理像素渲染，宽度以 32 像素分档；单页限制为约 1600 万像素。
 - 搜索输入延迟 180 ms 合并请求，复用 Unicode 完整大小写折叠索引，支持 `Straße` / `STRASSE`、`Σ` / `σ` / `ς` 和连字，以二分定位当前页匹配与文本坐标并合并相邻高亮；结果分页面返回，最多保留 10,000 个匹配。侧栏按可见行绘制全部结果，`n` / `N` 同步定位列表；旋转、放大后也会滚到匹配处。
 - 搜索尚未返回时按 `Enter` 会保留跳转请求，等结果就绪后定位；关闭搜索或主动翻页会取消待处理的跳转。
-- 选中单行文字后按 `/`、`Ctrl/Cmd+f` 或点击 Find，会将选中文字带入搜索并保留当前搜索选项。空选区或跨行选区保留原查询，避免将换行意外放进单行输入框。
+- 选中文字后按 `/`、`Ctrl/Cmd+f` 或点击 Find，会将选区空白整理为单个空格后带入搜索，并保留当前搜索选项。跨行词组复用原文及大小写折叠索引，不另建整页空白归一化副本；高亮与摘要继续映射到原文范围。
 - 搜索数字前缀直接计算目标匹配，无需逐条跳转；若结果仍在扫描且目标尚未就绪，会等待足够结果再定位，扫描完成后才循环到另一端。
 - 搜索摘要直接截取匹配起点前 32、后 80 个 Unicode 字符，再统一替换换行，避免临时字符数组和多次字符串拼接。
 - 密集页面每批最多返回 256 条匹配，批次间优先处理新的页面渲染、文本操作和搜索请求；不再单独截断每页的第 1,000 条以后结果，统一受全局 10,000 条上限约束。
@@ -429,6 +431,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection.py targe
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection-scroll.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-load.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-options.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-phrases.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-results.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-persistence.py target/release/pagewing

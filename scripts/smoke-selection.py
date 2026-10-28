@@ -118,7 +118,8 @@ def run(binary):
                 keyboard.key("/")
                 keyboard.key("a", ctrl=True)
                 copy(SENTENCE)
-                # A multi-line selection keeps the previous query.
+                # A multi-line selection becomes a searchable single-line
+                # phrase; copying page text must still retain its line break.
                 keyboard.key("k"); keyboard.key("e"); keyboard.key("p"); keyboard.key("t")
                 keyboard.key(0xFF1B)
                 keyboard.key("v")
@@ -128,8 +129,14 @@ def run(binary):
                 copy(SENTENCE + "\nDesigned for Linux and macOS. Made for your keyboard.")
                 keyboard.key("f", ctrl=True)
                 keyboard.key("a", ctrl=True)
-                copy("kept")
+                copy(SENTENCE + " Designed for Linux and macOS. Made for your keyboard.")
+                keyboard.key(0xFF0D)
+                time.sleep(0.5)
                 keyboard.key(0xFF1B)
+                keyboard.key("j", shift=True)
+                wait_for(lambda: saved(lambda book: book["page"] == 1), "leave the selected phrase page")
+                keyboard.key("n")
+                wait_for(lambda: saved(lambda book: book["page"] == 0), "selected multiline phrase finds the original page")
                 keyboard.key("j", shift=True)
                 wait_for(lambda: saved(lambda book: book["page"] == 1), "second page for Select All")
                 keyboard.key("a", ctrl=True)
@@ -153,7 +160,7 @@ def run(binary):
                 clicks((382, 138), 3)
                 copy(fixture["TEXT"])
                 keyboard.key(0xFF1B)
-                print("PASS: same-frame Select All/Copy before text arrives, repeat/glyph reset, rotated/current-page full text, page-change cancellation, word/line drags, long Unicode glyph mappings, clipboard, preserved zoom and search input/prefill guards")
+                print("PASS: same-frame Select All/Copy before text arrives, repeat/glyph reset, rotated/current-page full text, page-change cancellation, word/line drags, long Unicode glyph mappings, clipboard, preserved zoom and multiline search prefill")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

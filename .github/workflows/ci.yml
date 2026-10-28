@@ -68,7 +68,7 @@ jobs:
               marks comment-navigation
           - shard: 2
             tests: >-
-              search-options percentage bookmarks link-copy link-hints
+              search-options search-phrases percentage bookmarks link-copy link-hints
               search-dense outline-keyboard search-load help comments
           - shard: 3
             tests: >-

@@ -1,13 +1,20 @@
 // Explicit paths also let standalone search benchmarks reuse this module.
 #[path = "text/boundaries.rs"]
 mod boundaries;
+#[path = "text/query.rs"]
+mod query;
 #[path = "text/search_index.rs"]
 mod search_index;
 #[path = "text/snippet.rs"]
 mod snippet;
 #[path = "text/span.rs"]
 mod span;
+pub use query::SearchQuery;
 pub use span::TextSpan;
+
+#[cfg(test)]
+#[path = "text/phrase_tests.rs"]
+mod phrase_tests;
 
 use boundaries::WordBoundaries;
 use hayro::{
@@ -31,31 +38,6 @@ pub struct SearchOptions {
     pub whole_word: bool,
 }
 
-pub struct SearchQuery {
-    matcher: memchr::memmem::Finder<'static>,
-    options: SearchOptions,
-}
-
-impl SearchQuery {
-    pub fn new(query: String, options: SearchOptions) -> Self {
-        let needle = if query.trim().is_empty() {
-            String::new()
-        } else if options.match_case {
-            query
-        } else {
-            caseless::default_case_fold_str(&query)
-        };
-        Self {
-            matcher: memchr::memmem::Finder::new(needle.as_bytes()).into_owned(),
-            options,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.matcher.needle().is_empty()
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct PageText {
     pub text: String,
@@ -77,6 +59,7 @@ pub struct SearchHit {
 #[derive(Default)]
 pub struct SearchCursor {
     offset: usize,
+    accepted_end: usize,
     previous: Option<(usize, usize)>,
 }
 
@@ -290,20 +273,34 @@ impl PageText {
         cursor: &mut SearchCursor,
         limit: usize,
     ) -> SearchBatch {
+        if query.is_phrase() {
+            self.search_batch_mode::<true>(page, query, cursor, limit)
+        } else {
+            self.search_batch_mode::<false>(page, query, cursor, limit)
+        }
+    }
+
+    fn search_batch_mode<const PHRASE: bool>(
+        &self,
+        page: usize,
+        query: &SearchQuery,
+        cursor: &mut SearchCursor,
+        limit: usize,
+    ) -> SearchBatch {
         if let [byte] = query.matcher.needle() {
             // Specialize once per batch; keep the byte iterator's scan state
             // without checking the matcher kind for each dense one-letter hit.
-            self.search_batch_using(page, query, cursor, limit, |bytes, base| {
+            self.search_batch_using::<PHRASE, _>(page, query, cursor, limit, |bytes, base| {
                 memchr::memchr_iter(*byte, &bytes[base..])
             })
         } else {
-            self.search_batch_using(page, query, cursor, limit, |bytes, base| {
+            self.search_batch_using::<PHRASE, _>(page, query, cursor, limit, |bytes, base| {
                 query.matcher.find_iter(&bytes[base..])
             })
         }
     }
 
-    fn search_batch_using<'haystack, I: Iterator<Item = usize>>(
+    fn search_batch_using<'haystack, const PHRASE: bool, I: Iterator<Item = usize>>(
         &'haystack self,
         page: usize,
         query: &SearchQuery,
@@ -330,10 +327,12 @@ impl PageText {
         // The same prepared UTF-8 needle serves every page, batch and rejected
         // whole-word restart. Nonempty valid UTF-8 matches stay on boundaries.
         let matched_len = query.matcher.needle().len();
+        let anchor_starts_phrase = PHRASE && query.anchor_starts_phrase();
+        let restart_rejected = !PHRASE || query.restart_rejected();
         let mut matches = matches_for(bytes, base);
         let mut hits = Vec::new();
         let mut candidates = 0;
-        // Bound both emitted hits and rejected whole-word candidates per job.
+        // Bound emitted hits, rejected phrases and whole-word candidates per job.
         while hits.len() < limit && candidates < 4096 {
             let Some(relative) = matches.next() else {
                 cursor.offset = haystack.len();
@@ -341,16 +340,43 @@ impl PageText {
             };
             candidates += 1;
             let offset = base + relative;
-            let matched_end = offset + matched_len;
+            let starts_word = !anchor_starts_phrase
+                || boundaries.is_none_or(|boundaries| {
+                    let source_start = index.map_or(offset, |index| {
+                        index
+                            .source_range(&self.text, offset..offset + matched_len)
+                            .start
+                    });
+                    boundaries.contains(source_start)
+                });
+            // Specialize once per batch so single-term searches keep their
+            // direct literal matching loop without per-hit phrase checks.
+            let matched = if PHRASE {
+                starts_word
+                    .then(|| query.match_range(haystack, offset))
+                    .flatten()
+                    .filter(|range| range.start >= cursor.accepted_end)
+            } else {
+                Some(offset..offset + matched_len)
+            };
+            let Some(matched) = matched else {
+                cursor.offset = offset + haystack[offset..].chars().next().unwrap().len_utf8();
+                if restart_rejected {
+                    base = cursor.offset;
+                    matches = matches_for(bytes, base);
+                }
+                continue;
+            };
+            let matched_end = matched.end;
             cursor.offset = matched_end;
             // A partial case-fold expansion is not an entire word (s != ß).
             let partial_expansion = boundaries.is_some()
-                && index.is_some_and(|index| index.partial_expansion(offset..matched_end));
+                && index.is_some_and(|index| index.partial_expansion(matched.clone()));
             let (start, end) = if let Some(index) = index {
-                let range = index.source_range(&self.text, offset..matched_end);
+                let range = index.source_range(&self.text, matched.clone());
                 (range.start, range.end)
             } else {
-                (offset, matched_end)
+                (matched.start, matched_end)
             };
             if partial_expansion
                 || boundaries.is_some_and(|boundaries| {
@@ -358,10 +384,19 @@ impl PageText {
                 })
             {
                 // Rejected candidates may overlap a later valid phrase.
-                base = offset + haystack[offset..].chars().next().unwrap().len_utf8();
-                cursor.offset = base;
-                matches = matches_for(bytes, base);
+                cursor.offset = offset + haystack[offset..].chars().next().unwrap().len_utf8();
+                if restart_rejected {
+                    base = cursor.offset;
+                    matches = matches_for(bytes, base);
+                }
                 continue;
+            }
+            if PHRASE {
+                cursor.accepted_end = matched_end;
+                // The anchor can precede the end of the phrase. Resume after
+                // the complete accepted match to keep results non-overlapping.
+                base = matched_end;
+                matches = matches_for(bytes, base);
             }
             if cursor.previous == Some((start, end)) {
                 continue;

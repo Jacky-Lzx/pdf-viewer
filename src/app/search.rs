@@ -59,9 +59,8 @@ impl Pagewing {
         let selected = self
             .selection
             .selected_text()
-            .map(str::trim)
-            .filter(|text| !text.is_empty() && !text.contains(['\n', '\r']))
-            .map(str::to_owned);
+            .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|text| !text.is_empty());
         self.recent_picker = None;
         self.nav.clear_prefix();
         self.hints.cancel();
@@ -264,6 +263,53 @@ mod tests {
         }
         app.pan = egui::vec2(40.0, 80.0);
         (app, context)
+    }
+
+    #[test]
+    fn find_prefills_multiline_selection_without_changing_text_or_search_options() {
+        use crate::text::{PageText, SearchOptions, SearchQuery};
+        use std::sync::Arc;
+
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        let original = " \tStraße\r\n  中文\u{a0}reader \n";
+        let mut text = PageText::default();
+        text.text = original.into();
+        let text = Arc::new(text);
+        app.selection.set_text(text.clone());
+        app.selection.select_all();
+        app.query = "previous query".into();
+        app.library.search_options = SearchOptions {
+            match_case: true,
+            whole_word: true,
+        };
+        let revision = app.revision;
+        let mut find = key(Key::F);
+        for event in &mut find {
+            if let Event::Key { modifiers, .. } = event {
+                *modifiers = Modifiers::COMMAND;
+            }
+        }
+        frame(&mut app, &context, find);
+        assert_eq!(app.query, "Straße 中文 reader");
+        assert!(app.search_open);
+        assert_eq!(app.revision, revision + 1);
+        assert!(app.library.search_options.match_case && app.library.search_options.whole_word);
+        assert_eq!(text.text, original);
+        assert!(app.selection.selected_text().is_none());
+        assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
+        let query = SearchQuery::new(app.query.clone(), app.library.search_options);
+        assert_eq!(text.search_with(2, &query).len(), 1);
+        frame(&mut app, &context, key(Key::Enter));
+        assert_eq!(app.pending_search_jump, Some((false, 1)));
+
+        let mut blank = PageText::default();
+        blank.text = " \n\r\t\u{a0}".into();
+        app.selection.set_text(Arc::new(blank));
+        app.selection.select_all();
+        app.find();
+        assert_eq!(app.query, "Straße 中文 reader");
+        assert_eq!(app.revision, revision + 1);
     }
 
     #[test]

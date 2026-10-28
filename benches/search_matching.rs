@@ -79,6 +79,24 @@ fn main() {
             200,
             50,
         ),
+        (
+            "Single-line phrase",
+            "Rust PDF reader, built for long documents.\n",
+            50,
+            "built for long",
+            false,
+            200,
+            50,
+        ),
+        (
+            "Cross-line phrase",
+            "Rust PDF reader, built\r\n  for\tlong documents.\n",
+            50,
+            "built for long",
+            false,
+            200,
+            50,
+        ),
         ("Rejected words", "ba a ", 5000, "a a", true, 200, 0),
     ] {
         let mut page = PageText::default();
