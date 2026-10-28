@@ -11,6 +11,7 @@ mod destination;
 mod document;
 mod document_bytes;
 mod document_info;
+mod fifo_cache;
 mod file_watch;
 mod fonts;
 mod geometry;

@@ -2,7 +2,7 @@
 //! Entries belong to one immutable comments/page-label snapshot. The UI clears
 //! the cache whenever that snapshot is replaced, before indices can be reused.
 use crate::annotations::{Comment, ReviewStatus};
-use std::collections::{HashMap, VecDeque};
+use crate::fifo_cache::FifoCache;
 
 const CARD_LIMIT: usize = 128;
 type Key = (usize, bool);
@@ -58,14 +58,13 @@ pub fn card_lines(comment: &Comment, page_name: String, matched: bool) -> [Strin
 
 #[derive(Default)]
 pub struct CardTextCache {
-    entries: HashMap<Key, [String; 3]>,
-    order: VecDeque<Key>,
+    cache: FifoCache<Key, [String; 3], CARD_LIMIT>,
 }
 
 impl CardTextCache {
     /// Release strings and index storage when comments or page labels change.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        self.cache.clear();
     }
 
     /// Cache only recently encountered cards, independent of document length.
@@ -77,18 +76,7 @@ impl CardTextCache {
         matched: bool,
         create: impl FnOnce() -> [String; 3],
     ) -> &[String; 3] {
-        let key = (index, matched);
-        if self.entries.len() == CARD_LIMIT && !self.entries.contains_key(&key) {
-            let oldest = self
-                .order
-                .pop_front()
-                .expect("a full cache has an oldest card");
-            self.entries.remove(&oldest);
-        }
-        self.entries.entry(key).or_insert_with(|| {
-            self.order.push_back(key);
-            create()
-        })
+        self.cache.get_or_insert_with((index, matched), create)
     }
 }
 
@@ -159,8 +147,6 @@ mod tests {
             cache.get_or_insert_with(index, true, || {
                 [index.to_string(), String::new(), String::new()]
             });
-            assert!(cache.entries.len() <= CARD_LIMIT);
-            assert_eq!(cache.order.len(), cache.entries.len());
         }
         for _ in 0..3 {
             for index in 10_000 - CARD_LIMIT..10_000 {
@@ -175,16 +161,38 @@ mod tests {
                 [0],
             "rebuilt"
         );
-        assert_eq!(cache.entries.len(), CARD_LIMIT);
     }
 
     #[test]
-    fn clearing_releases_storage_before_comment_indices_are_reused() {
+    fn failed_card_preparation_keeps_resident_cards_and_eviction_usable() {
+        let mut cache = CardTextCache::default();
+        for index in 0..CARD_LIMIT {
+            cache.get_or_insert_with(index, true, || {
+                [index.to_string(), String::new(), String::new()]
+            });
+        }
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            cache.get_or_insert_with(CARD_LIMIT, true, || panic!("preparation failed"));
+        }));
+        assert!(failure.is_err());
+        for index in 0..CARD_LIMIT {
+            assert_eq!(
+                cache.get_or_insert_with(index, true, || panic!("resident card evicted"))[0],
+                index.to_string()
+            );
+        }
+        for index in CARD_LIMIT..10_000 {
+            cache.get_or_insert_with(index, true, || {
+                [index.to_string(), String::new(), String::new()]
+            });
+        }
+    }
+
+    #[test]
+    fn clearing_rebuilds_text_before_comment_indices_are_reused() {
         let mut cache = CardTextCache::default();
         cache.get_or_insert_with(0, true, || card_lines(&comment(), "iv · 4".into(), true));
         cache.clear();
-        assert_eq!(cache.entries.capacity(), 0);
-        assert_eq!(cache.order.capacity(), 0);
         let mut replacement = comment();
         replacement.contents = "Replacement snapshot".into();
         assert_eq!(

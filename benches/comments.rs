@@ -20,6 +20,9 @@ mod pdf_string;
 #[allow(dead_code, unused_imports)]
 #[path = "../src/comment_cards.rs"]
 mod comment_cards;
+#[allow(dead_code, unused_imports)]
+#[path = "../src/fifo_cache.rs"]
+mod fifo_cache;
 
 use annotations::{Comment, CommentId, Comments};
 use comment_cards::{CardTextCache, card_lines};

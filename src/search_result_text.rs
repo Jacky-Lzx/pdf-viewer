@@ -1,10 +1,7 @@
 //! Bounded presentation text for one append-only search/page-label snapshot.
+use crate::fifo_cache::FifoCache;
 use eframe::egui::{self, Color32, FontId, TextFormat, text::LayoutJob};
-use std::{
-    collections::{HashMap, VecDeque},
-    ops::Range,
-    sync::Arc,
-};
+use std::{ops::Range, sync::Arc};
 
 const RESULT_LIMIT: usize = 128;
 
@@ -61,15 +58,15 @@ pub fn result_label(
 
 #[derive(Default)]
 pub struct ResultTextCache {
-    entries: HashMap<usize, Arc<LayoutJob>>,
-    order: VecDeque<usize>,
+    cache: FifoCache<usize, Arc<LayoutJob>, RESULT_LIMIT>,
     style: Option<(FontId, Color32)>,
 }
 
 impl ResultTextCache {
     /// Indices belong to one query/document. Release all storage at that boundary.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        self.cache.clear();
+        self.style = None;
     }
 
     pub fn set_style(&mut self, font: FontId, highlight: Color32) {
@@ -86,17 +83,7 @@ impl ResultTextCache {
         index: usize,
         create: impl FnOnce() -> LayoutJob,
     ) -> Arc<LayoutJob> {
-        if self.entries.len() == RESULT_LIMIT && !self.entries.contains_key(&index) {
-            let oldest = self
-                .order
-                .pop_front()
-                .expect("a full cache has an oldest result");
-            self.entries.remove(&oldest);
-        }
-        Arc::clone(self.entries.entry(index).or_insert_with(|| {
-            self.order.push_back(index);
-            Arc::new(create())
-        }))
+        Arc::clone(self.cache.get_or_insert_with(index, || Arc::new(create())))
     }
 }
 
@@ -161,21 +148,20 @@ mod tests {
         ));
         for index in 1..10_000 {
             cache.get_or_insert_with(index, label);
-            assert!(cache.entries.len() <= RESULT_LIMIT);
-            assert_eq!(cache.entries.len(), cache.order.len());
         }
         for index in 10_000 - RESULT_LIMIT..10_000 {
             cache.get_or_insert_with(index, || panic!("visible result evicted"));
         }
+        let before = cache.get_or_insert_with(9999, || panic!("resident lost"));
         cache.set_style(FontId::proportional(24.0), Color32::YELLOW);
-        assert!(cache.entries.is_empty());
-        cache.get_or_insert_with(0, label);
+        let resized = cache.get_or_insert_with(9999, label);
+        assert!(!Arc::ptr_eq(&before, &resized));
         cache.set_style(FontId::proportional(24.0), Color32::GOLD);
-        assert!(cache.entries.is_empty());
-        cache.get_or_insert_with(0, label);
+        let recolored = cache.get_or_insert_with(9999, label);
+        assert!(!Arc::ptr_eq(&resized, &recolored));
+        let released = Arc::downgrade(&cache.get_or_insert_with(0, label));
         cache.clear();
-        assert_eq!(cache.entries.capacity(), 0);
-        assert_eq!(cache.order.capacity(), 0);
+        assert!(released.upgrade().is_none());
         assert!(cache.style.is_none());
         // Eviction must not invalidate a job still held by a rendered widget.
         assert_eq!(first.text, "iv · 4   前 Straße 后");

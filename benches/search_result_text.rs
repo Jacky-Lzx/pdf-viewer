@@ -1,6 +1,9 @@
 #[path = "support/allocations.rs"]
 mod allocation_counter;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/fifo_cache.rs"]
+mod fifo_cache;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/search_result_text.rs"]
 mod search_result_text;
 
