@@ -67,7 +67,7 @@ pub(super) struct CommentUi {
     pub filter_motions: Vec<crate::list_navigation::Motion>,
     pub filter_confirm: bool,
     filter_navigation: Option<filtering::FilterNavigation>,
-    filter_input: Vec<egui::Event>,
+    pub(super) filter_input: std::collections::VecDeque<egui::Event>,
     region: Option<(egui::LayerId, egui::Rect)>,
 }
 
@@ -75,7 +75,7 @@ impl CommentUi {
     pub fn set_comments(&mut self, comments: Comments) {
         if self.loaded {
             self.clear_filter_navigation();
-            self.filter_input = Vec::new();
+            self.filter_input = Default::default();
         }
         self.view.set_comments(&comments);
         self.cards.clear();
@@ -156,7 +156,7 @@ impl Pagewing {
         self.comments.open = open;
         if !open {
             self.comments.clear_filter_navigation();
-            self.comments.filter_input = Vec::new();
+            self.comments.filter_input = Default::default();
         }
         // Consume final text before hiding the panel, just as for a queued save.
         let pending = self.pending_comment_input(context);

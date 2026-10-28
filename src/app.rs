@@ -5,6 +5,7 @@ mod config;
 mod continuous;
 mod dialog;
 mod errors;
+mod focus_input;
 mod help;
 mod history_controls;
 mod input_dialogs;
@@ -124,6 +125,7 @@ pub struct Pagewing {
     render_ms: f64,
     dialog: Option<Receiver<Option<PathBuf>>>,
     deferred_input: Vec<egui::Event>,
+    focus_input: std::collections::VecDeque<egui::Event>,
     reader_actions: Vec<crate::input_actions::ReaderAction>,
     search_open: bool,
     search_focus: bool,
@@ -295,6 +297,7 @@ impl Pagewing {
             render_ms: 0.0,
             dialog: None,
             deferred_input: Vec::new(),
+            focus_input: Default::default(),
             reader_actions: Vec::new(),
             search_open: false,
             search_focus: false,
@@ -1433,7 +1436,7 @@ impl Pagewing {
 
 impl eframe::App for Pagewing {
     fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
-        self.prepare_comment_input(context, input);
+        self.prepare_native_input(context, input);
     }
 
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {

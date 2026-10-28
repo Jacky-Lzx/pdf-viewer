@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ def run(binary):
         keyboard = Keyboard()
         keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                               ctypes.c_uint, ctypes.c_uint]
+        keyboard.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -47,9 +49,21 @@ def run(binary):
                 for char in value:
                     keyboard.key(char)
 
-            def traverse(tabs):
-                for _ in range(tabs):
-                    keyboard.key(TAB)
+            def traverse(tabs, reverse=0, activation=None):
+                # Real busy frames can receive several focus keys at once.
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    _, status = os.waitpid(application.pid, os.WUNTRACED)
+                    assert os.WIFSTOPPED(status), "reader must stop before queuing Tabs"
+                    for _ in range(tabs):
+                        keyboard.key(TAB, delay=0)
+                    for _ in range(reverse):
+                        keyboard.key(TAB, shift=True, delay=0)
+                    if activation is not None:
+                        keyboard.key(activation, delay=0)
+                    keyboard.x11.XSync(keyboard.display, False)
+                finally:
+                    application.send_signal(signal.SIGCONT)
 
             def resize(size):
                 keyboard.x11.XResizeWindow(keyboard.display, window, *size)
@@ -76,6 +90,16 @@ def run(binary):
                 traverse(5)  # Apply.
                 resize_focused_action()
                 keyboard.key(ENTER)
+                expect(0, 1.75)
+
+                keyboard.key("z", ctrl=True, alt=True)
+                text("225")
+                traverse(5, activation=SPACE)
+                expect(0, 2.25)
+
+                keyboard.key("z", ctrl=True, alt=True)
+                text("175")
+                traverse(6, reverse=1, activation=ENTER)
                 expect(0, 1.75)
 
                 keyboard.key("z", ctrl=True, alt=True)
@@ -125,7 +149,8 @@ def run(binary):
                 expect(2, 1.75)
                 assert application.poll() is None
                 print("PASS: all zoom presets, Apply, Cancel, page Go/Cancel and help Copy/Close "
-                      "with matching/empty results retain keyboard focus "
+                      "with matching/empty results retain keyboard focus after batched Tabs; "
+                      "reverse Tabs and activation in the same burst keep their order "
                       "through minimum, wide-short, narrow-tall and restored windows; Enter/Space "
                       "activate the original action and release dialog focus")
             except Exception:
@@ -135,6 +160,8 @@ def run(binary):
                 print(book(), file=sys.stderr)
                 raise
             finally:
+                if application.poll() is None:
+                    application.send_signal(signal.SIGCONT)
                 application.terminate()
                 try:
                     application.wait(timeout=5)
