@@ -1,4 +1,4 @@
-use eframe::egui::{Event, Id, InputState, Key, Modifiers, Ui};
+use eframe::egui::{self, Event, Id, InputState, Key, Modifiers, Ui, Vec2};
 
 /// Keep document shortcuts out of egui's whole-UI zoom. Wheel zoom uses Alt
 /// (Option on macOS); native touchpad pinch events remain independent.
@@ -7,6 +7,36 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
         options.zoom_with_keyboard = false;
         options.input_options.zoom_modifier = Modifiers::ALT;
     });
+}
+
+/// Reveal focus transitions and viewport changes without undoing manual scroll.
+pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
+    if ui.is_sizing_pass() {
+        return;
+    }
+    let state_id = ui.id().with("focused-control");
+    let state = (ui.memory(|memory| memory.focused()), viewport);
+    let previous = ui.data_mut(|data| {
+        let previous = data.get_temp::<(Option<Id>, Vec2)>(state_id);
+        data.insert_temp(state_id, state);
+        previous
+    });
+    if previous != Some(state)
+        && let Some(id) = state.0
+    {
+        let response = {
+            // Reading geometry also processes outside clicks. Keep explicit
+            // input focus while inspecting a control from another scope.
+            let _focus = preserve_pointer_focus(ui.ctx());
+            ui.ctx().read_response(id)
+        };
+        if let Some(response) = response
+            && response.layer_id == ui.layer_id()
+            && ui.min_rect().contains_rect(response.rect)
+        {
+            response.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

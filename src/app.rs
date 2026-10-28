@@ -20,6 +20,7 @@ mod status;
 mod sync;
 mod tiles;
 mod toolbar;
+mod welcome;
 mod zoom;
 
 use crate::{
@@ -33,7 +34,7 @@ use crate::{
     text::SearchHit,
     worker::{Event, Worker},
 };
-use eframe::egui::{self, Color32, Key, RichText, Vec2};
+use eframe::egui::{self, Color32, Key, Vec2};
 use std::{
     path::PathBuf,
     sync::{
@@ -1049,6 +1050,18 @@ impl Pagewing {
             };
             let raw_key = key;
             let raw_modifiers = modifiers;
+            if self.nav.count == 0
+                && !typing
+                && !(self.help || self.properties_open || popup_open)
+                && !modifiers.command
+                && !modifiers.ctrl
+                && !modifiers.alt
+                && (key == Key::Tab || (!modifiers.shift && matches!(key, Key::Enter | Key::Space)))
+            {
+                // Welcome controls use normal focus traversal and activation,
+                // including when the reader's sidebar binding is disabled.
+                continue;
+            }
             if key == Key::Tab && self.search_open && self.input_buttons.search_has_focus(context) {
                 // Tab traverses the search controls while they own focus.
                 // In the reader it retains its sidebar-toggle binding.
@@ -2217,181 +2230,6 @@ impl Pagewing {
         if copied {
             self.notify("Copied link address");
         }
-    }
-
-    fn welcome(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .id_salt("welcome")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let width = (ui.available_width() - 40.0).clamp(160.0, 460.0);
-                ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() * 0.10).clamp(24.0, 80.0));
-                    appearance::logo(ui, 68.0);
-                    ui.add_space(18.0);
-                    appearance::section(ui, "P A G E W I N G");
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("A little room to read.").size(32.0).strong());
-                    ui.add_space(8.0);
-                    ui.weak("Your documents. A quieter place to focus.");
-                    ui.add_space(24.0);
-                    if self.loading {
-                        ui.spinner();
-                        ui.label("Opening document…");
-                    } else if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new("Open a document")
-                                    .color(Color32::WHITE)
-                                    .strong(),
-                            )
-                            .fill(ACCENT)
-                            .corner_radius(10)
-                            .min_size(Vec2::new(200.0, 44.0)),
-                        )
-                        .clicked()
-                    {
-                        self.choose_file();
-                    }
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "Drop a PDF here  ·  {}",
-                            self.library.shortcuts.label("open")
-                        ))
-                        .small()
-                        .weak(),
-                    );
-                    ui.add_space(36.0);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(width, 0.0),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_width(width);
-                            if self.library.recent.is_empty() {
-                                ui.separator();
-                                ui.add_space(12.0);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.weak("Made for your keyboard");
-                                    ui.label(
-                                        RichText::new("j / k")
-                                            .monospace()
-                                            .color(appearance::accent(ui)),
-                                    );
-                                    ui.weak("scroll");
-                                    ui.label(
-                                        RichText::new("/")
-                                            .monospace()
-                                            .color(appearance::accent(ui)),
-                                    );
-                                    ui.weak("find");
-                                    ui.label(
-                                        RichText::new("?")
-                                            .monospace()
-                                            .color(appearance::accent(ui)),
-                                    );
-                                    ui.weak("shortcuts");
-                                });
-                                return;
-                            }
-                            appearance::section(ui, "CONTINUE READING");
-                            ui.add_space(6.0);
-                            let mut open = None;
-                            for (index, item) in self.library.recent.iter().take(4).enumerate() {
-                                let name =
-                                    item.path.file_name().unwrap_or_default().to_string_lossy();
-                                let row = egui::Frame::new()
-                                    .fill(ui.visuals().panel_fill)
-                                    .corner_radius(10)
-                                    .inner_margin(14)
-                                    .show(ui, |ui| {
-                                        ui.set_width((width - 28.0).max(0.0));
-                                        ui.horizontal(|ui| {
-                                            let (rect, _) = ui.allocate_exact_size(
-                                                Vec2::new(28.0, 32.0),
-                                                egui::Sense::hover(),
-                                            );
-                                            let color = appearance::accent(ui);
-                                            ui.painter().rect_stroke(
-                                                rect.shrink2(Vec2::new(5.0, 2.0)),
-                                                3.0,
-                                                egui::Stroke::new(1.3_f32, color),
-                                                egui::StrokeKind::Inside,
-                                            );
-                                            for offset in [11.0, 16.0, 21.0] {
-                                                ui.painter().line_segment(
-                                                    [
-                                                        rect.min + Vec2::new(10.0, offset),
-                                                        rect.min + Vec2::new(18.0, offset),
-                                                    ],
-                                                    egui::Stroke::new(1.0_f32, color),
-                                                );
-                                            }
-                                            ui.vertical(|ui| {
-                                                ui.set_width((width - 80.0).max(0.0));
-                                                ui.add(
-                                                    egui::Label::new(RichText::new(name).strong())
-                                                        .truncate(),
-                                                );
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "Page {}  ·  Resume reading",
-                                                        item.page + 1
-                                                    ))
-                                                    .small()
-                                                    .weak(),
-                                                );
-                                            });
-                                        });
-                                    });
-                                let response = ui
-                                    .interact(
-                                        row.response.rect,
-                                        ui.id().with(("recent", index)),
-                                        egui::Sense::click(),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text(item.path.display().to_string());
-                                response.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Button,
-                                        true,
-                                        item.path.display().to_string(),
-                                    )
-                                });
-                                if response.hovered() || response.has_focus() {
-                                    ui.painter().rect_stroke(
-                                        row.response.rect,
-                                        10.0,
-                                        egui::Stroke::new(1.0_f32, appearance::accent(ui)),
-                                        egui::StrokeKind::Inside,
-                                    );
-                                }
-                                if response.clicked() {
-                                    open = Some(item.path.clone());
-                                }
-                            }
-                            if let Some(path) = open {
-                                self.open(path, ui.ctx());
-                            }
-                            ui.add_space(6.0);
-                            if ui
-                                .add(
-                                    egui::Button::new(format!(
-                                        "All recent documents  ·  {}",
-                                        self.library.shortcuts.label("recent")
-                                    ))
-                                    .frame(false),
-                                )
-                                .clicked()
-                            {
-                                self.toggle_recent(ui.ctx());
-                            }
-                        },
-                    );
-                    ui.add_space(30.0);
-                });
-            });
     }
 
     fn dialogs(&mut self, context: &egui::Context) {

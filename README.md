@@ -294,6 +294,8 @@ night = []                 # 停用该动作的快捷键
 
 `Ctrl/Cmd+p` 从最近 24 份文档中按文件名或完整路径筛选，支持 Unicode 大小写折叠与空格分隔的多个关键词。在筛选框中用方向键或 `Ctrl+j/k` 选择，回车、双击或 Open 按钮打开并恢复该文档的阅读位置。调整窗口大小后，列表会重新显露选中项，保留筛选内容；平时可自由滚动列表。也可用 Tab 聚焦结果、Open 或 Cancel，按 Enter 激活当前控件。再次按快捷键、`Escape` 或 Cancel 关闭；筛选时输入不会触发页面导航。欢迎界面也提供入口。
 
+欢迎页支持用 Tab / Shift+Tab 聚焦打开按钮、最近文档卡片和完整最近列表入口，按 Enter 或空格激活。焦点变化或调整窗口大小时会滚动显露当前控件，240×240 窗口也可操作；普通重绘会保留手动滚动的位置。
+
 ## 性能设计
 
 - PDF 加载、渲染、文本提取和搜索均放在后台线程，UI 通过事件唤醒。目录标题、文档信息和页码前缀按保留长度解码，避免为截掉的后缀创建临时字符串；UTF-16 直接读取字节，普通 ASCII 前缀直接复制，特殊 PDFDocEncoding 字节继续按编码表转换。
@@ -414,6 +416,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py ta
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-persistence.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-paths.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-welcome.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-close.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-load-cancel.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py target/release/pagewing

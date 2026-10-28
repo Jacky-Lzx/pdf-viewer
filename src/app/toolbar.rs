@@ -269,31 +269,7 @@ pub(super) fn horizontal_bar<R>(
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             ui.horizontal_centered(|ui| {
                 let inner = contents(ui);
-                let state_id = ui.id().with("focused-control");
-                let state = (ui.memory(|memory| memory.focused()), ui.clip_rect().width());
-                let previous = ui.data_mut(|data| {
-                    let previous = data.get_temp::<(Option<egui::Id>, f32)>(state_id);
-                    data.insert_temp(state_id, state);
-                    previous
-                });
-                // Reveal a newly focused control or preserve it across a
-                // resize. Do not undo a user's subsequent wheel/drag scroll.
-                if previous != Some(state)
-                    && let Some(id) = state.0
-                {
-                    let response = {
-                        // read_response also processes outside clicks. Inspect
-                        // geometry without undoing an input's explicit focus.
-                        let _focus = super::shortcuts::preserve_pointer_focus(ui.ctx());
-                        ui.ctx().read_response(id)
-                    };
-                    if let Some(response) = response
-                        && response.layer_id == ui.layer_id()
-                        && ui.min_rect().contains_rect(response.rect)
-                    {
-                        response.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
-                    }
-                }
+                shortcuts::reveal_focused_control(ui, egui::vec2(ui.clip_rect().width(), 0.0));
                 inner
             })
             .inner
