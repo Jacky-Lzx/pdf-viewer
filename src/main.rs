@@ -37,6 +37,7 @@ mod pdf_objects;
 mod pdf_string;
 mod recent;
 mod render_plan;
+mod search_navigation;
 mod search_result_text;
 mod selection;
 mod selection_index;

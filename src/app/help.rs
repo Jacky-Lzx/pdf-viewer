@@ -79,7 +79,7 @@ impl Pagewing {
         self.password_input = None;
         self.search_open = false;
         self.search_focus = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.help = true;
         self.help_filter.reset();
         self.help_filter.configure(&self.library.shortcuts);

@@ -20,7 +20,7 @@ impl Pagewing {
         self.page_input = None;
         self.password_input = None;
         self.search_open = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.recent_picker = Some(crate::recent::RecentPicker::new(
             self.library.recent.iter().map(|book| book.path.clone()),
         ));

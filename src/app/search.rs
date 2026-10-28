@@ -29,12 +29,13 @@ impl Pagewing {
             SearchButton::Copy => self.copy_search_requested = true,
             SearchButton::Close => {
                 self.search_open = false;
-                self.pending_search_jump = None;
+                self.search_navigation.clear();
             }
         }
     }
 
     pub(super) fn restart_search(&mut self) {
+        self.search_navigation.clear();
         self.copy_search_requested = false;
         self.revision += 1;
         self.hits.clear();
@@ -49,7 +50,6 @@ impl Pagewing {
     }
 
     pub(super) fn change_search(&mut self) {
-        self.pending_search_jump = None;
         self.restart_search();
         self.worker
             .search(self.revision, String::new(), self.library.search_options);
@@ -87,45 +87,42 @@ impl Pagewing {
     }
 
     pub(super) fn next_hits(&mut self, reverse: bool, count: usize) {
-        let count = count.max(1);
-        if self.hits.is_empty() {
-            self.pending_search_jump =
-                (!self.search_complete || self.search_due.is_some()).then_some((reverse, count));
-            return;
+        self.dispatch_search_jump(Some(crate::search_navigation::Jump::new(reverse, count)));
+    }
+
+    pub(super) fn resume_search_navigation(&mut self) {
+        self.dispatch_search_jump(None);
+    }
+
+    fn search_state(&self) -> crate::search_navigation::SearchState<'_> {
+        crate::search_navigation::SearchState {
+            hits: &self.hits,
+            selected: self.hit_index,
+            page: self.nav.page,
+            scanned: self.scanned,
+            complete: self.search_complete && self.search_due.is_none(),
         }
-        let (start, steps) = match self.hit_index {
-            Some(index) => (index, count),
-            None => match crate::text::initial_match(
-                &self.hits,
-                self.nav.page,
-                reverse,
-                self.scanned,
-                self.search_complete,
-            ) {
-                Some(index) => (index, count - 1),
-                None => {
-                    self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
-                    return;
-                }
-            },
-        };
-        let Some(index) = crate::text::advance_match(
-            start,
-            self.hits.len(),
-            reverse,
-            steps,
-            self.search_complete,
-        ) else {
-            self.pending_search_jump = (!self.search_complete).then_some((reverse, count));
-            return;
-        };
-        self.pending_search_jump = None;
-        self.select_hit(index);
+    }
+
+    fn dispatch_search_jump(&mut self, jump: Option<crate::search_navigation::Jump>) {
+        // Selecting a hit cancels external pending navigation. Keep this batch
+        // separate while its own page changes execute, then restore the tail.
+        let mut navigation = std::mem::take(&mut self.search_navigation);
+        if let Some(jump) = jump
+            && let Some(index) = navigation.request(jump, self.search_state())
+        {
+            self.select_hit(index);
+        }
+        while let Some(index) = navigation.next(self.search_state()) {
+            self.select_hit(index);
+        }
+        navigation.recycle();
+        self.search_navigation = navigation;
     }
 
     pub(super) fn select_hit(&mut self, index: usize) {
         let current = self.current_position();
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.hit_index = Some(index);
         self.reveal_hit = Some(index);
         let page = self.hits[index].page;
@@ -171,20 +168,14 @@ impl Pagewing {
                     }
                     // egui compares focus with the previous frame. Acquiring
                     // and releasing it with Enter in one frame is not lost_focus.
-                    if (response.lost_focus() || focused_now)
-                        && let Some(reverse) = ui.input(|input| {
-                            input.events.iter().find_map(|event| match event {
-                                egui::Event::Key {
-                                    key: Key::Enter,
-                                    pressed: true,
-                                    modifiers,
-                                    ..
-                                } => Some(modifiers.shift),
-                                _ => None,
-                            })
-                        })
-                    {
-                        self.next_hit(reverse);
+                    if response.lost_focus() || focused_now {
+                        ui.input(|input| {
+                            for event in &input.events {
+                                if let egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } = event {
+                                    self.next_hit(modifiers.shift);
+                                }
+                            }
+                        });
                     }
                     self.input_buttons.search_previous = Some(ui.button("Prev").id);
                     self.input_buttons.search_next = Some(ui.button("Next").id);
@@ -313,6 +304,109 @@ mod tests {
         (app, context)
     }
 
+    fn hits(pages: impl IntoIterator<Item = usize>) -> Vec<crate::text::SearchHit> {
+        pages
+            .into_iter()
+            .map(|page| crate::text::SearchHit {
+                page,
+                rects: Vec::new(),
+                snippet: "Rust".into(),
+                snippet_match: 0..4,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn batched_search_enters_preserve_every_direction_after_text_editing() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        app.query = "Rust".into();
+        app.hits = hits([0, 2, 4, 5]);
+        app.scanned = 6;
+        app.search_complete = true;
+        app.search_due = None;
+        let mut events = Vec::new();
+        for reverse in [false, true, false, false] {
+            let mut enter = key(Key::Enter);
+            if reverse {
+                for event in &mut enter {
+                    if let Event::Key { modifiers, .. } = event {
+                        *modifiers = Modifiers::SHIFT;
+                    }
+                }
+            }
+            events.extend(enter);
+        }
+        frame(&mut app, &context, events);
+        assert_eq!(app.query, "Rust");
+        assert_eq!(app.hit_index, Some(2));
+        assert_eq!(app.nav.page, 4);
+        assert!(app.search_navigation.first().is_none());
+        frame(&mut app, &context, Vec::new());
+        assert_eq!(
+            app.hit_index,
+            Some(2),
+            "idle frames must not replay submissions"
+        );
+    }
+
+    #[test]
+    fn pending_search_commands_resume_in_order_and_manual_navigation_cancels_the_tail() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.worker.events = receiver;
+        let send_batch = |id, revision, pages: &[usize], scanned, complete| {
+            sender
+                .send(crate::worker::Event::Search {
+                    id,
+                    revision,
+                    hits: hits(pages.iter().copied()),
+                    scanned,
+                    total: 6,
+                    complete,
+                    limited: false,
+                })
+                .unwrap();
+        };
+        app.query = "Rust".into();
+        app.search_due = None;
+        app.search_complete = false;
+        for reverse in [true, false, false] {
+            app.next_hit(reverse);
+        }
+        assert_eq!(app.search_navigation.first(), Some((true, 1)));
+        send_batch(app.id + 1, app.revision, &[5], 6, true);
+        send_batch(app.id, app.revision + 1, &[5], 6, true);
+        app.events(&context);
+        assert!(
+            app.hits.is_empty(),
+            "other document/query batches must not resume this queue"
+        );
+        assert_eq!(app.search_navigation.first(), Some((true, 1)));
+        send_batch(app.id, app.revision, &[0, 2], 3, false);
+        app.events(&context);
+        assert_eq!(app.hit_index, Some(1));
+        assert_eq!(app.search_navigation.first(), Some((false, 1)));
+        send_batch(app.id, app.revision, &[4, 5], 6, true);
+        app.events(&context);
+        assert_eq!(app.hit_index, Some(3));
+        assert_eq!(app.nav.page, 5);
+        assert!(app.search_navigation.first().is_none());
+
+        app.search_complete = false;
+        app.next_hit(false);
+        assert!(app.search_navigation.first().is_some());
+        app.jump(0);
+        send_batch(app.id, app.revision, &[], 6, true);
+        app.events(&context);
+        assert_eq!(
+            app.nav.page, 0,
+            "manual page changes cancel pending search navigation"
+        );
+        assert!(app.search_navigation.first().is_none());
+    }
+
     #[test]
     fn find_prefills_multiline_selection_without_changing_text_or_search_options() {
         use crate::text::{PageText, SearchOptions, SearchQuery};
@@ -349,7 +443,7 @@ mod tests {
         let query = SearchQuery::new(app.query.clone(), app.library.search_options);
         assert_eq!(text.search_with(2, &query).len(), 1);
         frame(&mut app, &context, key(Key::Enter));
-        assert_eq!(app.pending_search_jump, Some((false, 1)));
+        assert_eq!(app.search_navigation.first(), Some((false, 1)));
 
         let mut blank = PageText::default();
         blank.text = " \n\r\t\u{a0}".into();
@@ -592,7 +686,7 @@ mod tests {
                     }
                     SearchButton::Close => {
                         assert!(!app.search_open);
-                        assert!(app.pending_search_jump.is_none());
+                        assert!(app.search_navigation.first().is_none());
                     }
                 }
                 if !matches!(action, SearchButton::Previous | SearchButton::Next) {
@@ -624,7 +718,7 @@ mod tests {
         frame(&mut app, &context, events);
         assert!(app.library.search_options.whole_word);
         assert_eq!(app.query, "Rust");
-        assert_eq!(app.pending_search_jump, Some((false, 1)));
+        assert_eq!(app.search_navigation.first(), Some((false, 1)));
         assert_eq!(app.nav.page, 2);
         assert_eq!(app.pan, before);
     }
@@ -651,7 +745,7 @@ mod tests {
         frame(&mut app, &context, events);
         assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
         frame(&mut app, &context, key(Key::Enter));
-        assert_eq!(app.pending_search_jump, Some((false, 1)));
+        assert_eq!(app.search_navigation.first(), Some((false, 1)));
         assert_eq!(app.query, "Rust");
     }
 }

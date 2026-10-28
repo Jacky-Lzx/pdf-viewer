@@ -13,7 +13,7 @@ impl Pagewing {
         self.mark_action = None;
         self.search_open = false;
         self.search_focus = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.library.sidebar = true;
         self.outline.focus = true;
         self.outline.reveal = true;

@@ -126,7 +126,7 @@ pub struct Pagewing {
     result_text: crate::search_result_text::ResultTextCache,
     hit_index: Option<usize>,
     reveal_hit: Option<usize>,
-    pending_search_jump: Option<(bool, usize)>,
+    search_navigation: crate::search_navigation::SearchNavigation,
     scanned: usize,
     scan_total: usize,
     search_complete: bool,
@@ -291,7 +291,7 @@ impl Pagewing {
             result_text: crate::search_result_text::ResultTextCache::default(),
             hit_index: None,
             reveal_hit: None,
-            pending_search_jump: None,
+            search_navigation: Default::default(),
             scanned: 0,
             scan_total: 0,
             search_complete: true,
@@ -477,7 +477,7 @@ impl Pagewing {
         self.pending_offset = None;
         self.pending_focus = None;
         self.reading.offset = [0.0; 2];
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.requested = None;
         self.dirty = true;
     }
@@ -531,7 +531,7 @@ impl Pagewing {
             return;
         }
         self.hints.cancel();
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         let mut offset = self.current_offset();
         offset[axis] = fraction;
         if self.reading.continuous && axis == 1 && self.overflow.y > 0.0 {
@@ -908,9 +908,7 @@ impl Pagewing {
                     self.scan_total = total;
                     self.search_complete = complete;
                     self.search_limited = limited;
-                    if let Some((reverse, count)) = self.pending_search_jump.take() {
-                        self.next_hits(reverse, count);
-                    }
+                    self.resume_search_navigation();
                 }
                 Event::Text { id, page, text } if id == self.id => {
                     if text.trim().is_empty() {
@@ -1222,7 +1220,7 @@ impl Pagewing {
         self.nav.clear_prefix();
         self.hints.cancel();
         self.selection.cancel();
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.pending_focus = None;
         self.pending_offset = None;
         self.reading.fit = destination.fit(

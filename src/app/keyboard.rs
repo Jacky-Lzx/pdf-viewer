@@ -376,7 +376,7 @@ impl Pagewing {
                 self.page_input = None;
                 self.search_open = false;
                 self.search_focus = false;
-                self.pending_search_jump = None;
+                self.search_navigation.clear();
                 self.password_input = None;
                 self.nav.clear_prefix();
                 context.memory_mut(|memory| {
@@ -632,7 +632,7 @@ impl Pagewing {
                         }
                     }
                 } else if matches!(key, Key::J | Key::K) {
-                    self.pending_search_jump = None;
+                    self.search_navigation.clear();
                     if let Some(page) = crate::navigation::bookmark_target(
                         &self.bookmark_pages,
                         self.nav.page,

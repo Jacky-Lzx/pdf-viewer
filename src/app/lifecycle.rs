@@ -86,7 +86,7 @@ impl Pagewing {
         self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.query = String::new();
         self.search_due = None;
         self.search_open = false;
@@ -168,7 +168,7 @@ impl Pagewing {
         self.error = None;
         self.hints.cancel();
         self.selection.cancel();
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         if self.reloading {
             self.worker
                 .reload(self.id, self.reading.path.clone(), String::new());

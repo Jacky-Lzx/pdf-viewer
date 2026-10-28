@@ -19,7 +19,7 @@ impl Pagewing {
         self.password_input = None;
         self.recent_picker = None;
         self.search_focus = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.properties_open = true;
         context.memory_mut(|memory| {
             if let Some(id) = memory.focused() {

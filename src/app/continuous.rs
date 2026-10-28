@@ -44,7 +44,7 @@ impl Pagewing {
             self.visible_links.clear();
             self.hints.cancel();
             self.requested = None;
-            self.pending_search_jump = None;
+            self.search_navigation.clear();
         }
         self.pan.y = offset;
         self.resolve_view();

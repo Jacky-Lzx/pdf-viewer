@@ -64,7 +64,7 @@ impl Pagewing {
         self.password_input = None;
         self.search_open = false;
         self.search_focus = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.page_input = Some(PageInput::default());
     }
 

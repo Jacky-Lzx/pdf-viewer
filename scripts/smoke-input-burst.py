@@ -111,6 +111,18 @@ def run(binary):
                 copy_query("native")
                 keyboard.key(ESCAPE)
 
+                # All three submissions are queued before the debounced search
+                # has results. The first/second/third Rust hits are on pages 1,
+                # 4 and 5; a single retained submission would stay on page 1.
+                burst([("f", {"ctrl": True}), ("a", {"ctrl": True})] + text("Rust") + [(ENTER, {})] * 3)
+                expect(paths[0], 4, "multiple same-frame Enter presses survive asynchronous search startup")
+                # Once results are ready, mixed directions still execute in
+                # their original order: 5 -> 4 -> 5 -> 4 -> 1.
+                burst([("f", {"ctrl": True}), (ENTER, {"shift": True}), (ENTER, {}),
+                       (ENTER, {"shift": True}), (ENTER, {"shift": True})])
+                expect(paths[0], 0, "mixed Enter and Shift+Enter retain their order in one frame")
+                keyboard.key(ESCAPE)
+
                 burst([(':', {"shift": True})] + text("2") + [(ENTER, {})])
                 expect(paths[0], 1, "return to a page between Rust matches")
                 burst([("f", {"ctrl": True}), ("a", {"ctrl": True})] + text("Rust") + [(ENTER, {"shift": True})])
@@ -144,7 +156,7 @@ def run(binary):
                 expect(paths[2], 1, "Escape cancels pending input focus before the next navigation key")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: same-frame count correction, pending g/z cancellation, bounded and empty counts, literal punctuation without fallback counts, search/page Backspace and punctuation isolation, search/replacement/Enter, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
+                print("PASS: same-frame count correction, pending g/z cancellation, bounded and empty counts, literal punctuation without fallback counts, search/page Backspace and punctuation isolation, search/replacement/Enter, ordered repeated and mixed-direction submissions across asynchronous startup, no navigation or preference leakage, page numbers/labels, recent filtering/open, dialog switching and Escape focus release")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

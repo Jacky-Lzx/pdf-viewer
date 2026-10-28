@@ -38,7 +38,7 @@ impl Pagewing {
         self.page_input = None;
         self.recent_picker = None;
         self.search_focus = false;
-        self.pending_search_jump = None;
+        self.search_navigation.clear();
         self.comments.focus = false;
         let value = (self.scale * 100.0).to_string();
         let mut state = egui::text_edit::TextEditState::default();
