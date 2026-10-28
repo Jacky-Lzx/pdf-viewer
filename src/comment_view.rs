@@ -1,5 +1,6 @@
 //! Cached comment navigation, independent of widget layout and PDF writing.
 use crate::annotations::{Comments, ReviewStatus};
+use caseless::Caseless;
 use std::collections::HashMap;
 
 const SEARCH_BYTES: usize = 8 * 1024 * 1024;
@@ -30,8 +31,11 @@ pub struct CommentView {
     retained: Vec<bool>,
     visible: Vec<CommentRow>,
     overlays: HashMap<usize, Vec<usize>>,
-    folded: Vec<Option<[String; 2]>>,
+    // Fields are prepared separately so an author-only match skips the body.
+    folded: Vec<[Option<String>; 2]>,
     folded_bytes: usize,
+    // Reuse temporary storage for fields that exceed the search cache budget.
+    scratch: [String; 2],
     applied: Option<(CommentFilter, Option<usize>)>,
     matches: usize,
     selected: Option<usize>,
@@ -54,8 +58,9 @@ impl CommentView {
                 self.overlays.entry(comment.page).or_default().push(index);
             }
         }
-        self.folded = (0..comments.items.len()).map(|_| None).collect();
+        self.folded = (0..comments.items.len()).map(|_| [None, None]).collect();
         self.folded_bytes = 0;
+        self.scratch = Default::default();
         self.matched = vec![false; comments.items.len()];
         self.retained = vec![false; comments.items.len()];
         self.applied = None;
@@ -93,24 +98,37 @@ impl CommentView {
             }
             matched[index] = if words.is_empty() {
                 true
-            } else if let Some(fields) = &self.folded[index] {
-                words
-                    .iter()
-                    .all(|word| fields.iter().any(|s| word.find(s.as_bytes()).is_some()))
+            } else if let [Some(author), Some(contents)] = &self.folded[index] {
+                words.iter().all(|word| {
+                    word.find(author.as_bytes()).is_some()
+                        || word.find(contents.as_bytes()).is_some()
+                })
             } else {
-                let fields = [
-                    caseless::default_case_fold_str(&comment.author),
-                    caseless::default_case_fold_str(&comment.contents),
-                ];
-                let found = words
+                let [author_cache, contents_cache] = &mut self.folded[index];
+                let [author_scratch, contents_scratch] = &mut self.scratch;
+                let author = folded_field(
+                    &comment.author,
+                    author_cache,
+                    author_scratch,
+                    &mut self.folded_bytes,
+                );
+                if words
                     .iter()
-                    .all(|word| fields.iter().any(|s| word.find(s.as_bytes()).is_some()));
-                let bytes = fields.iter().map(String::capacity).sum::<usize>();
-                if bytes <= SEARCH_BYTES - self.folded_bytes {
-                    self.folded_bytes += bytes;
-                    self.folded[index] = Some(fields);
+                    .all(|word| word.find(author.as_bytes()).is_some())
+                {
+                    true
+                } else {
+                    let contents = folded_field(
+                        &comment.contents,
+                        contents_cache,
+                        contents_scratch,
+                        &mut self.folded_bytes,
+                    );
+                    words.iter().all(|word| {
+                        word.find(author.as_bytes()).is_some()
+                            || word.find(contents.as_bytes()).is_some()
+                    })
                 }
-                found
             };
         }
         self.matches = matched.iter().filter(|&&m| m).count();
@@ -180,6 +198,44 @@ impl CommentView {
     pub fn overlays(&self, page: usize) -> &[usize] {
         self.overlays.get(&page).map_or(&[], Vec::as_slice)
     }
+}
+
+fn folded_field<'a>(
+    text: &str,
+    cached: &'a mut Option<String>,
+    scratch: &'a mut String,
+    bytes: &mut usize,
+) -> &'a str {
+    if cached.is_none() {
+        scratch.clear();
+        scratch.reserve(text.len());
+        if text.is_ascii() {
+            scratch.push_str(text);
+            scratch.make_ascii_lowercase();
+        } else {
+            for ch in text.chars() {
+                if ch.is_ascii() {
+                    scratch.push(ch.to_ascii_lowercase());
+                } else {
+                    scratch.extend(std::iter::once(ch).default_case_fold());
+                }
+            }
+        }
+        let remaining = SEARCH_BYTES - *bytes;
+        if scratch.capacity() <= remaining {
+            *bytes += scratch.capacity();
+            *cached = Some(std::mem::take(scratch));
+        } else if scratch.len() <= remaining {
+            // A previous oversized field may have left a large scratch buffer.
+            // Keep that buffer for reuse without denying a smaller field cache.
+            let field = scratch.clone();
+            if field.capacity() <= remaining {
+                *bytes += field.capacity();
+                *cached = Some(field);
+            }
+        }
+    }
+    cached.as_deref().unwrap_or(scratch)
 }
 
 #[cfg(test)]
@@ -277,7 +333,13 @@ mod tests {
                 assert_eq!(view.matches(), expected.len());
                 assert_eq!(view.selected(), expected.first().copied());
                 if uncached {
-                    assert!(view.folded.iter().all(Option::is_none));
+                    // Empty fields can be cached without consuming the budget.
+                    assert!(
+                        view.folded
+                            .iter()
+                            .flatten()
+                            .all(|field| field.as_ref().is_none_or(String::is_empty))
+                    );
                 }
             }
         }
@@ -479,7 +541,7 @@ mod tests {
 
     #[test]
     fn search_cache_budget_never_truncates_matching() {
-        let contents = format!("{}needle", "a".repeat(SEARCH_BYTES + 1));
+        let contents = format!("{}NEEDLE", "A".repeat(SEARCH_BYTES + 1));
         let comments = Comments {
             items: vec![comment(0, 0, None, &contents)],
             limited: false,
@@ -491,8 +553,83 @@ mod tests {
             view.update(&comments, 0);
             assert_eq!(view.matches(), usize::from(query != "missing"));
             assert!(view.folded_bytes <= SEARCH_BYTES);
-            assert!(view.folded[0].is_none());
+            assert!(view.folded[0][1].is_none());
         }
+    }
+
+    #[test]
+    fn author_matches_leave_contents_unprepared_until_needed() {
+        let comments = Comments {
+            items: vec![comment(0, 0, None, "Straße 中文 ﬁnish")],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        for (query, body_prepared) in [
+            ("REVIEWER", false),
+            ("reviewer reviewer", false),
+            ("reviewer STRASSE", true),
+            ("FINISH 中文", true),
+        ] {
+            view.filter.query = query.into();
+            assert!(view.update(&comments, 0));
+            assert_eq!(view.matches(), 1);
+            assert_eq!(view.folded[0][1].is_some(), body_prepared);
+        }
+        let cached_bytes: usize = view
+            .folded
+            .iter()
+            .flatten()
+            .flatten()
+            .map(String::capacity)
+            .sum();
+        assert_eq!(view.folded_bytes, cached_bytes);
+        assert!(view.scratch.iter().all(String::is_empty));
+        view.set_comments(&comments);
+        assert_eq!(view.folded_bytes, 0);
+        assert!(view.folded.iter().flatten().all(Option::is_none));
+    }
+
+    #[test]
+    fn oversized_scratch_does_not_block_smaller_fields_from_the_cache() {
+        let comments = Comments {
+            items: vec![
+                comment(0, 0, None, &format!("{} needle", "İΣﬁa".repeat(1024))),
+                comment(0, 1, None, "needle"),
+            ],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        let occupied = SEARCH_BYTES - 64;
+        view.folded_bytes = occupied;
+        for query in ["NEEDLE", "reviewer needle", "missing", "i\u{307}σfia"] {
+            view.filter.query = query.into();
+            view.update(&comments, 0);
+            assert_eq!(
+                view.matches(),
+                match query {
+                    "missing" => 0,
+                    "i\u{307}σfia" => 1,
+                    _ => 2,
+                }
+            );
+            assert!(view.folded[0][1].is_none());
+            assert_eq!(view.folded[1][1].as_deref(), Some("needle"));
+            let cached_bytes: usize = view
+                .folded
+                .iter()
+                .flatten()
+                .flatten()
+                .map(String::capacity)
+                .sum();
+            assert_eq!(view.folded_bytes, occupied + cached_bytes);
+            assert!(view.folded_bytes <= SEARCH_BYTES);
+        }
+        let capacity = view.scratch[1].capacity();
+        assert!(capacity > 64);
+        view.set_comments(&comments);
+        assert!(view.scratch.iter().all(|field| field.capacity() == 0));
     }
 
     #[test]

@@ -55,10 +55,85 @@ fn main() {
     match std::env::args().nth(2).as_deref() {
         Some("filters") => benchmark_filters(passes),
         Some("threads") => benchmark_threads(passes),
+        Some("cold-filters") => benchmark_cold_filters(passes),
         _ => {
             benchmark_threads(passes);
             benchmark_filters(passes);
             benchmark(passes);
+        }
+    }
+}
+
+fn benchmark_cold_filters(passes: usize) {
+    println!(
+        "Cold and changed text filters: {passes} passes, median ms/update; fresh view or one previous full-text query. Includes folding, matching, cache writes, counts and visible rows; excludes fixture preparation, PDF parsing, widgets and GPU. The 2,000-item long snapshots exceed the 8 MiB search cache."
+    );
+    for (name, count, body) in [
+        ("short mixed", 10_000, "Review Straße 中文 ".into()),
+        ("long ASCII", 80, "Review notes ".repeat(2048)),
+        ("long ASCII", 2000, "Review notes ".repeat(2048)),
+        ("long Unicode", 80, "Straße 中文 Σ ﬁ ".repeat(2048)),
+        ("long Unicode", 2000, "Straße 中文 Σ ﬁ ".repeat(2048)),
+    ] {
+        let comments = Comments {
+            items: (0..count)
+                .map(|index| Comment {
+                    page: index / 10,
+                    slot: Some(index % 10),
+                    parent: None,
+                    review: ReviewStatus::None,
+                    marked: false,
+                    states: Vec::new(),
+                    kind: "Text".into(),
+                    contents: format!("headmarker {body} tailmarker"),
+                    author: "Pagewing".into(),
+                    rects: Vec::new(),
+                    has_appearance: false,
+                    truncated: false,
+                    locked: false,
+                })
+                .collect(),
+            limited: false,
+        };
+        for (label, query, expected) in [
+            ("author", "PAGEWING", count),
+            ("start", "headmarker", count),
+            ("end", "tailmarker", count),
+            ("absent", "absentmarker", 0),
+            ("both fields", "PAGEWING tailmarker", count),
+        ] {
+            for changed in [false, true] {
+                let mut samples = Vec::new();
+                let mut calls = (0, 0);
+                for sample in 0..=passes {
+                    let mut view = CommentView::default();
+                    view.set_comments(&comments);
+                    if changed {
+                        view.filter.query = "seedmarker".into();
+                        assert!(view.update(&comments, 0));
+                        assert_eq!(view.matches(), 0);
+                    }
+                    view.filter.query = query.into();
+                    if sample == passes {
+                        calls = allocations(|| {
+                            assert!(view.update(black_box(&comments), 0));
+                        });
+                    } else {
+                        let start = Instant::now();
+                        assert!(view.update(black_box(&comments), 0));
+                        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    assert_eq!(view.matches(), expected);
+                    assert_eq!(view.rows().len(), expected);
+                    assert_eq!(view.selected(), (expected > 0).then_some(0));
+                }
+                samples.sort_by(f64::total_cmp);
+                println!(
+                    "  {count} {name}, {label}, {}: {:.3} ms; (alloc,realloc) {calls:?}",
+                    if changed { "changed" } else { "cold" },
+                    samples[samples.len() / 2]
+                );
+            }
         }
     }
 }
