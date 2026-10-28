@@ -1,4 +1,7 @@
 #[allow(dead_code, unused_imports)]
+#[path = "../src/case_fold.rs"]
+mod case_fold;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/destination.rs"]
 mod destination;
 #[allow(dead_code, unused_imports)]

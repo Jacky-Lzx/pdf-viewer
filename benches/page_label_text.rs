@@ -1,6 +1,9 @@
 #[path = "support/allocations.rs"]
 mod allocation_counter;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/case_fold.rs"]
+mod case_fold;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/page_labels.rs"]
 mod page_labels;
 #[allow(dead_code, unused_imports)]

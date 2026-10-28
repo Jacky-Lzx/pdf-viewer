@@ -153,7 +153,36 @@ def run(binary):
                     keyboard.key(letter.lower(), shift=letter.isupper())
                 keyboard.key(0xFF0D)
                 expect(5, "UTF-16 page-label prefix accepts Unicode case expansion")
-                print("PASS: malformed name-pair/number-tree child recovery, dangling label-pair recovery, nested folds, real UTF-16 titles/page labels, Unicode filtering, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
+                # A later exact label must win over an earlier Unicode-folded
+                # candidate. Rebuild from the original fixture, retaining xrefs.
+                source = make_pdf(nested_outline=True)
+                original = b"/Nums [2 << /S /D >> 4 << /S /D /P (A-) >>]"
+                replacement = b"/Nums[2<</S/D/P(" + b"\xfe\xff" + "ß".encode("utf-16-be") + b")>>4<</S/D/P(SS)>>]"
+                assert original in source and len(replacement) <= len(original)
+                document.write_bytes(source.replace(original, replacement.ljust(len(original)), 1))
+                keyboard.key("r", ctrl=True)
+                time.sleep(0.5)
+
+                def label_input(value):
+                    keyboard.key(":", shift=True)
+                    for letter in value:
+                        keyboard.key(letter.lower(), shift=letter.isupper())
+                    keyboard.key(0xFF0D)
+
+                label_input("ss2")
+                expect(3, "first Unicode-folded duplicate wins without an exact label")
+                label_input("SS2")
+                expect(5, "later exact label takes priority over earlier folded duplicate")
+                label_input("SS02")
+                time.sleep(0.3)
+                expect(5, "noncanonical numeric suffix does not navigate")
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "SS02", "invalid label remains editable"
+                for letter in "SS1":
+                    keyboard.key(letter.lower(), shift=letter.isupper())
+                keyboard.key(0xFF0D)
+                expect(4, "correcting an invalid label preserves exact-match priority")
+                print("PASS: malformed name-pair/number-tree child recovery, dangling label-pair recovery, nested folds, real UTF-16 titles/page labels, Unicode filtering, exact/folded duplicate label priority, invalid label correction, ancestor context, compact layout, same-frame chapter input/Enter, keyboard selection, hidden sidebar, no-match handling and focus switching")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

@@ -439,6 +439,8 @@ cargo bench --locked --bench search_result_text -- 9
 cargo bench --locked --bench preview_caption -- 9
 # 页码文字：比较完整标签生成后截取与按可见前缀生成摘要
 cargo bench --locked --bench page_label_text -- 9
+# 对照标签跳转的 Unicode 前缀匹配、编号验证和临时分配
+cargo bench --locked --bench label_lookup -- 17
 # 单页与双页状态栏文字构造（含显示名和分配，不含界面与渲染）
 cargo bench --locked --bench status_text -- 21
 # 快捷键帮助筛选：比较每次格式化与复用目录检索文字，含分配计数

@@ -307,33 +307,42 @@ impl PageLabels {
             if label
                 .get(..range.prefix.len())
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&range.prefix))
-                && let Some((page, candidate)) = self.candidate(index, &label[range.prefix.len()..])
+                && let Some((page, canonical)) =
+                    self.candidate_suffix(index, &label[range.prefix.len()..])
             {
-                if candidate == label {
+                let (prefix, suffix) = label.split_at(range.prefix.len());
+                if prefix == range.prefix && canonical == suffix {
                     return Some(page);
                 }
-                if folded.is_none() && candidate.eq_ignore_ascii_case(label) {
+                if folded.is_none() && canonical.eq_ignore_ascii_case(suffix) {
                     folded = Some(page);
                 }
             }
             // Only non-ASCII lookup needs Unicode folding. Keep checking later
             // exact labels even after finding the earliest folded candidate.
             if folded.is_none() && (!ascii || !range.prefix.is_ascii()) {
-                let normalized =
-                    folded_label.get_or_insert_with(|| caseless::default_case_fold_str(label));
-                let prefix = caseless::default_case_fold_str(&range.prefix);
-                if let Some(suffix) = normalized.strip_prefix(&prefix)
-                    && let Some((page, candidate)) = self.candidate(index, suffix)
-                    && caseless::default_case_fold_str(&candidate) == *normalized
-                {
-                    folded = Some(page);
-                }
+                folded = self.folded_candidate(index, label, &mut folded_label);
             }
         }
         folded
     }
 
-    fn candidate(&self, index: usize, suffix: &str) -> Option<(usize, String)> {
+    // Keep Unicode folding and formatting out of the common range-scanning loop.
+    #[inline(never)]
+    fn folded_candidate(
+        &self,
+        index: usize,
+        label: &str,
+        folded_label: &mut Option<String>,
+    ) -> Option<usize> {
+        let normalized = folded_label.get_or_insert_with(|| crate::case_fold::fold(label));
+        let suffix = crate::case_fold::strip_prefix(normalized, &self.ranges[index].prefix)?;
+        let (page, canonical) = self.candidate_suffix(index, suffix)?;
+        // All numbering formats generate ASCII; only prefixes need full folding.
+        canonical.eq_ignore_ascii_case(suffix).then_some(page)
+    }
+
+    fn candidate_suffix(&self, index: usize, suffix: &str) -> Option<(usize, String)> {
         let range = &self.ranges[index];
         let value = parse_number(range.style, suffix, range.first)?;
         let offset = usize::try_from(value.checked_sub(range.first)?).ok()?;
@@ -342,10 +351,10 @@ impl PageLabels {
             .ranges
             .get(index + 1)
             .map_or(self.count, |next| next.page);
-        if page >= end {
+        if page >= end || page >= self.count {
             return None;
         }
-        Some((page, self.label(page)?))
+        Some((page, number(range.style, value)))
     }
 }
 
@@ -625,6 +634,123 @@ mod tests {
             }],
         };
         assert_eq!(letters.resolve_input("ſ", 1), Some(0));
+    }
+
+    #[test]
+    fn lookup_matches_linear_canonical_label_oracle() {
+        // Enumerate canonical labels independently of the range candidate parser.
+        // Exact matches across the whole document precede any folded match.
+        fn oracle(labels: &PageLabels, input: &str) -> Option<usize> {
+            if input.is_empty() {
+                return None;
+            }
+            let all: Vec<_> = (0..labels.count).map(|page| labels.label(page)).collect();
+            all.iter()
+                .position(|label| label.as_deref() == Some(input))
+                .or_else(|| {
+                    let folded = caseless::default_case_fold_str(input);
+                    all.iter().position(|label| {
+                        label
+                            .as_ref()
+                            .is_some_and(|label| caseless::default_case_fold_str(label) == folded)
+                    })
+                })
+        }
+
+        let prefixes = [
+            "",
+            "A-",
+            "a-",
+            "Straße-",
+            "STRASSE-",
+            "ΟΣ-",
+            "ος-",
+            "ﬃİ-",
+            "FFİ-",
+            "附录-",
+            "é-",
+            "e\u{301}-",
+            "S",
+            "ſ",
+            "1",
+            "😀-",
+        ];
+        let styles = [
+            Style::Decimal,
+            Style::Roman,
+            Style::LowerRoman,
+            Style::Letters,
+            Style::LowerLetters,
+            Style::None,
+        ];
+        for seed in 0..24 {
+            let labels = PageLabels {
+                count: 40,
+                // Leave page zero unlabeled in half the snapshots.
+                ranges: (0..8)
+                    .map(|index| LabelRange {
+                        page: index * 5 + seed % 2,
+                        first: [1, 18, 25, 27, 830, 39998, u32::MAX as u64][(seed + index) % 7],
+                        prefix: prefixes[(seed + index) % prefixes.len()].into(),
+                        style: styles[(seed / 4 + index) % styles.len()],
+                    })
+                    .collect(),
+            };
+            let mut queries = vec![String::new()];
+            for page in 0..labels.count {
+                if let Some(label) = labels.label(page) {
+                    queries.extend([
+                        label.clone(),
+                        label.to_uppercase(),
+                        label.to_lowercase(),
+                        caseless::default_case_fold_str(&label),
+                        format!("{label}0"),
+                        format!("!{label}"),
+                        label.replace('S', "ſ"),
+                    ]);
+                }
+            }
+            for prefix in prefixes {
+                for suffix in [
+                    "",
+                    "0",
+                    "01",
+                    "+1",
+                    "-1",
+                    "iiii",
+                    "IIV",
+                    "AB",
+                    "ſ",
+                    "SS",
+                    "832",
+                    "833",
+                    "39999",
+                    "40000",
+                    "4294967295",
+                    "18446744073709551616",
+                ] {
+                    queries.push(format!("{prefix}{suffix}"));
+                }
+            }
+            for query in queries {
+                assert_eq!(
+                    labels.find(&query),
+                    oracle(&labels, &query),
+                    "seed={seed}, {query:?}"
+                );
+                let explicit = format!(" ={} ", query.trim());
+                assert_eq!(
+                    labels.resolve_input(&explicit, labels.count),
+                    oracle(&labels, query.trim())
+                );
+            }
+            for physical in 0..=labels.count + 1 {
+                assert_eq!(
+                    labels.resolve_input(&physical.to_string(), labels.count),
+                    physical.checked_sub(1).filter(|page| *page < labels.count)
+                );
+            }
+        }
     }
 
     #[test]

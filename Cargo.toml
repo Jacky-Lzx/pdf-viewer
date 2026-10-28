@@ -153,6 +153,10 @@ name = "page_label_text"
 harness = false
 
 [[bench]]
+name = "label_lookup"
+harness = false
+
+[[bench]]
 name = "status_text"
 harness = false
 
