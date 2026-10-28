@@ -82,8 +82,8 @@ pub struct Pagewing {
     sidebar_region: Option<(egui::LayerId, egui::Rect)>,
     labels: crate::page_labels::PageLabels,
     links: crate::link_cache::LinkCache,
-    visible_links: crate::link_visibility::LinkVisibility,
-    other_visible_links: crate::link_visibility::LinkVisibility,
+    visible_links: crate::visible_rects::VisibleRects,
+    other_visible_links: crate::visible_rects::VisibleRects,
     hints: LinkHints,
     copy_link_hints: bool,
     mark_action: Option<MarkAction>,
@@ -248,8 +248,8 @@ impl Pagewing {
             sidebar_region: None,
             labels: crate::page_labels::PageLabels::default(),
             links: crate::link_cache::LinkCache::default(),
-            visible_links: crate::link_visibility::LinkVisibility::default(),
-            other_visible_links: crate::link_visibility::LinkVisibility::default(),
+            visible_links: crate::visible_rects::VisibleRects::default(),
+            other_visible_links: crate::visible_rects::VisibleRects::default(),
             hints: LinkHints::default(),
             copy_link_hints: false,
             mark_action: None,
@@ -808,7 +808,7 @@ impl Pagewing {
                     self.requested = None;
                     self.render_planner = RenderPlanner::default();
                     self.links.clear();
-                    self.visible_links = crate::link_visibility::LinkVisibility::default();
+                    self.visible_links = crate::visible_rects::VisibleRects::default();
                     self.hints.cancel();
                     self.selection.cancel();
                     self.pending_focus = None;
@@ -1268,7 +1268,7 @@ impl Pagewing {
         page_rect: egui::Rect,
         dimensions: [f32; 2],
     ) -> egui::Rect {
-        crate::link_visibility::screen_rect(
+        crate::visible_rects::screen_rect(
             rect,
             page_rect,
             dimensions,
@@ -1298,7 +1298,7 @@ impl Pagewing {
             &mut self.other_visible_links
         };
         let changed = visible.update(
-            crate::link_visibility::LinkView {
+            crate::visible_rects::PageView {
                 document: self.id,
                 page,
                 page_rect,

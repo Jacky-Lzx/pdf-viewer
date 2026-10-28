@@ -1,7 +1,8 @@
+//! Reusable screen geometry for visible page regions in an immutable snapshot.
 use eframe::egui::{Rect, Vec2};
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct LinkView {
+pub struct PageView {
     pub document: u64,
     pub page: usize,
     pub page_rect: Rect,
@@ -26,7 +27,7 @@ pub fn screen_rect(
     )
 }
 
-impl LinkView {
+impl PageView {
     pub fn screen_rect(self, rect: hayro::kurbo::Rect) -> Rect {
         screen_rect(
             rect,
@@ -38,42 +39,49 @@ impl LinkView {
     }
 }
 
+/// Paint paths can retain page-clipped bounds so viewport clipping does not
+/// move an icon anchor or add an antialiased edge to a filled highlight.
 #[derive(Default)]
-pub struct LinkVisibility {
-    view: Option<LinkView>,
-    pub indices: Vec<usize>,
+pub struct VisibleRects<Key = usize, const CLIP_TO_VIEW: bool = true> {
+    view: Option<PageView>,
+    pub indices: Vec<Key>,
     pub rects: Vec<Rect>,
 }
 
-impl LinkVisibility {
+impl<Key: Copy + PartialEq, const CLIP_TO_VIEW: bool> VisibleRects<Key, CLIP_TO_VIEW> {
     pub fn clear(&mut self) {
         self.invalidate();
         self.indices.clear();
         self.rects.clear();
     }
 
-    /// New link metadata can change geometry without changing the view or count.
+    /// New metadata can change geometry without changing the view or count.
     pub fn invalidate(&mut self) {
         self.view = None;
     }
 
-    /// Return whether hint numbering changed. Moving the same links keeps labels.
-    pub fn update(
+    /// Return whether visible identities changed. Moving the same regions keeps their order.
+    pub fn update_keyed(
         &mut self,
-        view: LinkView,
-        rectangles: impl Iterator<Item = hayro::kurbo::Rect>,
+        view: PageView,
+        rectangles: impl Iterator<Item = (Key, hayro::kurbo::Rect)>,
     ) -> bool {
         if self.view == Some(view) {
             return false;
         }
         let mut count = 0;
         let mut changed = false;
-        for (index, rect) in rectangles.enumerate() {
+        for (index, rect) in rectangles {
             let rect = view.screen_rect(rect);
             if !rect.intersects(view.clip) {
                 continue;
             }
-            let clipped = rect.intersect(view.page_rect).intersect(view.clip);
+            let clipped = rect.intersect(view.page_rect);
+            let clipped = if CLIP_TO_VIEW {
+                clipped.intersect(view.clip)
+            } else {
+                clipped
+            };
             if let Some(previous) = self.indices.get_mut(count) {
                 changed |= *previous != index;
                 *previous = index;
@@ -93,6 +101,17 @@ impl LinkVisibility {
     }
 }
 
+impl VisibleRects {
+    /// Links use their ordinal position as identity for hint numbering.
+    pub fn update(
+        &mut self,
+        view: PageView,
+        rectangles: impl Iterator<Item = hayro::kurbo::Rect>,
+    ) -> bool {
+        self.update_keyed(view, rectangles.enumerate())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,8 +119,8 @@ mod tests {
     use hayro::kurbo::Rect as PdfRect;
     use std::cell::Cell;
 
-    fn view() -> LinkView {
-        LinkView {
+    fn view() -> PageView {
+        PageView {
             document: 1,
             page: 0,
             page_rect: Rect::from_min_size(pos2(20.0, 30.0), Vec2::new(600.0, 800.0)),
@@ -114,7 +133,7 @@ mod tests {
 
     #[test]
     fn unchanged_views_skip_geometry_and_metadata_invalidation_rebuilds_equal_counts() {
-        let mut cache = LinkVisibility::default();
+        let mut cache = VisibleRects::default();
         let first = PdfRect::new(30.0, 40.0, 100.0, 50.0);
         assert!(cache.update(view(), [first].into_iter()));
         let geometry = cache.rects.clone();
@@ -139,31 +158,31 @@ mod tests {
     fn every_geometry_and_document_change_rebuilds_and_only_membership_changes_labels() {
         let original = view();
         let changes = [
-            LinkView {
+            PageView {
                 document: 2,
                 ..original
             },
-            LinkView {
+            PageView {
                 page: 1,
                 ..original
             },
-            LinkView {
+            PageView {
                 page_rect: original.page_rect.translate(Vec2::splat(1.0)),
                 ..original
             },
-            LinkView {
+            PageView {
                 clip: original.clip.shrink(1.0),
                 ..original
             },
-            LinkView {
+            PageView {
                 dimensions: [610.0, 810.0],
                 ..original
             },
-            LinkView {
+            PageView {
                 rotation: 1,
                 ..original
             },
-            LinkView {
+            PageView {
                 scale: 1.1,
                 ..original
             },
@@ -171,9 +190,10 @@ mod tests {
         let rectangles = [
             PdfRect::new(30.0, 40.0, 100.0, 50.0),
             PdfRect::new(550.0, 740.0, 580.0, 750.0),
+            PdfRect::new(-10.0, 10.0, 60.0, 60.0),
         ];
         for changed in changes {
-            let mut cache = LinkVisibility::default();
+            let mut cache = VisibleRects::default();
             cache.update(original, rectangles.into_iter());
             let previous = cache.indices.clone();
             let reads = Cell::new(0);
@@ -183,7 +203,7 @@ mod tests {
                     .into_iter()
                     .inspect(|_| reads.set(reads.get() + 1)),
             );
-            assert_eq!(reads.get(), 2);
+            assert_eq!(reads.get(), rectangles.len());
             let expected: Vec<_> = rectangles
                 .into_iter()
                 .enumerate()

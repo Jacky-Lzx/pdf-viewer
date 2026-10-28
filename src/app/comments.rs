@@ -48,6 +48,8 @@ pub(super) struct CommentUi {
     pub comments: Comments,
     pub view: CommentView,
     cards: CardTextCache,
+    visible: crate::visible_rects::VisibleRects<(usize, usize), false>,
+    other_visible: crate::visible_rects::VisibleRects<(usize, usize), false>,
     pub editor: Option<Comment>,
     original: String,
     original_review: ReviewStatus,
@@ -67,8 +69,14 @@ impl CommentUi {
     pub fn set_comments(&mut self, comments: Comments) {
         self.view.set_comments(&comments);
         self.cards.clear();
+        self.visible = Default::default();
+        self.clear_multi_page_overlays();
         self.comments = comments;
         self.loaded = true;
+    }
+
+    pub(super) fn clear_multi_page_overlays(&mut self) {
+        self.other_visible = Default::default();
     }
 
     pub fn reset(&mut self, reloaded: bool) {
@@ -483,45 +491,68 @@ impl Pagewing {
         page_rect: egui::Rect,
         dimensions: [f32; 2],
     ) {
+        let view = crate::visible_rects::PageView {
+            document: self.id,
+            page,
+            page_rect,
+            clip: ui.clip_rect(),
+            dimensions,
+            rotation: self.reading.rotation,
+            scale: self.scale,
+        };
+        let visible = if page == self.nav.page {
+            &mut self.comments.visible
+        } else {
+            // As with links, reuse one scratch buffer for neighboring pages.
+            // It must rebuild when a different page uses the same storage.
+            self.comments.other_visible.invalidate();
+            &mut self.comments.other_visible
+        };
+        let comments = &self.comments.comments.items;
+        visible.update_keyed(
+            view,
+            self.comments.view.overlays(page).iter().flat_map(|&index| {
+                comments[index]
+                    .rects
+                    .iter()
+                    .enumerate()
+                    .map(move |(part, &rect)| ((index, part), rect))
+            }),
+        );
         let mut selected = None;
-        for &index in self.comments.view.overlays(page) {
-            let comment = &self.comments.comments.items[index];
-            for (part, rect) in comment.rects.iter().enumerate() {
-                let rect = self
-                    .link_rect(*rect, page_rect, dimensions)
-                    .intersect(page_rect);
-                if !rect.is_positive() || !ui.clip_rect().intersects(rect) {
-                    continue;
-                }
-                if !comment.has_appearance {
-                    if comment.kind == "Highlight" {
-                        ui.painter().rect_filled(
-                            rect,
-                            0.0,
-                            Color32::from_rgba_unmultiplied(255, 210, 0, 75),
-                        );
-                    } else {
-                        ui.painter().circle_filled(
-                            rect.left_top() + Vec2::splat(4.0),
-                            4.0,
-                            Color32::from_rgb(215, 145, 30),
-                        );
-                    }
-                }
-                if !self.selection.active {
-                    let response = ui.interact(
+        for (&(index, part), &rect) in visible.indices.iter().zip(&visible.rects) {
+            if !rect.is_positive() || !view.clip.intersects(rect) {
+                continue;
+            }
+            let comment = &comments[index];
+            if !comment.has_appearance {
+                if comment.kind == "Highlight" {
+                    ui.painter().rect_filled(
                         rect,
-                        ui.id().with(("pdf-comment", page, index, part)),
-                        egui::Sense::click(),
+                        0.0,
+                        Color32::from_rgba_unmultiplied(255, 210, 0, 75),
                     );
-                    let response = response.on_hover_text(if comment.contents.is_empty() {
-                        "Click to add a comment"
-                    } else {
-                        &comment.contents
-                    });
-                    if response.clicked() {
-                        selected = Some(index);
-                    }
+                } else {
+                    ui.painter().circle_filled(
+                        rect.left_top() + Vec2::splat(4.0),
+                        4.0,
+                        Color32::from_rgb(215, 145, 30),
+                    );
+                }
+            }
+            if !self.selection.active {
+                let response = ui.interact(
+                    rect,
+                    ui.id().with(("pdf-comment", page, index, part)),
+                    egui::Sense::click(),
+                );
+                let response = response.on_hover_text(if comment.contents.is_empty() {
+                    "Click to add a comment"
+                } else {
+                    &comment.contents
+                });
+                if response.clicked() {
+                    selected = Some(index);
                 }
             }
         }

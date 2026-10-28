@@ -9,8 +9,9 @@ use std::time::Duration;
 
 impl Pagewing {
     pub(super) fn clear_multi_page_buffers(&mut self) {
+        self.comments.clear_multi_page_overlays();
         self.continuous_geometry = crate::page_geometry::PageGeometry::default();
-        self.other_visible_links = crate::link_visibility::LinkVisibility::default();
+        self.other_visible_links = crate::visible_rects::VisibleRects::default();
     }
 
     fn continuous_view(&self, pixels_per_point: f32) -> RenderView {

@@ -68,7 +68,7 @@ impl Pagewing {
         self.bookmark_pages = Vec::new();
         self.labels = crate::page_labels::PageLabels::default();
         self.links.clear();
-        self.visible_links = crate::link_visibility::LinkVisibility::default();
+        self.visible_links = crate::visible_rects::VisibleRects::default();
         self.hints.cancel();
         self.selection.cancel();
         self.mark_action = None;

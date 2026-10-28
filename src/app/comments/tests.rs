@@ -1,3 +1,5 @@
+mod overlays;
+
 use super::*;
 use egui::{Context, Event, Key, Modifiers, RawInput};
 use std::time::{Duration, Instant};

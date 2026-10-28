@@ -1,14 +1,17 @@
+#[path = "link_visibility/comments.rs"]
+mod comments;
+
 #[allow(dead_code, unused_imports)] // Test imports are unused in this harness-free bench.
 #[path = "../src/geometry.rs"]
 mod geometry;
 #[allow(dead_code, unused_imports)]
-#[path = "../src/link_visibility.rs"]
-mod link_visibility;
+#[path = "../src/visible_rects.rs"]
+mod visible_rects;
 
 use eframe::egui::{Rect, Vec2, pos2};
 use hayro::kurbo::Rect as PdfRect;
-use link_visibility::{LinkView, LinkVisibility};
 use std::{hint::black_box, time::Instant};
+use visible_rects::{PageView, VisibleRects};
 
 fn checksum(rect: Rect) -> u64 {
     [rect.min.x, rect.min.y, rect.max.x, rect.max.y]
@@ -17,7 +20,7 @@ fn checksum(rect: Rect) -> u64 {
         .sum()
 }
 
-fn original(rectangles: &[PdfRect], view: LinkView, indices: &mut Vec<usize>) -> (usize, u64) {
+fn original(rectangles: &[PdfRect], view: PageView, indices: &mut Vec<usize>) -> (usize, u64) {
     indices.clear();
     indices.extend(rectangles.iter().enumerate().filter_map(|(index, &rect)| {
         view.screen_rect(rect)
@@ -37,7 +40,7 @@ fn original(rectangles: &[PdfRect], view: LinkView, indices: &mut Vec<usize>) ->
     (indices.len(), sum)
 }
 
-fn cached(rectangles: &[PdfRect], view: LinkView, cache: &mut LinkVisibility) -> (usize, u64) {
+fn cached(rectangles: &[PdfRect], view: PageView, cache: &mut VisibleRects) -> (usize, u64) {
     cache.update(view, rectangles.iter().copied());
     (
         cache.indices.len(),
@@ -51,6 +54,10 @@ fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
+    if std::env::args().nth(2).as_deref() == Some("comments") {
+        comments::run(passes);
+        return;
+    }
     println!(
         "{passes} alternating passes, 3000 frames/sample; visibility and clipped hit regions including cache reads, no widgets, hints, parsing, GPU or UI rendering."
     );
@@ -63,7 +70,7 @@ fn main() {
             })
             .collect();
         for rotation in [0, 1] {
-            let original_view = LinkView {
+            let original_view = PageView {
                 document: 1,
                 page: 0,
                 page_rect: Rect::from_min_size(
@@ -79,12 +86,12 @@ fn main() {
                 rotation,
                 scale: 2.0,
             };
-            let shifted = LinkView {
+            let shifted = PageView {
                 page_rect: original_view.page_rect.translate(Vec2::new(-100.0, -120.0)),
                 ..original_view
             };
             for changing in [false, true] {
-                let mut cache = LinkVisibility::default();
+                let mut cache = VisibleRects::default();
                 let mut indices = Vec::new();
                 for view in [original_view, shifted] {
                     assert_eq!(

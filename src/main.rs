@@ -21,7 +21,6 @@ mod history;
 mod input_actions;
 mod link_cache;
 mod link_hints;
-mod link_visibility;
 mod links;
 mod list_navigation;
 #[cfg(target_os = "macos")]
@@ -50,6 +49,7 @@ mod text;
 mod text_cache;
 mod texture_pixels;
 mod thumbnails;
+mod visible_rects;
 mod worker;
 
 use std::{fmt::Write as _, time::Instant};
