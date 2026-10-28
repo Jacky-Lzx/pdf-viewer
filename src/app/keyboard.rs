@@ -26,7 +26,7 @@ impl Pagewing {
             Some(shortcuts::InputButton::CloseComments) => self.set_comments_open(context, false),
             Some(shortcuts::InputButton::Page) => self.open_goto(),
             Some(shortcuts::InputButton::Zoom) => self.open_zoom(context),
-            Some(shortcuts::InputButton::RestoreBookmark) => self.restore_bookmark(),
+            Some(shortcuts::InputButton::RestoreDeleted) => self.restore_deleted(),
             Some(shortcuts::InputButton::ReloadChanged) => {
                 if self.file_changed {
                     self.reload(context);

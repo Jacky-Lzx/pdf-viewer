@@ -30,8 +30,7 @@ impl Pagewing {
             self.mark(name, MarkAction::Jump);
         }
         if let Some(name) = remove {
-            self.reading.marks.remove(&name);
-            self.dirty = true;
+            self.remove_mark(name);
         }
         target.is_some()
     }

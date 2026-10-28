@@ -160,7 +160,7 @@ impl Pagewing {
         self.automatic_reload = false;
         self.remember();
         if let Some(message) = &mut self.message {
-            message.restore_bookmark = None;
+            message.recovery = None;
         }
         self.nav.clear_prefix();
         self.loading = true;

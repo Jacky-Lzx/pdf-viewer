@@ -69,6 +69,19 @@ def run(binary):
                 expect(0, "z", "return to the first page before deletion")
                 keyboard.click((92, 200))
                 expect(0, "", "the reserved delete button removes the mark without navigating")
+                keyboard.click((125, 382))
+                recovered = expect(0, "z", "Undo mark restores the saved position without navigating")
+                assert recovered["marks"]["z"] == mark, recovered
+                keyboard.key("'")
+                keyboard.key("z")
+                restored = expect(79, "z", "the recovered mark still follows its original destination")
+                for field in ("fit", "rotation", "continuous", "facing"):
+                    assert restored[field] == mark[field], (field, restored)
+                keyboard.key("g")
+                keyboard.key("g")
+                expect(0, "z", "return to the first page after following the recovered mark")
+                keyboard.click((92, 200))
+                expect(0, "", "delete the recovered mark before saving a new location")
                 keyboard.key("m")
                 keyboard.key("z")
                 expect(0, "z", "the same mark can be saved again")
@@ -106,7 +119,8 @@ def run(binary):
                 assert application.wait(timeout=8) == 0
                 print("PASS: 240-pixel-wide window, minimum-window scrolling, long Unicode page labels, truncated mark clicks, "
                       "saved zoom/rotation/layout, reserved delete action, unchanged page on deletion, "
-                      "mark recreation, persisted state and unchanged PDF")
+                      "complete mark recovery without navigation, recovered destination, mark recreation, "
+                      "persisted state and unchanged PDF")
             except Exception:
                 log.flush()
                 log.seek(0)

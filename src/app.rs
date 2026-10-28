@@ -682,7 +682,7 @@ impl Pagewing {
         );
         if changed {
             if let Some(message) = &mut self.message {
-                message.restore_bookmark = None;
+                message.recovery = None;
             }
             self.dirty = true;
         }
@@ -694,7 +694,17 @@ impl Pagewing {
             return;
         }
         let mut notice = status::Notice::new("Bookmark removed");
-        notice.restore_bookmark = (!self.loading).then_some(page);
+        notice.recovery = (!self.loading).then_some(status::Recovery::Bookmark(page));
+        self.message = Some(notice);
+    }
+
+    fn remove_mark(&mut self, name: char) {
+        let Some(position) = self.reading.marks.remove(&name) else {
+            return;
+        };
+        self.dirty = true;
+        let mut notice = status::Notice::new(format!("Mark {name} removed"));
+        notice.recovery = (!self.loading).then_some(status::Recovery::Mark { name, position });
         self.message = Some(notice);
     }
 
