@@ -59,7 +59,7 @@ impl Pagewing {
         let selected = self
             .selection
             .selected_text()
-            .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+            .map(crate::text::selection_query)
             .filter(|text| !text.is_empty());
         self.recent_picker = None;
         self.nav.clear_prefix();

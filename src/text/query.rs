@@ -1,6 +1,26 @@
 use super::SearchOptions;
 use std::ops::Range;
 
+/// Convert selected PDF text into a single-line phrase without a word buffer.
+pub fn selection_query(text: &str) -> String {
+    let text = text.trim();
+    let mut words = text.split_whitespace();
+    let mut query = String::with_capacity(text.len());
+    if let Some(first) = words.next() {
+        query.push_str(first);
+        for word in words {
+            query.push(' ');
+            query.push_str(word);
+        }
+    }
+    // Large gaps in a PDF text layer should not keep a large allocation alive
+    // in the search field after the whitespace has been collapsed.
+    if query.capacity() > query.len().saturating_mul(2) {
+        query.shrink_to_fit();
+    }
+    query
+}
+
 pub struct SearchQuery {
     pub(super) matcher: memchr::memmem::Finder<'static>,
     pub(super) options: SearchOptions,

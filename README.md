@@ -384,6 +384,8 @@ cargo bench --locked --bench help_filter -- 21
 cargo bench --locked --bench lazy_tooltips -- 21
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
 cargo bench --locked --bench search_matching -- 9
+# 选区转换为单行搜索词，比较临时词数组与直接拼接
+cargo bench --locked --bench search_selection -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径
 cargo bench --locked --bench pdf_strings -- 9
 # 有界标题和元数据前缀，比较完整解码后截断与按需解码

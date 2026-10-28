@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn selected_query_matches_joined_unicode_words_and_bounds_retained_capacity() {
+    for value in [
+        String::new(),
+        " \t\r\n\u{a0}\u{1680}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}".into(),
+        "  Straße\r\n\t中文\u{a0}reader \n".into(),
+        "one\u{b}\u{c}\u{85}two\u{2003}\u{3000}three".into(),
+        "word\u{200b}word \0 \u{feff}cafe\u{301} 😀".into(),
+        "Rust 中文\r\nreader\t".repeat(10000),
+        format!("word{}tail", " \t\r\n".repeat(10000)),
+    ] {
+        let expected = value.split_whitespace().collect::<Vec<_>>().join(" ");
+        let query = selection_query(&value);
+        assert_eq!(query, expected);
+        assert!(query.capacity() <= query.len().saturating_mul(2));
+        if !query.is_empty() {
+            let page = PageText {
+                text: value,
+                ..Default::default()
+            };
+            let hits = page.search(0, &query);
+            assert_eq!(hits.len(), 1);
+        }
+    }
+}
+
+#[test]
 fn phrase_search_crosses_pdf_line_breaks_and_retains_source_geometry() {
     let value = "before Straße\r\n\t  中文\u{a0}reader after\nSTRASSE 中文 reader";
     let page = PageText {
@@ -133,7 +159,15 @@ fn phrase_ranges_match_an_independent_normalized_reference() {
         }
         (text, source)
     }
-    for separator in [" ", "\n", "\r\n\t  ", "\u{a0}", "\u{2003}\n"] {
+    for separator in [
+        " ",
+        "\n",
+        "\r\n\t  ",
+        "\u{a0}",
+        "\u{2003}\n",
+        "\u{b}\u{c}\u{85}",
+        "\u{1680}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}",
+    ] {
         let value = format!(
             " a{separator}longest{separator}ß 中{separator}longest{separator}a a{separator}a a a STRASSE{separator}word\nword{separator}ß \0 "
         );
