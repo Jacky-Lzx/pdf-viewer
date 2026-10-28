@@ -147,9 +147,82 @@ fn sized_frame(
             app.comments_sidebar(context);
             app.sidebar(context);
             app.recent_dialog(context);
+            app.help_window(context);
+            app.properties_window(context);
             egui::CentralPanel::default().show(context, |_| {});
         },
     )
+}
+
+#[test]
+fn escape_closes_the_front_window_before_comments_and_preserves_drafts() {
+    for size in [egui::vec2(1180.0, 820.0), egui::vec2(240.0, 240.0)] {
+        for window in ["help", "properties", "recent"] {
+            for draft in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let context = Context::default();
+                let mut app = Pagewing::with_context(
+                    &context,
+                    None,
+                    None,
+                    directory.path().join("library.json"),
+                );
+                app.nav = crate::navigation::Navigation::new(6, 2);
+                app.dimensions = vec![[600.0, 800.0]; 6];
+                Filter::Comments.open(&mut app, &context);
+                app.comments.view.filter.query = "book".into();
+                if draft {
+                    let mut comment = app.comments.comments.items[0].clone();
+                    comment.contents = "Unsaved 中文 📝".into();
+                    app.comments.editor = Some(comment);
+                }
+                match window {
+                    "help" => app.open_help(&context),
+                    "properties" => app.show_properties(&context),
+                    _ => app.toggle_recent(&context),
+                }
+                for _ in 0..4 {
+                    sized_frame(&mut app, &context, size, Vec::new());
+                }
+                // Menus retain first refusal even above a floating window.
+                egui::Popup::open_id(&context, egui::Id::new("escape-priority-menu"));
+                sized_frame(&mut app, &context, size, key(Key::Escape, Modifiers::NONE));
+                assert!(!egui::Popup::is_any_open(&context));
+                assert!(app.help || app.properties_open || app.recent_picker.is_some());
+                assert!(app.comments.open);
+                sized_frame(&mut app, &context, size, key(Key::Escape, Modifiers::NONE));
+                assert!(app.comments.open, "{window} at {size:?}, draft={draft}");
+                assert!(!app.help && !app.properties_open && app.recent_picker.is_none());
+                assert!(!context.input(|input| input.key_pressed(Key::Escape)));
+                assert!(
+                    !context
+                        .memory(|memory| memory.has_focus(egui::Id::new("pagewing-help-input")))
+                );
+                assert!(
+                    !context
+                        .memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")))
+                );
+                assert_eq!(app.nav.page, 2);
+                assert_eq!(app.comments.view.filter.query, "book");
+                assert_eq!(app.comments.unsaved(), draft);
+                if draft {
+                    assert_eq!(
+                        app.comments.editor.as_ref().unwrap().contents,
+                        "Unsaved 中文 📝"
+                    );
+                }
+                // A later Escape hides the panel, then reading shortcuts work
+                // in the same batch without discarding its saved filter/draft.
+                let mut events = key(Key::Escape, Modifiers::NONE);
+                events.extend(key(Key::J, Modifiers::SHIFT));
+                sized_frame(&mut app, &context, size, events);
+                assert!(!app.comments.open);
+                assert_eq!(app.nav.page, 3);
+                assert_eq!(app.comments.view.filter.query, "book");
+                assert_eq!(app.comments.unsaved(), draft);
+            }
+        }
+    }
 }
 
 #[test]

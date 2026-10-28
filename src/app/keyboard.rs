@@ -341,7 +341,14 @@ impl Pagewing {
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
-            if key == Key::Escape && self.comments.open {
+            // Floating reader windows sit above the comment sidebar. Dismiss
+            // the front window first and keep the underlying draft visible.
+            if key == Key::Escape
+                && self.comments.open
+                && !self.help
+                && !self.properties_open
+                && self.recent_picker.is_none()
+            {
                 self.set_comments_open(context, false);
                 context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
@@ -351,7 +358,7 @@ impl Pagewing {
                 self.hints.cancel();
                 self.selection.cancel();
                 self.mark_action = None;
-                self.help = false;
+                self.close_help(context);
                 self.properties_open = false;
                 self.recent_picker = None;
                 self.page_input = None;
@@ -365,6 +372,7 @@ impl Pagewing {
                         memory.surrender_focus(id);
                     }
                 });
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 continue;
             }
             if modifiers.command && key == Key::O {

@@ -88,6 +88,16 @@ def run(binary):
                 keyboard.key("m", ctrl=True, shift=True)
                 query("elsewhere")
                 assert copied() == "elsewhere", "filter input owns text editing shortcuts"
+                for window in ("recent", "help", "properties"):
+                    if window == "recent":
+                        keyboard.key("p", ctrl=True)
+                    else:
+                        keyboard.click((500, 400))  # Return focus to the reader.
+                        keyboard.key(0xFFBE if window == "help" else "s")
+                    keyboard.key(0xFF1B)
+                    query("elsewhere")
+                    assert copied() == "elsewhere", f"Escape closes {window} before the underlying comment panel"
+                    expect(0)
                 keyboard.key(0xFF09, shift=True)  # Filter -> Copy.
                 keyboard.key(0xFF0D)
                 exported = keyboard.clipboard()
@@ -161,7 +171,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload, filtered clipboard export with thread context, keyboard activation/focus traversal and page navigation")
+                print("PASS: native comment filters, Escape closes recent/help/properties before comments, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload, filtered clipboard export with thread context, keyboard activation/focus traversal and page navigation")
             except Exception:
                 log.flush()
                 log.seek(0)
