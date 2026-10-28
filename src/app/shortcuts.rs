@@ -60,9 +60,18 @@ pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
         return;
     }
     let state_id = ui.id().with("focused-control");
-    let state = (ui.memory(|memory| memory.focused()), viewport);
+    // Horizontal bars may grow when an optional control appears without a
+    // viewport resize. Content width is stable during manual scrolling, unlike
+    // screen-space positions, so it can reveal moved controls without pulling
+    // a manually scrolled bar back on every frame.
+    let content_width = (viewport.y == 0.0).then(|| ui.min_size().x);
+    let state = (
+        ui.memory(|memory| memory.focused()),
+        viewport,
+        content_width,
+    );
     let previous = ui.data_mut(|data| {
-        let previous = data.get_temp::<(Option<Id>, Vec2)>(state_id);
+        let previous = data.get_temp::<(Option<Id>, Vec2, Option<f32>)>(state_id);
         data.insert_temp(state_id, state);
         previous
     });

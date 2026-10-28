@@ -3,9 +3,13 @@ use crate::navigation::Fit;
 use eframe::egui::{self, RichText, scroll_area::ScrollAreaOutput};
 
 impl Pagewing {
+    pub(super) fn toolbar_control_focused(&self, context: &egui::Context) -> bool {
+        shortcuts::focused_in_region(context, self.toolbar_region)
+    }
+
     pub(super) fn toolbar(&mut self, context: &egui::Context) {
         self.input_buttons = shortcuts::InputButtons::default();
-        egui::TopBottomPanel::top("toolbar")
+        let panel = egui::TopBottomPanel::top("toolbar")
             .frame(appearance::panel(context, 4))
             .exact_height(56.0)
             .show(context, |ui| {
@@ -17,22 +21,26 @@ impl Pagewing {
                         ui.label(RichText::new("Pagewing").size(19.0).strong());
                     }
                     ui.add_space(16.0);
-                    if ui
-                        .button("Open")
+                    if appearance::toolbar_button(ui, "open", egui::Button::new("Open"))
                         .on_hover_text_lazy(|| self.library.shortcuts.label("open"))
                         .clicked()
                     {
                         self.choose_file();
                     }
                     if !self.reading.path.as_os_str().is_empty()
-                        && appearance::tool(ui, appearance::Icon::Close, "Close document", false)
-                            .on_hover_text_lazy(|| self.library.shortcuts.label("close"))
-                            .clicked()
+                        && appearance::toolbar_tool(
+                            ui,
+                            appearance::Icon::Close,
+                            "Close document",
+                            false,
+                        )
+                        .on_hover_text_lazy(|| self.library.shortcuts.label("close"))
+                        .clicked()
                     {
                         self.close_document(context);
                     }
                     if self.nav.count > 0 {
-                        if appearance::tool(
+                        if appearance::toolbar_tool(
                             ui,
                             appearance::Icon::Sidebar,
                             "Sidebar",
@@ -45,7 +53,7 @@ impl Pagewing {
                             self.dirty = true;
                         }
                         self.input_buttons.comments = Some(
-                            appearance::tool(
+                            appearance::toolbar_tool(
                                 ui,
                                 appearance::Icon::Comments,
                                 "Comments",
@@ -54,26 +62,43 @@ impl Pagewing {
                             .on_hover_text_lazy(|| self.library.shortcuts.label("comments"))
                             .id,
                         );
-                        if !self.selection.rects.is_empty() && ui.button("Add comment").clicked() {
+                        if !self.selection.rects.is_empty()
+                            && appearance::toolbar_button(
+                                ui,
+                                "add-comment",
+                                egui::Button::new("Add comment"),
+                            )
+                            .clicked()
+                        {
                             self.add_comment(ui.ctx());
                         }
                         ui.separator();
-                        if appearance::tool(ui, appearance::Icon::Previous, "Previous page", false)
-                            .on_hover_text_lazy(|| self.library.shortcuts.label("previous_page"))
-                            .clicked()
+                        if appearance::toolbar_tool(
+                            ui,
+                            appearance::Icon::Previous,
+                            "Previous page",
+                            false,
+                        )
+                        .on_hover_text_lazy(|| self.library.shortcuts.label("previous_page"))
+                        .clicked()
                         {
                             self.step(-1);
                         }
-                        if appearance::tool(ui, appearance::Icon::Next, "Next page", false)
+                        if appearance::toolbar_tool(ui, appearance::Icon::Next, "Next page", false)
                             .on_hover_text_lazy(|| self.library.shortcuts.label("next_page"))
                             .clicked()
                         {
                             self.step(1);
                         }
                         ui.separator();
-                        if appearance::tool(ui, appearance::Icon::Rotate, "Rotate page", false)
-                            .on_hover_text_lazy(|| self.library.shortcuts.label("rotate"))
-                            .clicked()
+                        if appearance::toolbar_tool(
+                            ui,
+                            appearance::Icon::Rotate,
+                            "Rotate page",
+                            false,
+                        )
+                        .on_hover_text_lazy(|| self.library.shortcuts.label("rotate"))
+                        .clicked()
                         {
                             self.rotate_page(false, 1);
                         }
@@ -81,7 +106,7 @@ impl Pagewing {
                     right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
                         ui.add_space(12.0);
                         self.input_buttons.help = Some(
-                            appearance::tool(
+                            appearance::toolbar_tool(
                                 ui,
                                 appearance::Icon::Help,
                                 "Keyboard shortcuts",
@@ -89,7 +114,7 @@ impl Pagewing {
                             )
                             .id,
                         );
-                        if appearance::tool(
+                        if appearance::toolbar_tool(
                             ui,
                             appearance::Icon::Theme,
                             if self.library.dark {
@@ -107,7 +132,7 @@ impl Pagewing {
                         }
                         if self.nav.count > 0 {
                             self.input_buttons.find = Some(
-                                appearance::tool(
+                                appearance::toolbar_tool(
                                     ui,
                                     appearance::Icon::Search,
                                     "Find in document",
@@ -116,7 +141,7 @@ impl Pagewing {
                                 .on_hover_text_lazy(|| self.library.shortcuts.label("find"))
                                 .id,
                             );
-                            if appearance::tool(
+                            if appearance::toolbar_tool(
                                 ui,
                                 appearance::Icon::Bookmark,
                                 "Bookmark",
@@ -131,6 +156,7 @@ impl Pagewing {
                     });
                 });
             });
+        self.toolbar_region = Some((panel.response.layer_id, panel.response.rect));
     }
 
     pub(super) fn view_controls(&mut self, ui: &mut egui::Ui) {
@@ -282,6 +308,189 @@ pub(super) fn right_group<R>(
 mod tests {
     use super::*;
     use egui::{Context, Event, Modifiers, MouseWheelUnit, PointerButton, RawInput, Rect, Vec2};
+
+    fn reader_frame(app: &mut Pagewing, context: &Context, width: f32, events: Vec<Event>) {
+        let _ = context.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                app.keys(context);
+                app.toolbar(context);
+                egui::CentralPanel::default().show(context, |_| {});
+            },
+        );
+    }
+
+    #[test]
+    fn reader_toolbar_focus_stays_on_its_action_when_controls_reflow() {
+        use super::shortcuts::InputButton;
+        for action in [InputButton::Help, InputButton::Find, InputButton::Comments] {
+            let root = tempfile::tempdir().unwrap();
+            let context = Context::default();
+            let mut app =
+                Pagewing::with_context(&context, None, None, root.path().join("library.json"));
+            app.nav = crate::navigation::Navigation::new(6, 2);
+            app.dimensions = vec![[600.0, 800.0]; 6];
+            reader_frame(&mut app, &context, 1180.0, Vec::new());
+            let target = |app: &Pagewing| {
+                match action {
+                    InputButton::Help => app.input_buttons.help,
+                    InputButton::Find => app.input_buttons.find,
+                    InputButton::Comments => app.input_buttons.comments,
+                    _ => unreachable!(),
+                }
+                .unwrap()
+            };
+            let focused = target(&app);
+            context.memory_mut(|memory| memory.request_focus(focused));
+            for (width, selected) in [
+                (900.0, false),
+                (240.0, false),
+                (1180.0, false),
+                (240.0, false),
+                (240.0, true),
+                (240.0, false),
+            ] {
+                app.selection.rects = if selected {
+                    vec![hayro::kurbo::Rect::new(10.0, 20.0, 80.0, 30.0)]
+                } else {
+                    Vec::new()
+                };
+                for _ in 0..5 {
+                    reader_frame(&mut app, &context, width, Vec::new());
+                }
+                assert_eq!(
+                    target(&app),
+                    focused,
+                    "{action:?}, width {width}, selection {selected}: preserve the action identity"
+                );
+                assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+                let response = context.read_response(focused).unwrap();
+                assert!(
+                    response.interact_rect.contains_rect(response.rect),
+                    "{action:?}, width {width}, selection {selected}: reveal the actual focused button"
+                );
+                assert_eq!(app.nav.page, 2);
+                assert!(!app.help && !app.search_open && !app.comments.open);
+            }
+            reader_frame(
+                &mut app,
+                &context,
+                240.0,
+                [true, false]
+                    .map(|pressed| Event::Key {
+                        key: egui::Key::Space,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    })
+                    .into(),
+            );
+            assert_eq!(app.help, action == InputButton::Help);
+            assert_eq!(app.search_open, action == InputButton::Find);
+            assert_eq!(app.comments.open, action == InputButton::Comments);
+            assert_eq!(app.nav.page, 2);
+        }
+    }
+
+    #[test]
+    fn toolbar_tab_and_button_activation_leave_the_reading_view_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        let context = Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, root.path().join("library.json"));
+        app.nav = crate::navigation::Navigation::new(6, 2);
+        app.dimensions = vec![[600.0, 800.0]; 6];
+        app.viewport = Vec2::new(600.0, 500.0);
+        app.overflow = Vec2::new(800.0, 1000.0);
+        app.pan = Vec2::new(37.0, 53.0);
+        let sidebar = app.library.sidebar;
+        reader_frame(&mut app, &context, 1180.0, Vec::new());
+        let find = app.input_buttons.find.unwrap();
+        context.memory_mut(|memory| memory.request_focus(find));
+        reader_frame(&mut app, &context, 1180.0, Vec::new());
+        let key = |key, modifiers| {
+            [true, false]
+                .map(|pressed| Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                })
+                .to_vec()
+        };
+        reader_frame(
+            &mut app,
+            &context,
+            1180.0,
+            key(egui::Key::Tab, Modifiers::NONE),
+        );
+        assert_eq!(
+            app.library.sidebar, sidebar,
+            "Tab on the toolbar must traverse controls"
+        );
+        let bookmark = context.memory(|memory| memory.focused()).unwrap();
+        assert_ne!(bookmark, find);
+        for width in [240.0, 1180.0, 240.0] {
+            for _ in 0..5 {
+                reader_frame(&mut app, &context, width, Vec::new());
+            }
+            assert_eq!(context.memory(|memory| memory.focused()), Some(bookmark));
+            let response = context.read_response(bookmark).unwrap();
+            assert!(response.interact_rect.contains_rect(response.rect));
+        }
+        reader_frame(
+            &mut app,
+            &context,
+            240.0,
+            key(egui::Key::Space, Modifiers::NONE),
+        );
+        assert!(
+            app.reading.bookmarks.contains(&2),
+            "Space must activate the focused Bookmark button"
+        );
+        assert_eq!(
+            app.pan,
+            Vec2::new(37.0, 53.0),
+            "button activation must not scroll the PDF"
+        );
+        assert_eq!(app.nav.page, 2);
+        reader_frame(
+            &mut app,
+            &context,
+            240.0,
+            key(egui::Key::Tab, Modifiers::SHIFT),
+        );
+        // Reverse traversal publishes its target on the following egui frame.
+        reader_frame(&mut app, &context, 240.0, Vec::new());
+        assert_eq!(context.memory(|memory| memory.focused()), Some(find));
+        assert_eq!(app.library.sidebar, sidebar);
+        reader_frame(
+            &mut app,
+            &context,
+            240.0,
+            key(egui::Key::Escape, Modifiers::NONE),
+        );
+        assert_eq!(context.memory(|memory| memory.focused()), None);
+        reader_frame(
+            &mut app,
+            &context,
+            240.0,
+            key(egui::Key::Tab, Modifiers::NONE),
+        );
+        assert_eq!(
+            app.library.sidebar, !sidebar,
+            "Tab keeps its reading shortcut after Escape"
+        );
+    }
 
     #[test]
     fn shortcut_tooltips_format_only_when_visible_and_follow_current_bindings() {

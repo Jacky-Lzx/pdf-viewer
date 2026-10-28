@@ -109,7 +109,7 @@ require('tex-tools').setup({
 
 按 `v` 进入选择模式并拖选文字，点击工具栏 **Add comment**（或 `Ctrl/Cmd+Shift+h`），在右侧 Comments 面板输入批注后点击 **Save comment**（或 `Ctrl/Cmd+Enter`）。保存直接更新当前 PDF 文件，并保留阅读位置；无需选择保存路径，不生成副本或备份。每次保存一条新增或修改的批注，可继续添加下一条。快速输入后立即按保存快捷键也会保留末尾文字；同一批操作中的隐藏面板与翻页不会丢弃已请求的保存。保存完成前会阻止关闭、重载或恢复其他文档，完成后可重试。comment 可以包含中文和多行文字，也可以留空以只保存高亮。
 
-打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，以固定高度卡片显示页码、作者、状态与正文摘要；悬停或打开编辑器可查看全文。列表只绘制可见条目，面板宽度可拖动调整。编辑器的保存和放弃按钮固定在面板底部，长批注与小窗口也能直接操作；底部显示已保存或未保存状态。紧凑窗口使用 **Save / Discard**，回复和删除收进 **More…** 菜单。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
+打开 PDF 后，**Comments** 侧栏默认关闭。点击工具栏 **Comments**（或 `Ctrl/Cmd+Shift+m`）可显示或隐藏面板。右侧列表按文档页序展示批注线程，回复缩进排列在父批注下，以固定高度卡片显示页码、作者、状态与正文摘要；悬停或打开编辑器可查看全文。列表只绘制可见条目，面板宽度可拖动调整。编辑器的保存和放弃按钮固定在面板底部，长批注与小窗口也能直接操作；底部显示已保存或未保存状态。紧凑窗口使用 **Save / Discard**，回复和删除收进 **More…** 菜单。保存与放弃按钮的键盘焦点在宽、窄布局切换后仍保留，按 `Enter` 或空格激活当前操作。点击条目会跳到对应页面，并可编辑 comment；普通阅读模式下，悬停高亮可预览 comment，点击高亮可打开编辑器。单页和连续滚动模式均支持；读取 PDF 的 `Contents` 文本，不包含云端讨论或独立的 Skim notes 文件。
 
 批注筛选：面板顶部可按正文与作者搜索，支持 Unicode 大小写折叠和空格分隔的多个关键词；各词可分别匹配作者或正文。可叠加 **All statuses** 状态选择、**Marked only** 勾选标记及 **Current page** 当前页筛选。窄面板中筛选控件纵向排列并自动换行；筛选和编辑器的状态框随可用宽度收缩，悬停可查看完整状态，下拉选项保留完整文字并支持滚动。
 
@@ -170,7 +170,9 @@ night = []                 # 停用该动作的快捷键
 
 ## 键盘操作
 
-窗口最小尺寸为 240 × 240 像素，支持同时缩窄宽度和高度。顶部工具栏和搜索栏在按钮放不下时可横向滚动：将指针移到栏内使用鼠标滚轮、触控板左右滑动，或拖动栏底部的横向滚动条。底部缩放与 View 显示模式菜单在窄窗口中也可横向滚动访问；侧栏内容可纵向滚动。
+窗口最小尺寸为 240 × 240 像素，支持同时缩窄宽度和高度。工具栏按钮保留各自的键盘焦点，缩窗或出现选区操作后会显露聚焦项；`Tab` / `Shift+Tab` 在控件间移动，`Enter` / 空格激活，`Escape` 将焦点交回阅读区。
+
+顶部工具栏和搜索栏在按钮放不下时可横向滚动：将指针移到栏内使用鼠标滚轮、触控板左右滑动，或拖动栏底部的横向滚动条。底部缩放与 View 显示模式菜单在窄窗口中也可横向滚动访问；侧栏内容可纵向滚动。
 
 矮窗口会收起侧栏顶部的文件摘要，优先显示目录筛选和章节列表。按 `c` 聚焦目录后，键盘选中项会保持可见；调整窗口尺寸后仍能继续选择和回车跳转，支持 240 × 240 的最小窗口。
 
@@ -488,6 +490,8 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py targ
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-file-watch.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
+# 工具栏焦点在宽/窄布局间保留，激活按钮不同时滚动页面
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-focus.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing

@@ -153,28 +153,38 @@ impl Pagewing {
                     });
                 }
             }
-            ui.horizontal_wrapped(|ui| {
-                actions.save = ui
-                    .add_enabled(
-                        !busy
-                            && !comment.locked
-                            && (comment.editable() || comment.contents == self.comments.original),
-                        egui::Button::new(if compact { "Save" } else { "Save comment" }),
-                    )
-                    .on_hover_text("Save this comment directly to the current PDF · Ctrl/Cmd+Enter")
-                    .clicked();
-                actions.discard = ui
-                    .add_enabled(
-                        !busy,
-                        egui::Button::new(if compact {
-                            "Discard"
-                        } else {
-                            "Discard / close editor"
-                        }),
-                    )
-                    .on_hover_text("Discard changes and close this editor")
-                    .clicked();
-            });
+            // Bind Save and Discard to their actions when the compact footer
+            // changes the structure of the preceding status and menu row.
+            ui.scope_builder(
+                egui::UiBuilder::new().id(("comment-editor-primary", self.id)),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        actions.save = ui
+                            .add_enabled(
+                                !busy
+                                    && !comment.locked
+                                    && (comment.editable()
+                                        || comment.contents == self.comments.original),
+                                egui::Button::new(if compact { "Save" } else { "Save comment" }),
+                            )
+                            .on_hover_text(
+                                "Save this comment directly to the current PDF · Ctrl/Cmd+Enter",
+                            )
+                            .clicked();
+                        actions.discard = ui
+                            .add_enabled(
+                                !busy,
+                                egui::Button::new(if compact {
+                                    "Discard"
+                                } else {
+                                    "Discard / close editor"
+                                }),
+                            )
+                            .on_hover_text("Discard changes and close this editor")
+                            .clicked();
+                    });
+                },
+            );
             if comment.slot.is_some() && !compact {
                 (actions.reply, actions.delete) = ui.horizontal_wrapped(thread_actions).inner;
             }

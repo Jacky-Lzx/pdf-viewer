@@ -91,7 +91,7 @@ pub(super) fn logo(ui: &mut egui::Ui, size: f32) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 pub(super) enum Icon {
     Sidebar,
     Comments,
@@ -105,8 +105,29 @@ pub(super) enum Icon {
     Help,
 }
 
-pub(super) fn tool(ui: &mut egui::Ui, icon: Icon, label: &str, selected: bool) -> egui::Response {
-    let response = ui.add(
+/// Toolbar controls keep their action identity when responsive labels or
+/// selection controls appear, disappear, or change their place in the row.
+pub(super) fn toolbar_button(
+    ui: &mut egui::Ui,
+    action: impl std::hash::Hash,
+    button: egui::Button<'_>,
+) -> egui::Response {
+    ui.scope_builder(
+        egui::UiBuilder::new().id(("reader-toolbar", action)),
+        |ui| ui.add(button),
+    )
+    .inner
+}
+
+pub(super) fn toolbar_tool(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    let response = toolbar_button(
+        ui,
+        icon,
         egui::Button::new("")
             .min_size(Vec2::new(32.0, 32.0))
             .selected(selected),

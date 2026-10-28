@@ -76,7 +76,7 @@ jobs:
               recent welcome password zoom persistence install-linux preview-layout
           - shard: 4
             tests: >-
-              desktop destinations thumbnails selection selection-scroll
+              desktop destinations thumbnails toolbar-focus selection selection-scroll
               page-size tiles long-title file-watch mouse-input
     steps:
       - uses: actions/checkout@v4
