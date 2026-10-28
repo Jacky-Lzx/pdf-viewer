@@ -111,6 +111,17 @@ pub struct Library {
     pub shortcuts: crate::settings::Shortcuts,
 }
 
+pub struct RemovedRecent {
+    index: usize,
+    state: Arc<ReadingState>,
+}
+
+impl RemovedRecent {
+    pub fn path(&self) -> &Path {
+        &self.state.path
+    }
+}
+
 impl Library {
     pub fn load(path: &Path) -> Self {
         let legacy = (path == config_path()).then(|| {
@@ -153,6 +164,27 @@ impl Library {
         self.recent.insert(0, Arc::new(state));
         self.recent.truncate(24);
     }
+
+    pub fn remove_recent(&mut self, path: &Path) -> Option<RemovedRecent> {
+        let index = self.recent.iter().position(|item| item.path == path)?;
+        Some(RemovedRecent {
+            index,
+            state: self.recent.remove(index),
+        })
+    }
+
+    pub fn restore_recent(&mut self, removed: RemovedRecent) {
+        // A newer record wins if the document has been reopened in the meantime.
+        if !self
+            .recent
+            .iter()
+            .any(|item| item.path == removed.state.path)
+        {
+            self.recent
+                .insert(removed.index.min(self.recent.len()), removed.state);
+            self.recent.truncate(24);
+        }
+    }
 }
 
 pub fn config_path() -> PathBuf {
@@ -164,6 +196,76 @@ pub fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_removal_and_undo_preserve_order_shared_snapshots_and_full_reading_state() {
+        let mut library = Library::default();
+        for name in ["first.pdf", "middle.pdf", "last.pdf"] {
+            library.remember(ReadingState {
+                path: name.into(),
+                page: 7,
+                fit: Fit::Custom(2.5),
+                rotation: 3,
+                offset: [0.3, 0.6],
+                bookmarks: [2, 7].into(),
+                marks: [(
+                    'a',
+                    ReadingMark {
+                        page: 5,
+                        ..Default::default()
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            });
+        }
+        let snapshot = library.clone();
+        let expected = serde_json::to_value(&snapshot).unwrap();
+        assert!(library.remove_recent(Path::new("missing.pdf")).is_none());
+        let removed = library.remove_recent(Path::new("middle.pdf")).unwrap();
+        assert_eq!(removed.path(), Path::new("middle.pdf"));
+        assert_eq!(library.recent.len(), 2);
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
+        assert!(Arc::ptr_eq(&library.recent[0], &snapshot.recent[0]));
+        assert!(Arc::ptr_eq(&library.recent[1], &snapshot.recent[2]));
+        library.restore_recent(removed);
+        assert_eq!(serde_json::to_value(&library).unwrap(), expected);
+        assert!(
+            library
+                .recent
+                .iter()
+                .zip(&snapshot.recent)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+        );
+    }
+
+    #[test]
+    fn recent_undo_keeps_newer_records_and_the_history_bound() {
+        let mut library = Library::default();
+        for index in 0..24 {
+            library.remember(ReadingState {
+                path: format!("{index}.pdf").into(),
+                ..Default::default()
+            });
+        }
+        let removed = library.remove_recent(Path::new("23.pdf")).unwrap();
+        library.remember(ReadingState {
+            path: "23.pdf".into(),
+            page: 9,
+            ..Default::default()
+        });
+        library.restore_recent(removed);
+        assert_eq!(library.recent.len(), 24);
+        assert_eq!(library.recent[0].page, 9);
+        let removed = library.remove_recent(Path::new("0.pdf")).unwrap();
+        library.remember(ReadingState {
+            path: "new.pdf".into(),
+            ..Default::default()
+        });
+        library.restore_recent(removed);
+        assert_eq!(library.recent.len(), 24);
+        assert_eq!(library.recent[0].path, Path::new("new.pdf"));
+    }
 
     #[test]
     fn snapshots_share_records_but_later_reading_edits_are_isolated() {

@@ -33,6 +33,8 @@ impl Pagewing {
         let mut open = true;
         let mut cancelled = false;
         let mut chosen = None;
+        let mut removed = None;
+        let mut undo = false;
         let size = context.content_rect().size();
         let compact = size.x < 480.0 || size.y < 420.0;
         dialog::window(context, "Recent documents", "Recent", 580.0)
@@ -69,7 +71,15 @@ impl Pagewing {
                     .max(ui.spacing().interact_size.y)
                     .max(ui.text_style_height(&egui::TextStyle::Button)
                         + ui.spacing().button_padding.y * 2.0);
-                if compact {
+                if picker.undo.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("{} documents", picker.len()));
+                        undo = ui
+                            .small_button(if compact { "Undo" } else { "Undo remove" })
+                            .on_hover_text("Restore the last removed document and its saved reading state")
+                            .clicked();
+                    });
+                } else if compact {
                     ui.weak(format!("{} documents", picker.len()));
                 } else {
                     ui.weak(format!(
@@ -106,16 +116,48 @@ impl Pagewing {
                             });
                         }
                         for row in 0..picker.len() {
-                            let response = ui
-                                .add_sized(
-                                    [ui.available_width(), row_height],
-                                    egui::Button::selectable(
-                                        picker.selected == row,
-                                        picker.label(row),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(picker.display(row));
+                            let active = (self.nav.count > 0 || self.loading)
+                                && picker.path(row) == self.reading.path;
+                            let (response, remove) = ui
+                                .push_id(picker.path(row), |ui| {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), row_height),
+                                        egui::Sense::hover(),
+                                    );
+                                    let remove_rect = egui::Rect::from_min_max(
+                                        egui::pos2((rect.right() - 24.0).max(rect.left()), rect.top()),
+                                        rect.max,
+                                    );
+                                    let open_rect = egui::Rect::from_min_max(
+                                        rect.min,
+                                        egui::pos2((remove_rect.left() - ui.spacing().item_spacing.x).max(rect.left()), rect.bottom()),
+                                    );
+                                    let response = ui.place(
+                                        open_rect,
+                                        egui::Button::selectable(picker.selected == row, picker.label(row)).truncate(),
+                                    ).on_hover_text(picker.display(row));
+                                    // This child stays inside the allocated row. An
+                                    // enabled scope at the next cursor would add a
+                                    // second spacing gap after every result.
+                                    let mut remove_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(remove_rect)
+                                            .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                                    );
+                                    if active {
+                                        remove_ui.disable();
+                                    }
+                                    let remove = remove_ui.add(egui::Button::new("×"))
+                                        .on_hover_text("Remove from recent, including saved position, bookmarks and marks. The PDF is kept. Delete also works when this row is focused.")
+                                        .on_disabled_hover_text("Close this document before removing its saved history.");
+                                    remove.widget_info(|| egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        !active,
+                                        format!("Remove {} from recent", picker.display(row)),
+                                    ));
+                                    (response, remove)
+                                })
+                                .inner;
                             if reveal && picker.selected == row {
                                 // Keep visible neighbors still; only reveal the
                                 // portion that lies outside the result viewport.
@@ -123,6 +165,17 @@ impl Pagewing {
                                     None,
                                     egui::style::ScrollAnimation::none(),
                                 );
+                            }
+                            if super::list_focus::row_focus(&response)
+                                .or_else(|| super::list_focus::row_focus(&remove))
+                                .is_some()
+                            {
+                                picker.selected = row;
+                            }
+                            let delete = response.has_focus()
+                                && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+                            if !active && (remove.clicked() || delete) {
+                                removed = Some(picker.path(row).to_owned());
                             }
                             if response.clicked() {
                                 picker.selected = row;
@@ -171,6 +224,28 @@ impl Pagewing {
                     }
                 });
             });
+        if undo {
+            if let Some(record) = picker.undo.take() {
+                let path = record.path().to_owned();
+                self.library.restore_recent(record);
+                picker.refresh(
+                    self.library.recent.iter().map(|book| book.path.clone()),
+                    Some(&path),
+                );
+                self.dirty = true;
+                chosen = None;
+            }
+        } else if let Some(path) = removed
+            && let Some(record) = self.library.remove_recent(&path)
+        {
+            picker.undo = Some(record);
+            picker.refresh(
+                self.library.recent.iter().map(|book| book.path.clone()),
+                None,
+            );
+            self.dirty = true;
+            chosen = None;
+        }
         if let Some(path) = chosen {
             self.open(path, context);
         } else if open && !cancelled {
@@ -185,6 +260,7 @@ impl Pagewing {
 
 #[cfg(test)]
 mod tests {
+    mod removal;
     use super::*;
     use crate::recent::RecentPicker;
 
@@ -330,8 +406,8 @@ mod tests {
                 size,
                 vec![egui::Event::Paste("strasse".into())],
             );
-            // The one result, Open and Copy are distinct focus stops.
-            for _ in 0..3 {
+            // The result, remove, Open and Copy are distinct focus stops.
+            for _ in 0..4 {
                 sized_frame(&mut app, &context, size, key(egui::Key::Tab));
             }
             for activation in [egui::Key::Enter, egui::Key::Space] {
@@ -673,7 +749,7 @@ mod tests {
         let mut app =
             Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
         let path = directory.path().join("selected.pdf");
-        for tabs in [4, 2, 1] {
+        for tabs in [5, 3, 1] {
             app.clear_document(&context);
             app.recent_picker = Some(RecentPicker::new(std::iter::once(path.clone())));
             for _ in 0..4 {
@@ -684,7 +760,7 @@ mod tests {
             }
             frame(&mut app, &context, key(egui::Key::Enter));
             assert!(app.recent_picker.is_none());
-            if tabs == 4 {
+            if tabs == 5 {
                 assert!(!app.loading, "Enter on Cancel must not load a document");
                 assert!(app.reading.path.as_os_str().is_empty());
             } else {
@@ -701,7 +777,7 @@ mod tests {
         for _ in 0..4 {
             frame(&mut app, &context, Vec::new());
         }
-        for _ in 0..2 {
+        for _ in 0..3 {
             frame(&mut app, &context, key(egui::Key::Tab));
         }
         frame(&mut app, &context, key(egui::Key::Enter));

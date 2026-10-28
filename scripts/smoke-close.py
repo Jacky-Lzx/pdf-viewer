@@ -136,10 +136,17 @@ def run(binary):
                 keyboard.key("w"); keyboard.key("z"); keyboard.key("b")
                 keyboard.key("m"); keyboard.key("a"); keyboard.key("b")
                 wait_for(lambda: book().get("page") == 2 and book().get("offset", [0, 0])[1] > 0.99, "width fit and bottom position")
+                before_search = book()
                 keyboard.key("/")
                 for letter in "jkg":
                     keyboard.key(letter)
-                wait_for(lambda: 0.8 < book().get("offset", [0, 0])[1] < 0.99, "search viewport updates the saved relative position")
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "jkg", "the search field is open and owns the query"
+                # Opening search changes the canvas height. Resizing now keeps
+                # the relative reading position, including the bottom edge.
+                wait_for(lambda: book().get("page") == 2 and
+                         abs(book().get("offset", [0, 0])[1] - before_search["offset"][1]) < 0.0001,
+                         "search viewport preserves the saved relative position")
                 before_close = book()
                 keyboard.key("w", ctrl=True)
                 closed()

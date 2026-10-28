@@ -331,6 +331,8 @@ night = []                 # 停用该动作的快捷键
 
 `Ctrl/Cmd+p` 从最近 24 份文档中按文件名或完整路径筛选，支持 Unicode 大小写折叠与空格分隔的多个关键词。在筛选框中用方向键或 `Ctrl+j/k` 逐条选择，`PageUp/PageDown` 按当前视口的可见行数移动，`Ctrl/Cmd+Home/End` 到首尾；普通 `Home/End` 保留文字编辑功能。回车、双击或 Open 按钮打开并恢复该文档的阅读位置。调整窗口大小后，列表会重新显露选中项，保留筛选内容；平时可自由滚动列表。也可用 Tab 聚焦结果、Open、Copy path 或 Cancel，按 Enter 激活当前控件。**Copy path**（紧凑窗口为 **Copy**）复制选中项的完整路径，保留最近列表、当前阅读位置和批注草稿；筛选框内的 `Ctrl/Cmd+c` 仍复制选中的筛选文字。没有结果或文件名无法准确表示为文字时，复制按钮禁用；非 UTF-8 路径仍可正常打开，不替换原始文件名字节。再次按快捷键、`Escape` 或 Cancel 关闭；筛选时输入不会触发页面导航。欢迎界面也提供入口。
 
+最近列表每行右侧的 **×** 可移除该文档的历史记录；Tab 聚焦文档行后也可按 `Delete`。PDF 文件会保留，该记录的阅读位置、书签和命名位置随记录移除；窗口内的 **Undo remove**（紧凑窗口为 **Undo**）可撤销最后一次移除，恢复完整状态和原排序，关闭窗口后不再保留撤销入口。筛选词会保留，移除后选中相邻结果。当前打开或正在加载的文档需先关闭才能移除；筛选框里的 `Delete` 继续编辑文字。
+
 欢迎页支持用 Tab / Shift+Tab 聚焦打开按钮、最近文档卡片和完整最近列表入口，按 Enter 或空格激活。焦点变化或调整窗口大小时会滚动显露当前控件，240×240 窗口也可操作；普通重绘会保留手动滚动的位置。
 
 最近文档、章节和批注筛选框都保留 `Shift+↑/↓` 的文字选择功能；未加修饰键的 `↑/↓` 和 `Ctrl+j/k` 用于逐条移动结果。
@@ -487,6 +489,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py ta
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-persistence.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-paths.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent-remove.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-welcome.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-close.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-load-cancel.py target/release/pagewing

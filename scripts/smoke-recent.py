@@ -191,8 +191,8 @@ def run(binary):
                 keyboard.key(0xFF0D)
                 expect(paths[-2], 4, "last recent result opens at minimum size")
                 picker("alpha")
-                # One result: Tab goes to the row, Open, Copy, then Cancel.
-                for _ in range(3):
+                # One result: row, remove, Open, Copy, then Cancel.
+                for _ in range(4):
                     keyboard.key(0xFF09)
                 keyboard.key(0xFF0D)
                 assert keyboard.clipboard() == str(paths[0]), "Copy keeps the full selected path at minimum size"
@@ -200,7 +200,7 @@ def run(binary):
                 keyboard.key("k", shift=True)
                 expect(paths[-2], 3, "Enter on Cancel closes the picker without opening its selected result")
                 picker("alpha")
-                keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
+                keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
                 expect(paths[0], 0, "Tab and Enter activate Open at minimum size")
                 picker("jkgmissing")
                 keyboard.key(0xFF57, ctrl=True)  # Ctrl+End with no results

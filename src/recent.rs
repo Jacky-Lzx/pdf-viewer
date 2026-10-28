@@ -17,6 +17,7 @@ pub struct RecentPicker {
     pub reveal: bool,
     pub motions: Vec<Motion>,
     pub confirm: bool,
+    pub undo: Option<crate::state::RemovedRecent>,
 }
 
 impl RecentPicker {
@@ -48,6 +49,7 @@ impl RecentPicker {
             reveal: true,
             motions: Vec::new(),
             confirm: false,
+            undo: None,
         }
     }
 
@@ -68,6 +70,25 @@ impl RecentPicker {
         );
         self.selected = 0;
         self.reveal = true;
+    }
+
+    /// Rebuild only after a library edit, keeping the query and nearest result.
+    pub fn refresh(&mut self, paths: impl Iterator<Item = PathBuf>, preferred: Option<&Path>) {
+        let selected = self.selected;
+        let query = std::mem::take(&mut self.query);
+        let undo = self.undo.take();
+        *self = Self::new(paths);
+        self.query = query;
+        self.filter();
+        self.selected = preferred
+            .and_then(|path| {
+                self.visible
+                    .iter()
+                    .position(|&index| self.entries[index].path == path)
+            })
+            .unwrap_or(selected)
+            .min(self.len().saturating_sub(1));
+        self.undo = undo;
     }
 
     pub fn len(&self) -> usize {
@@ -95,6 +116,10 @@ impl RecentPicker {
         &self.entries[self.visible[row]].label
     }
 
+    pub fn path(&self, row: usize) -> &Path {
+        &self.entries[self.visible[row]].path
+    }
+
     pub fn display(&self, row: usize) -> &str {
         &self.entries[self.visible[row]].display
     }
@@ -109,6 +134,40 @@ impl RecentPicker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refreshing_after_removal_keeps_filter_and_nearest_selection_and_undo_reveals_the_path() {
+        let paths: Vec<PathBuf> = [
+            "one STRASSE.pdf",
+            "other.pdf",
+            "two Straße.pdf",
+            "three Straße.pdf",
+        ]
+        .map(PathBuf::from)
+        .into();
+        let mut picker = RecentPicker::new(paths.iter().cloned());
+        picker.query = "STRASSE".into();
+        picker.filter();
+        picker.step(1);
+        assert_eq!(picker.selected_path(), Some(paths[2].as_path()));
+        picker.refresh(
+            paths.iter().filter(|path| **path != paths[2]).cloned(),
+            None,
+        );
+        assert_eq!(picker.query, "STRASSE");
+        assert_eq!(picker.selected_path(), Some(paths[3].as_path()));
+        assert!(picker.focus && picker.reveal);
+        picker.refresh(paths.iter().cloned(), Some(&paths[2]));
+        assert_eq!(picker.selected_path(), Some(paths[2].as_path()));
+        picker.query = "other".into();
+        picker.filter();
+        picker.refresh(paths.iter().cloned(), Some(&paths[2]));
+        assert_eq!(picker.query, "other");
+        assert_eq!(picker.selected_path(), Some(paths[1].as_path()));
+        picker.refresh(std::iter::empty(), None);
+        assert_eq!(picker.selected_path(), None);
+        assert_eq!(picker.selected, 0);
+    }
 
     #[test]
     fn unicode_filter_matches_all_path_tokens_and_retains_original_paths() {
