@@ -103,7 +103,7 @@ impl Pagewing {
 
     pub(super) fn continuous_canvas(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect().shrink(24.0);
-        self.viewport = rect.size().max(Vec2::splat(1.0));
+        self.resize_viewport(rect.size().max(Vec2::splat(1.0)));
         if self.resolve_view().is_none() {
             return;
         }

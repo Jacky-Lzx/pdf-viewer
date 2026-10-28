@@ -171,7 +171,7 @@ impl Pagewing {
         .then(|| context.cumulative_pass_nr());
     }
 
-    fn pending_comment_input(&self, context: &egui::Context) -> bool {
+    pub(super) fn pending_comment_input(&self, context: &egui::Context) -> bool {
         self.comments.input_pass == Some(context.cumulative_pass_nr())
             && context.input(|input| input.events.iter().any(edits_comment))
     }

@@ -263,6 +263,8 @@ night = []                 # 停用该动作的快捷键
 | `F11` | 全屏 |
 | `Escape` | 关闭对话框或搜索，取消数字前缀 |
 
+顶部工具栏的 **Back to previous view / Forward to next view** 箭头可恢复跳转前后的页码、缩放、旋转、显示模式和页内滚动；没有可恢复位置时按钮禁用。搜索词和未保存的批注草稿会保留，关闭文档后清空历史。按钮支持 Tab 聚焦、Enter / Space 激活，窄窗口会自动滚动工具栏以显示当前焦点。
+
 底部状态栏提供 **− / 缩放比例 / +**；点击 **View** 菜单可集中选择单页（Single page）、连续滚动（Continuous）、双页并排（Two pages side by side），以及适合整页、宽度、高度和实际大小。双页模式从第 1 页起按 1–2、3–4 配对，共用缩放比例；翻页切换整组，末尾落单页居中显示。显示模式会随文档、命名位置和历史记录保存与恢复。
 
 在 **View** 菜单选择 **Continuous** 或按 `Shift+C` 开启连续滚动：页面按纵向排列，滚轮、触控板、拖动和 `j/k`、半屏 / 整屏滚动均可跨页，页码及侧栏随阅读位置更新。模式按文档保存，重新打开时恢复页码和滚动位置；旧阅读记录默认使用单页模式。连续模式仅渲染可见页面并预取相邻页，多个可见页共享 96 MiB 页面纹理缓存。搜索高亮、内部链接、缩放、旋转和单页文本选择同样可用；`f/F` 链接提示针对当前页，文本选择不跨页。`zt/zz/zb` 仍对齐当前页，`Ctrl+e/y` 在连续模式中也可跨页。
@@ -494,6 +496,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/rel
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
 # 顶部和底部控件焦点在宽/窄布局与动态状态间保留，激活按钮不同时滚动页面
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-focus.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-history.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing

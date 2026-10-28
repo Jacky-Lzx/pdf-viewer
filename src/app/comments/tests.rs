@@ -283,6 +283,59 @@ fn pointer_transitions_preserve_pending_editor_input() {
 }
 
 #[test]
+fn toolbar_history_preserves_the_comment_draft_and_its_page() {
+    let (_root, context, mut app) = saved_comment_editor();
+    app.jump(2);
+    app.comments.editor.as_mut().unwrap().contents = "Unsaved draft 📝".into();
+    let mut position = egui::Pos2::ZERO;
+    let mut draw = |events| {
+        let _ = context.run(
+            RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1180.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |context| {
+                app.events(context);
+                app.keys(context);
+                app.toolbar(context);
+                position = context
+                    .read_response(app.input_buttons.history_back.unwrap())
+                    .unwrap()
+                    .rect
+                    .center();
+                app.comments_sidebar(context);
+                app.canvas(context);
+            },
+        );
+        position
+    };
+    let mut pos = egui::Pos2::ZERO;
+    for _ in 0..3 {
+        pos = draw(Vec::new());
+    }
+    let mut events = key(Key::A, Modifiers::COMMAND);
+    events.push(Event::Text("Final unsaved draft 📝".into()));
+    events.push(Event::PointerMoved(pos));
+    events.extend([true, false].map(|pressed| Event::PointerButton {
+        pos,
+        pressed,
+        button: egui::PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    }));
+    draw(events);
+    assert_eq!(app.nav.page, 0);
+    assert!(app.comments.open && app.comments.unsaved());
+    let draft = app.comments.editor.as_ref().unwrap();
+    assert_eq!(draft.contents, "Final unsaved draft 📝");
+    assert_eq!(draft.page, 0);
+    assert!(!app.comments.saving && !app.loading);
+}
+
+#[test]
 fn queued_save_protects_the_editor_and_final_input_until_the_worker_starts() {
     for action in [
         Some((Key::W, Modifiers::COMMAND)),

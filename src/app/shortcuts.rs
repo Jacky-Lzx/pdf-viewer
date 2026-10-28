@@ -124,6 +124,7 @@ pub(super) fn focused_in_region(
 pub(super) enum InputButton {
     Help,
     Find,
+    History(bool),
     Search(SearchButton),
     Comments,
     CloseComments,
@@ -154,6 +155,8 @@ pub(super) enum SearchButton {
 pub(super) struct InputButtons {
     pub help: Option<Id>,
     pub find: Option<Id>,
+    pub history_back: Option<Id>,
+    pub history_forward: Option<Id>,
     pub search_case: Option<Id>,
     pub search_word: Option<Id>,
     pub search_previous: Option<Id>,
@@ -197,6 +200,8 @@ impl InputButtons {
         for (id, action) in [
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),
+            (self.history_back, InputButton::History(false)),
+            (self.history_forward, InputButton::History(true)),
             (self.search_case, InputButton::Search(SearchButton::Case)),
             (self.search_word, InputButton::Search(SearchButton::Word)),
             (

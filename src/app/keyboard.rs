@@ -24,6 +24,9 @@ impl Pagewing {
                 }
             }
             Some(shortcuts::InputButton::Find) => self.find(),
+            Some(shortcuts::InputButton::History(forward)) => {
+                self.toolbar_history(context, forward)
+            }
             Some(shortcuts::InputButton::Search(action)) => {
                 self.search_button(action);
                 if action == shortcuts::SearchButton::Copy && search_input_focused {

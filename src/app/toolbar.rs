@@ -102,6 +102,8 @@ impl Pagewing {
                         {
                             self.rotate_page(false, 1);
                         }
+                        ui.separator();
+                        self.history_controls(ui);
                     }
                     right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
                         ui.add_space(12.0);

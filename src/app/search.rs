@@ -651,7 +651,7 @@ mod tests {
                 context.memory_mut(|memory| memory.request_focus(id));
                 // Settle focus before activating, as with a real Tab press.
                 frame(&mut app, &context, Vec::new());
-                let before = app.pan;
+                let before = app.current_offset();
                 let revision = app.revision;
                 let output = frame(&mut app, &context, key(activation));
                 assert_eq!(app.query, "Rust", "{action:?}, {activation:?}");
@@ -694,7 +694,14 @@ mod tests {
                     }
                 }
                 if !matches!(action, SearchButton::Previous | SearchButton::Next) {
-                    assert_eq!(app.pan, before, "{action:?}, {activation:?}");
+                    // Closing the search bar changes the viewport height.
+                    // Activation must preserve the relative reading position.
+                    for (actual, expected) in app.current_offset().into_iter().zip(before) {
+                        assert!(
+                            (actual - expected).abs() < 0.0001,
+                            "{action:?}, {activation:?}: {actual} != {expected}"
+                        );
+                    }
                 }
             }
         }

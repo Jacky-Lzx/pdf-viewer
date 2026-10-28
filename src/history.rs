@@ -33,6 +33,16 @@ fn push(stack: &mut VecDeque<ReadingMark>, position: ReadingMark) {
 }
 
 impl ViewHistory {
+    /// Read-only availability must agree with traversal, including entries
+    /// removed by a reload and repeated positions at the current view.
+    pub fn can_go(&self, forward: bool, current: &ReadingMark, count: usize) -> bool {
+        let stack = if forward { &self.forward } else { &self.back };
+        stack
+            .iter()
+            .rev()
+            .any(|position| position.page < count && !same_view(position, current))
+    }
+
     pub fn record(&mut self, position: ReadingMark) {
         self.previous_jump = Some(position.clone());
         push(&mut self.back, position);
@@ -200,5 +210,33 @@ mod tests {
         assert_eq!(history.go(false, current, 3).unwrap().page, 0);
         history.retain_pages(0);
         assert!(history.back.is_empty() && history.forward.is_empty());
+    }
+
+    #[test]
+    fn availability_agrees_with_traversal_for_repeated_invalid_and_same_page_views() {
+        let mut history = ViewHistory::default();
+        for page in [0, 2, 5, 2] {
+            history.record(position(page, 0.2));
+        }
+        history.go(false, position(2, 0.8), 6);
+        for forward in [false, true] {
+            for count in [0, 1, 3, 6] {
+                for current in [position(2, 0.2), position(2, 0.8), position(5, 0.2)] {
+                    let mut copy = ViewHistory {
+                        back: history.back.clone(),
+                        forward: history.forward.clone(),
+                        previous_jump: history.previous_jump.clone(),
+                    };
+                    assert_eq!(
+                        history.can_go(forward, &current, count),
+                        copy.go(forward, current, count).is_some()
+                    );
+                }
+            }
+        }
+        let mut history = ViewHistory::default();
+        history.record(position(0, 0.2));
+        assert!(!history.can_go(false, &position(0, 0.200001), 1));
+        assert!(history.can_go(false, &position(0, 0.8), 1));
     }
 }

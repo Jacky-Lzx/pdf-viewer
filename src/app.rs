@@ -6,6 +6,7 @@ mod continuous;
 mod dialog;
 mod errors;
 mod help;
+mod history_controls;
 mod input_dialogs;
 mod keyboard;
 mod lifecycle;
@@ -23,6 +24,7 @@ mod sync;
 mod tiles;
 mod toolbar;
 mod tooltips;
+mod viewport;
 mod welcome;
 mod zoom;
 
@@ -984,7 +986,7 @@ impl Pagewing {
                     return;
                 }
                 let rect = ui.max_rect().shrink(24.0);
-                self.viewport = rect.size();
+                self.resize_viewport(rect.size());
                 let dimensions = self.dimensions[self.nav.page];
                 let Some(rotated) = self.resolve_view() else {
                     return;

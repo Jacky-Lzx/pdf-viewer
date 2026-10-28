@@ -103,6 +103,8 @@ pub(super) enum Icon {
     Bookmark,
     Theme,
     Help,
+    HistoryBack,
+    HistoryForward,
 }
 
 /// Action controls keep their identity when surrounding labels or optional
@@ -175,6 +177,14 @@ pub(super) fn toolbar_tool(
         }
         Icon::Previous => line(&[(3., -6.), (-3., 0.), (3., 6.)]),
         Icon::Next => line(&[(-3., -6.), (3., 0.), (-3., 6.)]),
+        Icon::HistoryBack => {
+            line(&[(7., 0.), (-7., 0.)]);
+            line(&[(-1., -6.), (-7., 0.), (-1., 6.)]);
+        }
+        Icon::HistoryForward => {
+            line(&[(-7., 0.), (7., 0.)]);
+            line(&[(1., -6.), (7., 0.), (1., 6.)]);
+        }
         Icon::Rotate => {
             line(&[
                 (5., -4.),
