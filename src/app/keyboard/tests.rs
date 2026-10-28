@@ -97,6 +97,35 @@ fn frame(app: &mut Pagewing, context: &Context, events: Vec<Event>) -> egui::Ful
     sized_frame(app, context, egui::vec2(1180.0, 820.0), events)
 }
 
+#[test]
+fn oversized_key_batches_dispatch_every_action_then_release_their_buffer() {
+    let directory = tempfile::tempdir().unwrap();
+    let context = Context::default();
+    let mut app =
+        Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+    let count = crate::input_actions::MAX_RETAINED_ACTIONS + 37;
+    app.nav = crate::navigation::Navigation::new(count + 4, 0);
+    app.dimensions = vec![[600.0, 800.0]; count + 4];
+    let events = (0..count)
+        .flat_map(|_| key(Key::J, Modifiers::SHIFT))
+        .collect();
+    frame(&mut app, &context, events);
+    assert_eq!(
+        app.nav.page, count,
+        "retention limits must not truncate this frame's commands"
+    );
+    assert!(app.reader_actions.is_empty());
+    assert!(app.reader_actions.capacity() <= crate::input_actions::MAX_RETAINED_ACTIONS);
+    frame(&mut app, &context, key(Key::K, Modifiers::SHIFT));
+    assert_eq!(
+        app.nav.page,
+        count - 1,
+        "the next frame must not replay old commands"
+    );
+    assert!(app.reader_actions.is_empty());
+    assert!(app.reader_actions.capacity() > 0);
+}
+
 fn sized_frame(
     app: &mut Pagewing,
     context: &Context,

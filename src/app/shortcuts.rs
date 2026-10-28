@@ -230,21 +230,7 @@ pub(super) fn zoom_action(key: Key, modifiers: Modifiers) -> Option<ZoomAction> 
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum KeyText {
-    None,
-    Character(char),
-    Other,
-}
-
-impl KeyText {
-    pub(super) fn character(self) -> Option<char> {
-        match self {
-            Self::Character(character) => Some(character),
-            _ => None,
-        }
-    }
-}
+pub(super) use crate::input_actions::KeyText;
 
 pub(super) fn reader_zoom_action(key: Key, shift: bool, text: KeyText) -> Option<ZoomAction> {
     match text {
@@ -277,46 +263,6 @@ pub(super) fn count_digit(key: Key, shift: bool, text: KeyText) -> Option<char> 
         },
         _ => None,
     }
-}
-
-pub(super) fn reader_actions(input: &InputState) -> impl Iterator<Item = (Event, KeyText)> + '_ {
-    input
-        .events
-        .iter()
-        .enumerate()
-        .filter_map(|(index, event)| {
-            let action = matches!(
-                event,
-                Event::Copy
-                    | Event::Key { pressed: true, .. }
-                    | Event::PointerButton {
-                        button: eframe::egui::PointerButton::Extra1
-                            | eframe::egui::PointerButton::Extra2,
-                        pressed: true,
-                        ..
-                    }
-            );
-            if !action {
-                return None;
-            }
-            // Some characters have no egui key and fall back to a physical
-            // digit/letter. Keep this press's literal text to distinguish them.
-            let text = if matches!(event, Event::Key { .. }) {
-                match input.events.get(index + 1) {
-                    Some(Event::Text(text)) => {
-                        let mut characters = text.chars();
-                        match (characters.next(), characters.next()) {
-                            (Some(character), None) => KeyText::Character(character),
-                            _ => KeyText::Other,
-                        }
-                    }
-                    _ => KeyText::None,
-                }
-            } else {
-                KeyText::None
-            };
-            Some((event.clone(), text))
-        })
 }
 
 pub(super) struct PointerFocusGuard {
@@ -776,16 +722,22 @@ mod tests {
                     Event::Text(symbol.to_string()),
                     key(Key::J, Modifiers::SHIFT, true),
                 ];
-                let actions: Vec<_> = reader_actions(&input).collect();
+                let actions: Vec<_> = crate::input_actions::reader_actions(&input).collect();
                 assert_eq!(actions.len(), 4);
                 assert_eq!(
                     actions
                         .iter()
-                        .map(|(_, text)| text.character())
+                        .map(|action| match action {
+                            crate::input_actions::ReaderAction::Key { text, .. } =>
+                                text.character(),
+                            _ => None,
+                        })
                         .collect::<Vec<_>>(),
                     [Some('5'), Some('0'), Some(symbol), None]
                 );
-                assert!(matches!(&actions[2].0, Event::Key { key, .. } if *key == symbol_key));
+                assert!(
+                    matches!(&actions[2], crate::input_actions::ReaderAction::Key { key, .. } if *key == symbol_key)
+                );
             }
         }
     }
@@ -829,9 +781,14 @@ mod tests {
             Event::Text(String::new()),
             key(Key::Num3, Modifiers::NONE, true),
         ];
-        let digits: Vec<_> = reader_actions(&input)
-            .map(|(event, text)| {
-                let Event::Key { key, modifiers, .. } = event else {
+        let digits: Vec<_> = crate::input_actions::reader_actions(&input)
+            .map(|event| {
+                let crate::input_actions::ReaderAction::Key {
+                    key,
+                    modifiers,
+                    text,
+                } = event
+                else {
                     unreachable!()
                 };
                 count_digit(key, modifiers.shift, text)

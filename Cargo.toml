@@ -171,3 +171,7 @@ harness = false
 [[bench]]
 name = "annotation_geometry"
 harness = false
+
+[[bench]]
+name = "input_actions"
+harness = false

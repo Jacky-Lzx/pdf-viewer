@@ -1,4 +1,5 @@
 use super::{MarkAction, Pagewing, input_dialogs, set_theme, shortcuts, zoom};
+use crate::input_actions::{self, ReaderAction};
 use crate::{links::LinkTarget, navigation::Fit};
 use eframe::egui::{self, Key, Vec2};
 
@@ -97,10 +98,9 @@ impl Pagewing {
         }
         // Preserve action order, including side-button history mixed with keys.
         // Text, paste, IME and primary pointer events stay in egui.
-        for (event, key_text) in
-            context.input(|input| shortcuts::reader_actions(input).collect::<Vec<_>>())
-        {
-            let symbol = key_text.character();
+        let mut actions = std::mem::take(&mut self.reader_actions);
+        context.input(|input| actions.extend(input_actions::reader_actions(input)));
+        for event in actions.drain(..) {
             // Opening/closing an input changes how later keys in this same
             // frame must be routed, before its widget has been drawn.
             let typing = (self.search_open && self.search_focus)
@@ -131,16 +131,15 @@ impl Pagewing {
                     .any(|name| memory.has_focus(egui::Id::new(name)))
                 });
             let popup_open = egui::Popup::is_any_open(context);
-            if let egui::Event::PointerButton { button, .. } = event {
+            if let ReaderAction::History { forward } = event {
                 if !typing && !self.help && !self.properties_open && !popup_open {
                     self.nav.clear_prefix();
                     self.mark_action = None;
-                    self.history(button == egui::PointerButton::Extra2);
+                    self.history(forward);
                 }
                 continue;
             }
-            if matches!(event, egui::Event::Copy) && !typing && !popup_open && self.selection.active
-            {
+            if event == ReaderAction::Copy && !typing && !popup_open && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
                     input
@@ -149,15 +148,15 @@ impl Pagewing {
                 });
                 continue;
             }
-            let egui::Event::Key {
+            let ReaderAction::Key {
                 key,
-                pressed: true,
                 modifiers,
-                ..
+                text: key_text,
             } = event
             else {
                 continue;
             };
+            let symbol = key_text.character();
             let raw_key = key;
             let raw_modifiers = modifiers;
             if self.nav.count == 0
@@ -873,5 +872,7 @@ impl Pagewing {
                 self.nav.clear_prefix();
             }
         }
+        input_actions::recycle(&mut actions);
+        self.reader_actions = actions;
     }
 }

@@ -18,6 +18,7 @@ mod fonts;
 mod geometry;
 mod help_catalog;
 mod history;
+mod input_actions;
 mod link_cache;
 mod link_hints;
 mod link_visibility;
