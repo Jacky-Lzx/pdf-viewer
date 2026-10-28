@@ -357,6 +357,41 @@ impl InputButtons {
     }
 }
 
+/// A single-copy context menu: focus its action on opening and keep keyboard
+/// navigation inside the popup. Allocate the copied text only on activation.
+/// Scope `id` to the snapshot when a row can receive replacement content.
+pub(super) fn copy_context_menu(
+    response: &egui::Response,
+    id: Id,
+    label: &str,
+    text: &str,
+) -> bool {
+    let mut copied = false;
+    egui::Popup::context_menu(response).id(id).show(|ui| {
+        let copy = ui.button(label);
+        if response.secondary_clicked() {
+            copy.request_focus();
+        }
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                copy.id,
+                egui::EventFilter {
+                    tab: true,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        if copy.clicked() {
+            ui.ctx().copy_text(text.to_owned());
+            copied = true;
+            ui.close();
+        }
+    });
+    copied
+}
+
 /// `keys` already toggled the menu; drawing must not toggle it again after
 /// subsequent keys such as Escape. Keyboard opening selects its first item.
 pub(super) fn show_menu<R>(

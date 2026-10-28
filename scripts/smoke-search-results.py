@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check search-result visibility below long contents and bookmarks in X11."""
+"""Check search-result visibility and snippet copying in a native X11 window."""
 import ctypes
 import json
 import os
@@ -101,6 +101,19 @@ def run(binary):
                 expect(79, "copying all results preserves the selected hit and reading page")
                 keyboard.key(ESCAPE)
                 position = selected_result(540)
+                keyboard.click(position, button=3)
+                keyboard.key(ENTER)
+                wait_for(lambda: "Needle 080" in keyboard.clipboard()
+                         and not keyboard.clipboard().startswith("Pagewing search snippets\n"),
+                         "single result snippet reaches the system clipboard")
+                snippet = keyboard.clipboard()
+                assert "Needle 079" not in snippet and "Query:" not in snippet, snippet
+                expect(79, "copying a snippet preserves the reading page")
+                position = wait_for(lambda: selected_result(540), "copying a snippet preserves the selected match")
+                keyboard.click(position, button=3)
+                keyboard.key(ESCAPE)
+                assert keyboard.clipboard() == snippet, "cancelling the menu changes the clipboard"
+                expect(79, "cancelling the snippet menu preserves navigation")
                 keyboard.wheel(position, steps=12)
                 time.sleep(0.3)
                 assert not selected_result(540), "manual list scrolling must remain in place"
@@ -125,7 +138,7 @@ def run(binary):
                 expect(78, "Results preserves the current hit while reading another chapter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, first/last navigation, resize visibility, manual scrolling, Results restoration, clickable rows and chapter focus")
+                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, right-click single-snippet copying and cancellation, first/last navigation, resize visibility, manual scrolling, Results restoration, clickable rows and chapter focus")
             except Exception:
                 log.flush()
                 log.seek(0)

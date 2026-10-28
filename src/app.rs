@@ -1383,28 +1383,12 @@ impl Pagewing {
                     self.hints.cancel();
                     self.mark_action = None;
                 }
-                response.context_menu(|ui| {
-                    let copy = ui.button("Copy link address");
-                    if response.secondary_clicked() {
-                        copy.request_focus();
-                    }
-                    ui.memory_mut(|memory| {
-                        memory.set_focus_lock_filter(
-                            copy.id,
-                            egui::EventFilter {
-                                tab: true,
-                                horizontal_arrows: true,
-                                vertical_arrows: true,
-                                ..Default::default()
-                            },
-                        );
-                    });
-                    if copy.clicked() {
-                        ui.ctx().copy_text(url.clone());
-                        copied = true;
-                        ui.close();
-                    }
-                });
+                copied |= shortcuts::copy_context_menu(
+                    &response,
+                    egui::Popup::default_response_id(&response),
+                    "Copy link address",
+                    url,
+                );
             }
             if response.clicked() {
                 follow = Some(link.target.clone());

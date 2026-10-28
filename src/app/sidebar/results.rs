@@ -76,6 +76,7 @@ impl Pagewing {
             results = results.vertical_scroll_offset(offset);
         }
         let mut selected = None;
+        let mut copied = false;
         let mut focus = ListFocus::new(ui, "search-results", row_height, height);
         let results = focus.scroll(ui, results);
         let output = results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
@@ -96,8 +97,24 @@ impl Pagewing {
                         Vec2::new(ui.available_width(), row_height),
                         egui::Button::selectable(self.hit_index == Some(index), label).truncate(),
                     )
-                    .on_hover_text(&hit.snippet);
+                    .on_hover_ui(|ui| {
+                        ui.set_max_width(ui.spacing().tooltip_width);
+                        ui.label(&hit.snippet);
+                        ui.weak("Right-click to copy this snippet");
+                    });
                 focus.observe(&response, index);
+                if response.secondary_clicked() {
+                    self.nav.clear_prefix();
+                    self.hints.cancel();
+                    self.mark_action = None;
+                }
+                copied |= crate::app::shortcuts::copy_context_menu(
+                    &response,
+                    // A replacement query must not inherit this row's open menu.
+                    response.id.with(("snippet", self.revision)),
+                    "Copy snippet",
+                    &hit.snippet,
+                );
                 if response.clicked() {
                     selected = Some(index);
                 }
@@ -137,6 +154,9 @@ impl Pagewing {
         }
         if let Some(index) = selected {
             self.select_hit(index);
+        }
+        if copied {
+            self.notify("Copied search snippet");
         }
         focus.finish(ui);
     }
@@ -265,6 +285,172 @@ mod tests {
         settle(app, context, size)
     }
 
+    fn pointer_click(
+        app: &mut Pagewing,
+        context: &egui::Context,
+        size: Vec2,
+        position: egui::Pos2,
+        button: egui::PointerButton,
+    ) -> egui::FullOutput {
+        // Move before pressing: combining a large pointer delta and a held
+        // primary button in one frame starts ScrollArea's drag-to-scroll.
+        frame(
+            app,
+            context,
+            size,
+            vec![egui::Event::PointerMoved(position)],
+        );
+        let mut output = egui::FullOutput::default();
+        for pressed in [true, false] {
+            output = frame(
+                app,
+                context,
+                size,
+                vec![egui::Event::PointerButton {
+                    pos: position,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        output
+    }
+
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        [true, false]
+            .map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .into()
+    }
+
+    fn menu_action(output: &egui::FullOutput) -> Option<egui::Rect> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Copy snippet" => {
+                let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                shape.clip_rect.contains_rect(rect).then_some(rect)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn replacing_search_results_closes_the_old_snippet_menu() {
+        let (_directory, context, mut app) = long_sidebar();
+        let size = Vec2::new(860.0, 540.0);
+        app.select_hit(79);
+        app.search_button(SearchButton::Results);
+        let output = settle(&mut app, &context, size);
+        pointer_click(
+            &mut app,
+            &context,
+            size,
+            visible_result(&output, 78).unwrap().center(),
+            egui::PointerButton::Secondary,
+        );
+        assert!(egui::Popup::is_any_open(&context));
+        let mut hits = std::mem::take(&mut app.hits);
+        app.query = "replacement".into();
+        app.restart_search();
+        for hit in &mut hits {
+            hit.snippet = "replacement text".into();
+            hit.snippet_match = 0..11;
+        }
+        app.hits = hits;
+        let output = settle(&mut app, &context, size);
+        assert!(menu_action(&output).is_none());
+        assert!(!egui::Popup::is_any_open(&context));
+        assert_eq!(app.nav.page, 79);
+        assert_eq!(app.hit_index, None);
+    }
+
+    #[test]
+    fn snippet_menu_copies_unicode_without_selecting_or_navigating_and_survives_resize() {
+        let (_directory, context, mut app) = long_sidebar();
+        let size = Vec2::new(860.0, 540.0);
+        let snippet = "Straße 中文 😀 Needle 078";
+        app.hits[78].snippet = snippet.into();
+        let start = snippet.find("Needle").unwrap();
+        app.hits[78].snippet_match = start..start + 6;
+        app.select_hit(79);
+        app.search_button(SearchButton::Results);
+        let output = settle(&mut app, &context, size);
+        let position = visible_result(&output, 78).unwrap().center();
+        app.pan = Vec2::new(37.0, 53.0);
+        pointer_click(
+            &mut app,
+            &context,
+            size,
+            position,
+            egui::PointerButton::Secondary,
+        );
+        assert!(egui::Popup::is_any_open(&context));
+        assert_eq!(app.hit_index, Some(79));
+        assert_eq!(app.nav.page, 79);
+        for resized in [Vec2::new(240.0, 240.0), size] {
+            let output = settle(&mut app, &context, resized);
+            let action = menu_action(&output).expect("copy action must remain fully visible");
+            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, resized).contains_rect(action));
+        }
+        let output = frame(&mut app, &context, size, key(egui::Key::Enter));
+        assert!(output.platform_output.commands.iter().any(|command| {
+            matches!(command, egui::OutputCommand::CopyText(text) if text == snippet)
+        }));
+        assert!(!egui::Popup::is_any_open(&context));
+        assert_eq!(app.hit_index, Some(79));
+        assert_eq!(app.nav.page, 79);
+        assert_eq!(app.pan, Vec2::new(37.0, 53.0));
+
+        let output = settle(&mut app, &context, size);
+        pointer_click(
+            &mut app,
+            &context,
+            size,
+            visible_result(&output, 78).unwrap().center(),
+            egui::PointerButton::Secondary,
+        );
+        settle(&mut app, &context, size);
+        let output = frame(&mut app, &context, size, key(egui::Key::Escape));
+        assert!(!egui::Popup::is_any_open(&context));
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        assert_eq!(app.hit_index, Some(79));
+        assert_eq!(app.nav.page, 79);
+        assert_eq!(app.pan, Vec2::new(37.0, 53.0));
+
+        let output = settle(&mut app, &context, size);
+        pointer_click(
+            &mut app,
+            &context,
+            size,
+            visible_result(&output, 78).unwrap().center(),
+            egui::PointerButton::Secondary,
+        );
+        let output = settle(&mut app, &context, size);
+        let output = pointer_click(
+            &mut app,
+            &context,
+            size,
+            menu_action(&output).unwrap().center(),
+            egui::PointerButton::Primary,
+        );
+        assert!(output.platform_output.commands.iter().any(|command| {
+            matches!(command, egui::OutputCommand::CopyText(text) if text == snippet)
+        }));
+        assert_eq!(app.nav.page, 79);
+        assert_eq!(app.hit_index, Some(79));
+    }
+
     #[test]
     fn results_button_reveals_the_current_match_below_long_contents_and_bookmarks() {
         let (_directory, context, mut app) = long_sidebar();
@@ -371,6 +557,50 @@ mod tests {
         let output = settle(&mut app, &context, size);
         assert!(selected_result(&context, &output, 79).is_some());
         assert_eq!(app.nav.page, 79);
+    }
+
+    #[test]
+    fn left_click_follows_without_copying_or_moving_visible_rows() {
+        let (_directory, context, mut app) = long_sidebar();
+        let size = Vec2::new(860.0, 540.0);
+        app.select_hit(40);
+        app.search_button(SearchButton::Results);
+        let output = settle(&mut app, &context, size);
+        let heading = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "SEARCH RESULTS" => Some(text.pos),
+                _ => None,
+            })
+            .unwrap();
+        let output = wheel(
+            &mut app,
+            &context,
+            size,
+            heading + egui::vec2(5.0, 5.0),
+            -90.0,
+        );
+        let before = visible_result(&output, 39).expect("neighboring result remains visible");
+        let position = before.center();
+        let output = pointer_click(
+            &mut app,
+            &context,
+            size,
+            position,
+            egui::PointerButton::Primary,
+        );
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        let output = settle(&mut app, &context, size);
+        assert_eq!(app.nav.page, 39);
+        assert_eq!(app.hit_index, Some(39));
+        assert_eq!(visible_result(&output, 39), Some(before));
     }
 
     #[test]

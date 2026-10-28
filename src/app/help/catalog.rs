@@ -127,6 +127,10 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
     ("? / F1 / Escape", "Find keyboard shortcuts / close dialog"),
     ("Right-click web link", "Copy link address"),
     (
+        "Right-click search result",
+        "Copy its snippet without moving the reading view",
+    ),
+    (
         "Ctrl/Cmd+click PDF",
         "SyncTeX reverse search in the configured editor",
     ),
@@ -162,5 +166,9 @@ pub(super) const FIXED_SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+c / Alt+w", "Match case / whole words (search open)"),
     ("Escape", "Close dialog / cancel current mode"),
     ("Right-click web link", "Copy link address"),
+    (
+        "Right-click search result",
+        "Copy its snippet without moving the reading view",
+    ),
     ("Ctrl/Cmd+click PDF", "SyncTeX reverse search"),
 ];
