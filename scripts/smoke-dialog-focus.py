@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep zoom presets and page dialog actions focused across native resizes."""
+"""Keep zoom, page and shortcut-help actions focused across native resizes."""
 import ctypes
 import json
 import os
@@ -100,8 +100,32 @@ def run(binary):
                 keyboard.key(ENTER)
                 keyboard.key("j", shift=True)
                 expect(4, 1.75)
+
+                keyboard.key(0xFFBE)  # F1.
+                text("zoom 0")
+                traverse(1)  # Copy shortcuts, with a single matching result.
+                resize_focused_action()
+                keyboard.key(ENTER)
+                wait_for(lambda: "100% zoom" in keyboard.clipboard(),
+                         "help copy retains focus through window resizing")
+                expect(4, 1.75)
+                # Copy returns to the filter. Close remains the second button.
+                traverse(2)
+                resize_focused_action()
+                keyboard.key(SPACE)
+                keyboard.key("k", shift=True)
+                expect(3, 1.75)
+
+                keyboard.key(0xFFBE)
+                text("missing")
+                traverse(1)  # Copy is disabled; Close follows the filter.
+                resize_focused_action()
+                keyboard.key(ENTER)
+                keyboard.key("k", shift=True)
+                expect(2, 1.75)
                 assert application.poll() is None
-                print("PASS: all zoom presets, Apply, Cancel and page Go/Cancel retain keyboard focus "
+                print("PASS: all zoom presets, Apply, Cancel, page Go/Cancel and help Copy/Close "
+                      "with matching/empty results retain keyboard focus "
                       "through minimum, wide-short, narrow-tall and restored windows; Enter/Space "
                       "activate the original action and release dialog focus")
             except Exception:

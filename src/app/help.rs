@@ -1,4 +1,4 @@
-use super::{ACCENT, Pagewing, dialog};
+use super::{ACCENT, Pagewing, appearance, dialog};
 use eframe::egui::{self, RichText};
 use std::fmt::Write;
 
@@ -10,6 +10,7 @@ pub(super) struct HelpFilter {
     query: String,
     catalog: crate::help_catalog::HelpCatalog,
     pub(super) focus: bool,
+    scroll_to_top: bool,
 }
 
 impl HelpFilter {
@@ -33,6 +34,7 @@ impl HelpFilter {
             );
         }
         self.catalog.filter(&self.query);
+        self.scroll_to_top = true;
     }
 
     fn configure(&mut self, shortcuts: &crate::settings::Shortcuts) {
@@ -134,49 +136,61 @@ impl Pagewing {
                 ui.weak(format!("{} shortcuts", self.help_filter.catalog.len()));
                 let stacked = ui.available_width() < 420.0;
                 let column_width = (ui.available_width() - 24.0) * 0.5;
-                egui::ScrollArea::vertical()
+                let mut results = egui::ScrollArea::vertical()
                     .id_salt("pagewing-help-results")
                     // Reserve room for the title, filter and actions outside
                     // scrolling, including the larger frame on desktop.
-                    .max_height((size.y - if short { 180.0 } else { 300.0 }).max(32.0))
-                    .show(ui, |ui| {
-                        if self.help_filter.catalog.is_empty() {
-                            ui.label("No matching shortcuts.");
+                    .max_height((size.y - if short { 180.0 } else { 300.0 }).max(32.0));
+                if self.help_filter.scroll_to_top {
+                    results = results.vertical_scroll_offset(0.0);
+                }
+                results.show(ui, |ui| {
+                    if self.help_filter.catalog.is_empty() {
+                        ui.label("No matching shortcuts.");
+                    }
+                    if stacked {
+                        for (keys, action) in self.help_filter.rows() {
+                            ui.add(egui::Label::new(RichText::new(keys).monospace()).wrap());
+                            ui.add(egui::Label::new(action).wrap());
+                            ui.add_space(8.0);
                         }
-                        if stacked {
-                            for (keys, action) in self.help_filter.rows() {
-                                ui.add(egui::Label::new(RichText::new(keys).monospace()).wrap());
-                                ui.add(egui::Label::new(action).wrap());
-                                ui.add_space(8.0);
-                            }
-                        } else {
-                            egui::Grid::new("keys")
-                                .num_columns(2)
-                                .spacing([24.0, 8.0])
-                                .max_col_width(column_width)
-                                .show(ui, |ui| {
-                                    for (keys, action) in self.help_filter.rows() {
-                                        ui.monospace(keys);
-                                        ui.label(action);
-                                        ui.end_row();
-                                    }
-                                });
-                        }
-                    });
+                    } else {
+                        egui::Grid::new("keys")
+                            .num_columns(2)
+                            .spacing([24.0, 8.0])
+                            .max_col_width(column_width)
+                            .show(ui, |ui| {
+                                for (keys, action) in self.help_filter.rows() {
+                                    ui.monospace(keys);
+                                    ui.label(action);
+                                    ui.end_row();
+                                }
+                            });
+                    }
+                });
+                if !ui.is_sizing_pass() {
+                    self.help_filter.scroll_to_top = false;
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(
-                            !self.help_filter.catalog.is_empty(),
-                            egui::Button::new("Copy shortcuts"),
-                        )
+                        .add_enabled_ui(!self.help_filter.catalog.is_empty(), |ui| {
+                            appearance::action_button(
+                                ui,
+                                "help-copy",
+                                egui::Button::new("Copy shortcuts"),
+                            )
+                        })
+                        .inner
                         .clicked()
                     {
                         context.copy_text(self.help_filter.copy_text());
                         copied = true;
                         input.request_focus();
                     }
-                    close = ui.button("Close").on_hover_text("Escape").clicked();
+                    close = appearance::action_button(ui, "help-close", egui::Button::new("Close"))
+                        .on_hover_text("Escape")
+                        .clicked();
                 });
                 if !short {
                     ui.weak("Counts work with movement: 5j, 3J, 12gg. Drag to pan.");
@@ -192,125 +206,4 @@ impl Pagewing {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn help_and_its_actions_fit_the_minimum_reader_size() {
-        let directory = tempfile::tempdir().unwrap();
-        let context = egui::Context::default();
-        let mut app =
-            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
-        for size in dialog::TEST_SIZES {
-            for query in ["", "copy link", "jkgmissing"] {
-                app.open_help(&context);
-                app.help_filter.query = query.into();
-                app.help_filter.filter();
-                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-                let mut output = egui::FullOutput::default();
-                for _ in 0..4 {
-                    output = context.run(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            ..Default::default()
-                        },
-                        |context| app.help_window(context),
-                    );
-                }
-                let rect = context
-                    .memory(|memory| memory.area_rect(egui::Id::new("Keyboard shortcuts")))
-                    .unwrap();
-                assert!(
-                    screen.contains_rect(rect),
-                    "screen {screen:?}, window {rect:?}"
-                );
-                if size.x > 1000.0 {
-                    assert!(
-                        rect.width() > 600.0,
-                        "desktop width must recover after resizing"
-                    );
-                }
-                dialog::assert_visible_actions(
-                    &context,
-                    &output,
-                    screen,
-                    "Keyboard shortcuts",
-                    &["Copy shortcuts", "Close"],
-                );
-                app.close_help(&context);
-            }
-        }
-    }
-
-    #[test]
-    fn filters_keys_and_descriptions_with_all_case_insensitive_tokens() {
-        let mut help = HelpFilter::default();
-        help.reset();
-        assert_eq!(help.rows().len(), SHORTCUTS.len());
-        help.query = "  COPY  LINK  ".into();
-        help.filter();
-        let rows: Vec<_> = help.rows().collect();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().any(|(keys, _)| keys == &"F, then a label"));
-        assert!(rows.iter().any(|(keys, _)| keys == &"Right-click web link"));
-        help.query = "zoom 0".into();
-        help.filter();
-        assert_eq!(help.rows().next().unwrap().0, "a / Ctrl/Cmd+0");
-        assert_eq!(help.rows().len(), 1);
-    }
-
-    #[test]
-    fn custom_bindings_replace_the_default_help_and_copy_output() {
-        let mut shortcuts = crate::settings::Shortcuts::default();
-        let mut help = HelpFilter::default();
-        for (key, label) in [
-            (egui::Key::X, "X"),
-            (egui::Key::Y, "Y"),
-            (egui::Key::X, "X"),
-        ] {
-            shortcuts.overrides.insert(
-                "next_page".into(),
-                vec![crate::settings::Binding::from_event(
-                    key,
-                    egui::Modifiers::NONE,
-                    None,
-                )],
-            );
-            help.reset();
-            help.configure(&shortcuts);
-            help.query = "next page".into();
-            help.filter();
-            assert_eq!(help.rows().collect::<Vec<_>>(), vec![(label, "Next page")]);
-            assert!(help.copy_text().contains(&format!("{label}\tNext page")));
-            help.query = "zt".into();
-            help.filter();
-            assert_eq!(help.rows().len(), 1, "fixed Vim sequences stay documented");
-        }
-        shortcuts.overrides.clear();
-        help.reset();
-        help.configure(&shortcuts);
-        help.query = "next page".into();
-        help.filter();
-        assert!(help.copy_text().contains("Next / previous page"));
-        assert!(!help.copy_text().contains("X\tNext page"));
-    }
-
-    #[test]
-    fn copy_uses_only_visible_rows_and_reopening_clears_the_filter() {
-        let mut help = HelpFilter {
-            query: "bookmark".into(),
-            ..Default::default()
-        };
-        help.filter();
-        let text = help.copy_text();
-        assert!(text.starts_with("Pagewing keyboard shortcuts\n\n"));
-        assert!(text.contains("Toggle bookmark"));
-        assert!(!text.contains("Zoom in"));
-        help.query = "jkgmissing".into();
-        help.filter();
-        assert_eq!(help.rows().len(), 0);
-        help.reset();
-        assert!(help.query.is_empty() && help.focus);
-        assert_eq!(help.rows().len(), SHORTCUTS.len());
-    }
-}
+mod tests;
