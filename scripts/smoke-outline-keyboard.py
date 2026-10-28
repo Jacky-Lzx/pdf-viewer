@@ -48,15 +48,25 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
 
-            def selected_row_visible(bounds=(228, 486), xs=(50, 80, 110)):
-                # Only inspect the chapter list, excluding headings, text input
-                # and page list. Filled row backgrounds span all three points.
+            def selected_row_visible(bounds=(64, 486), xs=(50, 80, 110)):
+                # The outer sidebar can retain a small scroll offset while the
+                # entire chapter row remains visible. Include that position,
+                # but require a continuous band so an input border cannot pass.
+                # Chapter rows are indented; selected page rows also fill x=20.
+                def green(color):
+                    red, green, blue = color
+                    return green > red + 8 and green > blue + 6
+
                 filled = 0
                 for y in range(*bounds, 2):
                     colors = [keyboard.pixel((x, y)) for x in xs]
-                    if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
+                    if all(map(green, colors)) and not green(keyboard.pixel((20, y))):
                         filled += 1
-                return filled >= 6
+                        if filled >= 6:
+                            return True
+                    else:
+                        filled = 0
+                return False
 
             try:
                 window = wait_for(keyboard.focus, "long-outline reader window")
