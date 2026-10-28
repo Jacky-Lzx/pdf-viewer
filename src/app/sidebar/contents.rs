@@ -1,3 +1,4 @@
+use super::focus::ListFocus;
 use super::{Pagewing, appearance, reveal_offset};
 use eframe::egui::{self, RichText, Vec2};
 
@@ -123,6 +124,8 @@ impl Pagewing {
             ));
         }
         let mut selected = None;
+        let mut focus = ListFocus::new(ui, "contents", row_height, viewport_height);
+        let scroll = focus.scroll(ui, scroll);
         scroll.show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
             for row in range {
                 let index = self.outline.visible()[row];
@@ -149,14 +152,13 @@ impl Pagewing {
                                     response
                                 })
                                 .inner;
-                            if response
-                                .on_hover_text(if collapsed {
-                                    "Expand chapter"
-                                } else {
-                                    "Collapse chapter"
-                                })
-                                .clicked()
-                            {
+                            let response = response.on_hover_text(if collapsed {
+                                "Expand chapter"
+                            } else {
+                                "Collapse chapter"
+                            });
+                            focus.observe(&response, row);
+                            if response.clicked() {
                                 toggle = Some(index);
                             }
                         } else {
@@ -164,7 +166,7 @@ impl Pagewing {
                         }
                         if let Some(destination) = entry.destination {
                             let page = destination.page;
-                            if ui
+                            let response = ui
                                 .add(
                                     egui::Button::selectable(
                                         if keyboard_focus {
@@ -183,23 +185,22 @@ impl Pagewing {
                                         entry.title,
                                         self.page_name(page)
                                     ));
-                                })
-                                .clicked()
-                            {
+                                });
+                            focus.observe(&response, row);
+                            if response.clicked() {
                                 selected = Some(index);
                                 target = Some(destination);
                             }
                         } else {
-                            if ui
-                                .add(
-                                    egui::Button::selectable(
-                                        keyboard_focus && self.outline.selected() == Some(index),
-                                        RichText::new(&entry.title).weak(),
-                                    )
-                                    .truncate(),
+                            let response = ui.add(
+                                egui::Button::selectable(
+                                    keyboard_focus && self.outline.selected() == Some(index),
+                                    RichText::new(&entry.title).weak(),
                                 )
-                                .clicked()
-                            {
+                                .truncate(),
+                            );
+                            focus.observe(&response, row);
+                            if response.clicked() {
                                 selected = Some(index);
                                 toggle = Some(index);
                             }
@@ -218,6 +219,7 @@ impl Pagewing {
         if let Some(destination) = target {
             self.follow_destination(destination);
         }
+        focus.finish(ui);
         ui.add_space(20.0);
         navigated
     }

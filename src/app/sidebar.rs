@@ -3,6 +3,7 @@ use eframe::egui::{self, RichText, Vec2};
 
 mod bookmarks;
 mod contents;
+mod focus;
 mod marks;
 mod pages;
 mod results;
@@ -12,14 +13,20 @@ enum RowAction {
     Remove,
 }
 
+struct RowResponse {
+    action: Option<RowAction>,
+    focused: Option<egui::Id>,
+}
+
 fn removable_row(
     ui: &mut egui::Ui,
     selected: bool,
     label: impl Into<egui::WidgetText>,
     delete_tooltip: &str,
     tooltip: impl FnOnce(&mut egui::Ui),
-) -> Option<RowAction> {
+) -> RowResponse {
     let mut action = None;
+    let mut focused = None;
     let row_height = Pagewing::sidebar_row_height(ui);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -33,6 +40,7 @@ fn removable_row(
                     ui.set_max_width(ui.spacing().tooltip_width);
                     tooltip(ui);
                 });
+            focused = focus::row_focus(&jump).or_else(|| focus::row_focus(&remove));
             if jump.clicked() {
                 action = Some(RowAction::Jump);
             } else if remove.clicked() {
@@ -40,7 +48,7 @@ fn removable_row(
             }
         });
     });
-    action
+    RowResponse { action, focused }
 }
 
 /// Reveal only the part of a row outside the current list viewport.

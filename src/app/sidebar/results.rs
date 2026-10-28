@@ -1,3 +1,4 @@
+use super::focus::ListFocus;
 use super::{Pagewing, appearance, reveal_offset};
 use eframe::egui::{self, Color32, RichText, Vec2};
 
@@ -75,6 +76,8 @@ impl Pagewing {
             results = results.vertical_scroll_offset(offset);
         }
         let mut selected = None;
+        let mut focus = ListFocus::new(ui, "search-results", row_height, height);
+        let results = focus.scroll(ui, results);
         let output = results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
             for index in range {
                 let hit = &self.hits[index];
@@ -88,14 +91,14 @@ impl Pagewing {
                         highlight,
                     )
                 });
-                if ui
+                let response = ui
                     .add_sized(
                         Vec2::new(ui.available_width(), row_height),
                         egui::Button::selectable(self.hit_index == Some(index), label).truncate(),
                     )
-                    .on_hover_text(&hit.snippet)
-                    .clicked()
-                {
+                    .on_hover_text(&hit.snippet);
+                focus.observe(&response, index);
+                if response.clicked() {
                     selected = Some(index);
                 }
             }
@@ -135,6 +138,7 @@ impl Pagewing {
         if let Some(index) = selected {
             self.select_hit(index);
         }
+        focus.finish(ui);
     }
 }
 

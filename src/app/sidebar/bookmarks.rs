@@ -1,3 +1,4 @@
+use super::focus::ListFocus;
 use super::{Pagewing, RowAction, removable_row, reveal_offset};
 use eframe::egui;
 
@@ -21,11 +22,13 @@ impl Pagewing {
         }
         let mut target = None;
         let mut remove = None;
+        let mut focus = ListFocus::new(ui, "bookmarks", row_height, height);
+        let scroll = focus.scroll(ui, scroll);
         scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
             for row in range {
                 let page = self.bookmark_pages[row];
                 ui.push_id(("bookmark", page), |ui| {
-                    match removable_row(
+                    let response = removable_row(
                         ui,
                         page == self.nav.page,
                         self.labels.sidebar_caption(page),
@@ -33,7 +36,9 @@ impl Pagewing {
                         |ui| {
                             ui.label(self.labels.sidebar_tooltip(page));
                         },
-                    ) {
+                    );
+                    focus.observe_id(response.focused, row);
+                    match response.action {
                         Some(RowAction::Jump) => target = Some(page),
                         Some(RowAction::Remove) => remove = Some(page),
                         None => {}
@@ -41,6 +46,7 @@ impl Pagewing {
                 });
             }
         });
+        focus.finish(ui);
         if let Some(page) = target {
             self.jump(page);
         }

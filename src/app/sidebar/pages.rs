@@ -1,3 +1,4 @@
+use super::focus::ListFocus;
 use super::{Pagewing, appearance, reveal_offset};
 use crate::{navigation::Fit, thumbnails::PreviewLayout};
 use eframe::egui::{self, Color32, Vec2};
@@ -108,10 +109,12 @@ impl Pagewing {
             scroll = scroll.vertical_scroll_offset(offset);
         }
         let page_before = self.nav.page;
+        let mut focus = ListFocus::new(ui, salt, row_height, height);
+        let scroll = focus.scroll(ui, scroll);
         let output = if self.library.thumbnails {
-            self.page_previews(ui, layout, scroll)
+            self.page_previews(ui, layout, scroll, &mut focus)
         } else {
-            self.page_list(ui, row_height, scroll)
+            self.page_list(ui, row_height, scroll, &mut focus)
         };
         let bottom = ui.min_rect().bottom();
         if reveal_section {
@@ -147,6 +150,7 @@ impl Pagewing {
                 )
             });
         }
+        focus.finish(ui);
     }
 
     fn page_list(
@@ -154,10 +158,11 @@ impl Pagewing {
         ui: &mut egui::Ui,
         row_height: f32,
         scroll: egui::ScrollArea,
+        focus: &mut ListFocus,
     ) -> egui::scroll_area::ScrollAreaOutput<()> {
         scroll.show_rows(ui, row_height, self.nav.count, |ui, range| {
             for page in range {
-                if ui
+                let response = ui
                     .add_sized(
                         Vec2::new(ui.available_width(), row_height),
                         egui::Button::selectable(
@@ -169,9 +174,9 @@ impl Pagewing {
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
                         ui.label(self.labels.sidebar_tooltip(page));
-                    })
-                    .clicked()
-                {
+                    });
+                focus.observe(&response, page);
+                if response.clicked() {
                     self.jump(page);
                     self.reveal_page = None;
                 }
@@ -184,6 +189,7 @@ impl Pagewing {
         ui: &mut egui::Ui,
         layout: crate::thumbnails::PreviewLayout,
         scroll: egui::ScrollArea,
+        focus: &mut ListFocus,
     ) -> egui::scroll_area::ScrollAreaOutput<()> {
         let mut target = None;
         let output = scroll.show_rows(ui, layout.row_height, self.nav.count, |ui, range| {
@@ -192,6 +198,7 @@ impl Pagewing {
                     Vec2::new(ui.available_width(), layout.row_height),
                     egui::Sense::click(),
                 );
+                focus.observe(&response, page);
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }
@@ -366,6 +373,116 @@ mod tests {
             output = frame(app, context, size, Vec::new());
         }
         output
+    }
+
+    #[test]
+    fn resizing_a_virtual_list_preserves_the_focused_page_without_navigating() {
+        let (_directory, context, mut app) = preview_app(false);
+        let size = egui::vec2(1180.0, 820.0);
+        app.nav.jump(0);
+        app.outline.set_entries(vec![OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(Destination::page(0)),
+            depth: 0,
+        }]);
+        app.focus_contents();
+        settle(&mut app, &context, size);
+        let key = |key| {
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into()
+        };
+        let mut focused = None;
+        for _ in 0..50 {
+            frame(&mut app, &context, size, key(egui::Key::Tab));
+            let output = settle(&mut app, &context, size);
+            let label = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Page 25" => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => None,
+            });
+            if let Some(id) = context.memory(|memory| memory.focused())
+                && context.read_response(id).is_some_and(|response| {
+                    label.is_some_and(|label| response.rect.contains_rect(label))
+                })
+            {
+                focused = Some(id);
+                break;
+            }
+        }
+        let focused = focused.expect("Tab must reach a later page row");
+        for (resized, font_size) in [(egui::vec2(240.0, 240.0), 14.0), (size, 28.0), (size, 14.0)] {
+            context.style_mut(|style| {
+                style.text_styles.insert(
+                    egui::TextStyle::Button,
+                    egui::FontId::proportional(font_size),
+                );
+            });
+            settle(&mut app, &context, resized);
+            assert_eq!(app.nav.page, 0, "resizing must preserve the reading page");
+            assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+            let response = context.read_response(focused).unwrap();
+            assert!(
+                response
+                    .interact_rect
+                    .contains_rect(response.rect.shrink(1.0)),
+                "the focused page must be visible at {resized:?}"
+            );
+        }
+        frame(&mut app, &context, size, key(egui::Key::Space));
+        assert_eq!(app.nav.page, 24, "Space follows the retained page button");
+        let labels = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("Page ") => {
+                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        shape
+                            .clip_rect
+                            .contains_rect(rect)
+                            .then(|| (text.galley.text().to_owned(), rect))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = labels(&settle(&mut app, &context, size));
+        let pos = context.read_response(focused).unwrap().rect.center();
+        frame(
+            &mut app,
+            &context,
+            size,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: Vec2::new(0.0, -180.0),
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frame(
+            &mut app,
+            &context,
+            size,
+            vec![egui::Event::PointerMoved(egui::pos2(1100.0, 60.0))],
+        );
+        let after = labels(&settle(&mut app, &context, size));
+        assert_ne!(after, before, "manual scrolling must move the list");
+        assert_eq!(
+            labels(&settle(&mut app, &context, size)),
+            after,
+            "ordinary frames must preserve manual scrolling"
+        );
+        assert_eq!(app.nav.page, 24);
     }
 
     fn preview_key(app: &mut Pagewing, context: &egui::Context, size: Vec2) {

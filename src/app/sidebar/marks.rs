@@ -19,7 +19,9 @@ impl Pagewing {
                         ui.label(self.labels.sidebar_tooltip(mark.page));
                         ui.label("Restore page, zoom, rotation and scroll position");
                     },
-                ) {
+                )
+                .action
+                {
                     Some(RowAction::Jump) => target = Some(name),
                     Some(RowAction::Remove) => remove = Some(name),
                     None => {}

@@ -203,9 +203,27 @@ def run(binary):
                 expect_sidebar([], False, "Escape returns Tab to the reader's sidebar shortcut")
                 keyboard.key(0xFF09)
                 expect_sidebar([], True, "reader Tab reopens the sidebar")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key("g"); keyboard.key("g")
+                expect(0, "return to the first page before virtual keyboard traversal")
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "001 chapter"])
+                keyboard.key(0xFF09)
+                # Chapter -> List -> Previews -> draggable scroll area -> page
+                # rows. Continue past the initial range without navigating.
+                for _ in range(3 + 25):
+                    keyboard.key(0xFF09)
+                expect(0, "Tab through virtual pages preserves the reading page")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key(" ")
+                expect(24, "shrinking retains a later virtual page button for Space activation")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion and Escape back to reading")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion, Escape back to reading and later virtual page focus after resizing")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
