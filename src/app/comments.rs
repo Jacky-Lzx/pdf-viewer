@@ -5,6 +5,7 @@ use crate::comment_view::{CommentFilter, CommentView};
 use eframe::egui::{self, Color32, Vec2};
 
 mod editor;
+mod export;
 mod list;
 
 // Match the inputs accepted by the multiline editor. This is deliberately
@@ -97,6 +98,25 @@ impl CommentUi {
 }
 
 impl Pagewing {
+    fn copy_shown_comments(&mut self, context: &egui::Context) {
+        let report = export::render(&self.comments.comments, self.comments.view.rows(), |page| {
+            self.labels.label(page)
+        });
+        if report.copied == 0 {
+            self.notify("No comments copied.");
+            return;
+        }
+        context.copy_text(report.text);
+        self.notify(if report.copied == report.total {
+            format!("Copied {} shown comments", report.copied)
+        } else {
+            format!(
+                "Copied {} of {} shown comments (clipboard size limit)",
+                report.copied, report.total
+            )
+        });
+    }
+
     pub(super) fn comment_filter_focused(&self, context: &egui::Context) -> bool {
         self.comments.open
             && self.zoom_input.is_none()
@@ -279,6 +299,7 @@ impl Pagewing {
             return;
         }
         let mut selected = None;
+        let mut copy = false;
         let mut actions = CommentActions::default();
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 480.0);
         egui::SidePanel::right("pagewing-comments-sidebar")
@@ -291,7 +312,10 @@ impl Pagewing {
                     if ui.available_width() < 220.0 {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         if ui.available_width() < 120.0 {
-                            ui.label(egui::RichText::new("Comments").small().strong());
+                            // Keep the title and both header actions on one
+                            // line so the editor footer retains its height.
+                            ui.spacing_mut().button_padding.x = 2.0;
+                            ui.label(egui::RichText::new("Notes").small().strong());
                         } else {
                             ui.strong("Comments");
                         }
@@ -309,6 +333,16 @@ impl Pagewing {
                             })
                             .id,
                     );
+                    copy = ui
+                        .add_enabled(
+                            self.comments.loaded
+                                && !self.loading
+                                && !self.comments.busy()
+                                && !self.comments.view.rows().is_empty(),
+                            egui::Button::new("Copy").small(),
+                        )
+                        .on_hover_text("Copy saved comments shown in this list, including thread context. Unsaved editor changes are not included.")
+                        .clicked();
                 });
                 if self.comments.editor.is_some() {
                     let compact = ui.available_width() < 220.0 || ui.available_height() < 220.0;
@@ -400,6 +434,9 @@ impl Pagewing {
                     });
             });
         let save_requested = std::mem::take(&mut self.comments.save_requested);
+        if copy {
+            self.copy_shown_comments(context);
+        }
         if actions.discard {
             self.comments.editor = None;
         }

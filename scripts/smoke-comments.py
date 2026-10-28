@@ -88,6 +88,13 @@ def run(binary):
                 keyboard.key("m", ctrl=True, shift=True)
                 query("elsewhere")
                 assert copied() == "elsewhere", "filter input owns text editing shortcuts"
+                keyboard.click((1075, 84))  # Copy the filtered saved list.
+                exported = keyboard.clipboard()
+                for expected in ["Page 2 · Highlight", "Author: Bob", "Elsewhere comment"]:
+                    assert expected in exported, (expected, exported)
+                assert "Root question" not in exported
+                assert document.read_bytes() == original, "copying comments leaves the PDF intact"
+                query("elsewhere")
                 expect(0)
                 keyboard.key(0xFF0D)
                 expect(1)
@@ -126,6 +133,13 @@ def run(binary):
                 keyboard.key("m", ctrl=True, shift=True)
                 keyboard.click((1030, 145))  # Marked only; retain the root as context.
                 query("jkg STRASSE")
+                keyboard.click((1075, 84))
+                exported = keyboard.clipboard()
+                for expected in ["[Thread context]", "Root question", "Author: Straße", "Reply depth: 1", "Status: Completed / resolved", "Marked: yes", "Nested needle jkg"]:
+                    assert expected in exported, (expected, exported)
+                assert exported.index("Root question") < exported.index("Nested needle jkg")
+                assert "Saved elsewhere comment" not in exported
+                query("jkg STRASSE")
                 keyboard.key("k", ctrl=True)
                 keyboard.key(0xFF0D)
                 assert copied() == "Root question", "keyboard selection can open retained parent context"
@@ -140,7 +154,7 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
                 expect(1)
-                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload and page navigation")
+                print("PASS: native comment filters, Unicode author matching, current-page/marked combination, keyboard selection/Enter, parent context, full editor, same-frame unsaved text/close and final text/save/reload protection, multiline highlight read/edit/reload, filtered clipboard export with thread context and page navigation")
             except Exception:
                 log.flush()
                 log.seek(0)

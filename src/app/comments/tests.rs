@@ -87,7 +87,17 @@ fn click_text_size(app: &mut Pagewing, context: &Context, label: &str, size: Vec
     } else {
         points.next()
     }
-    .unwrap_or_else(|| panic!("Missing visible button: {label}"));
+    .unwrap_or_else(|| {
+        let texts: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((text.galley.text(), text.pos)),
+                _ => None,
+            })
+            .collect();
+        panic!("Missing visible button: {label} at {size:?}; {texts:?}")
+    });
     for pressed in [true, false] {
         frame_size(
             app,
@@ -1471,4 +1481,142 @@ fn comment_filter_keyboard_confirms_new_query_and_protects_editor_drafts() {
     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Deepest needle")));
     frame(&mut app, &context, key(Key::Enter, Modifiers::NONE));
     assert_eq!(app.comments.editor.as_ref().unwrap().slot, Some(127));
+}
+
+#[test]
+fn copy_shown_comments_fits_resizing_and_keeps_unsaved_draft_and_pdf() {
+    let (_root, context, mut app) = saved_comment_editor();
+    let original_pdf = std::fs::read(&app.reading.path).unwrap();
+    app.comments.editor.as_mut().unwrap().contents = "Unpublished draft 中文😀".into();
+    app.comments.view.filter.query = "Original".into();
+    let mut sizes = super::super::dialog::TEST_SIZES.to_vec();
+    sizes.push(egui::vec2(240.0, 240.0));
+    for size in sizes {
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame_size(&mut app, &context, Vec::new(), size);
+        }
+        let (bounds, clip) = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Copy" => Some((
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                    shape.clip_rect,
+                )),
+                _ => None,
+            })
+            .expect("copy action must be visible");
+        assert!(
+            clip.contains_rect(bounds),
+            "{size:?}: {bounds:?} / {clip:?}"
+        );
+        assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(bounds));
+        let mut copied = None;
+        for pressed in [true, false] {
+            let output = frame_size(
+                &mut app,
+                &context,
+                vec![
+                    Event::PointerMoved(bounds.center()),
+                    Event::PointerButton {
+                        pos: bounds.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+                size,
+            );
+            for command in output.platform_output.commands {
+                if let egui::OutputCommand::CopyText(text) = command {
+                    copied = Some(text);
+                }
+            }
+        }
+        let copied = copied.expect("click must copy the saved filtered list");
+        assert!(copied.contains("Original comment"));
+        assert!(!copied.contains("Unpublished draft"));
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Unpublished draft 中文😀"
+        );
+        assert!(app.comments.unsaved());
+        assert_eq!(app.comments.view.filter.query, "Original");
+        assert_eq!(app.nav.page, 0);
+        assert_eq!(std::fs::read(&app.reading.path).unwrap(), original_pdf);
+    }
+}
+
+#[test]
+fn copy_shown_comments_includes_virtual_rows_and_leaves_clipboard_alone_when_empty() {
+    let (_root, context, mut app) = many_comments();
+    frame(&mut app, &context, Vec::new());
+    let selected = app.comments.view.selected();
+    let output = context.run(RawInput::default(), |context| {
+        app.copy_shown_comments(context)
+    });
+    let text = output
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    assert!(text.contains("Row 0\n\n"));
+    assert!(text.contains("Row 79\n\n"));
+    assert_eq!(text.matches("Page 1 · Highlight\n").count(), 80);
+    assert_eq!(app.comments.view.selected(), selected);
+    app.comments.view.filter.query = "missing".into();
+    app.comments.view.update(&app.comments.comments, 0);
+    let output = context.run(RawInput::default(), |context| {
+        app.copy_shown_comments(context)
+    });
+    assert!(
+        !output
+            .platform_output
+            .commands
+            .iter()
+            .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+    );
+}
+
+#[test]
+fn copying_saved_list_preserves_text_typed_in_the_pointer_press_batch() {
+    let (_root, context, mut app) = saved_comment_editor();
+    let output = frame(&mut app, &context, Vec::new());
+    let point = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Copy" => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap();
+    for pressed in [true, false] {
+        let mut events = vec![Event::PointerMoved(point)];
+        if pressed {
+            events.push(Event::Text(" Final 中文😀".into()));
+        }
+        events.push(Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        frame(&mut app, &context, events);
+    }
+    assert!(
+        app.comments
+            .editor
+            .as_ref()
+            .unwrap()
+            .contents
+            .contains("Final 中文😀")
+    );
+    assert!(app.comments.unsaved());
 }
