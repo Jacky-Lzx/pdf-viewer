@@ -39,5 +39,6 @@ text_embolden_decrease = ["Alt+Minus"]
 # Modifiers: Cmd (Ctrl on Linux, Command on macOS), Ctrl, Alt, Shift.
 # Use key names such as X, ArrowDown, PageDown, Comma, Plus, Questionmark.
 # next_page = ["X", "Shift+J"]
+# next_chapter = ["Alt+ArrowDown"] # Previous: previous_chapter = ["Alt+ArrowUp"].
 # zoom = ["Cmd+Alt+Z"] # Open the exact zoom percentage input.
 # night = []

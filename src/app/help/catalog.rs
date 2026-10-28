@@ -58,6 +58,10 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
         "Restore the previous / next reading view",
     ),
     ("Alt+j / Alt+k", "Next / previous bookmark, optional count"),
+    (
+        "Alt+↓ / Alt+↑",
+        "Next / previous chapter start, optional count; stops at either end",
+    ),
     ("a / Ctrl/Cmd+0", "100% zoom, keeping the viewport center"),
     ("Ctrl/Cmd+p", "Find a recent document"),
     ("/   or   Ctrl/Cmd+f", "Search document"),

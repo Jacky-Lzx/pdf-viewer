@@ -660,6 +660,8 @@ impl Pagewing {
                             self.library.shortcuts.label("bookmark")
                         ));
                     }
+                } else if !modifiers.shift && matches!(key, Key::ArrowDown | Key::ArrowUp) {
+                    self.jump_chapter(key == Key::ArrowUp, count);
                 }
                 continue;
             }

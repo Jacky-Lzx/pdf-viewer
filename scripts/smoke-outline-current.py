@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check page-based current chapters and explicit reveal through real X11 input."""
+"""Check current chapter reveal and counted chapter jumps through real X11 input."""
 import ctypes
 import json
 import os
@@ -138,10 +138,63 @@ def run(binary):
                 expect(45)
                 keyboard.key(0xFF0D)
                 expect(44)
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    _, status = os.waitpid(application.pid, os.WUNTRACED)
+                    assert os.WIFSTOPPED(status)
+                    keyboard.key("3", delay=0)
+                    keyboard.key(0xFF54, alt=True, delay=0)
+                    keyboard.x11.XSync(keyboard.display, False)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                expect(56)
+                assert book()["fit"] == "Page", "chapter jumps apply the PDF's /Fit destination"
+                keyboard.key(0xFF51, alt=True)
+                expect(44)
+                keyboard.key(0xFF53, alt=True)
+                expect(56)
+                keyboard.key("j", shift=True)
+                expect(57)
+                keyboard.key(0xFF52, alt=True)
+                expect(56)
+                keyboard.key(0xFF52, alt=True)
+                expect(52)
+                type_text("9999999"); keyboard.key(0xFF54, alt=True)
+                expect(76)
+                keyboard.key(0xFF54, alt=True)
+                time.sleep(2.2)
+                expect(76)
+                type_text("9999999"); keyboard.key(0xFF52, alt=True)
+                expect(0)
+                keyboard.key(0xFF52, alt=True)
+                time.sleep(2.2)
+                expect(0)
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                (config / "config.toml").write_text(
+                    '[appearance]\nsidebar = true\n[shortcuts]\nnext_chapter = ["X"]\nprevious_chapter = []\n'
+                )
+                stamp = state_path.stat().st_mtime_ns
+                application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "reader with remapped chapter commands")
+                wait_for(lambda: state_path.stat().st_mtime_ns != stamp, "loaded remapped reading snapshot")
+                expect(0)
+                keyboard.key(0xFF54, alt=True)
+                time.sleep(2.2)
+                expect(0)
+                keyboard.key("x")
+                expect(4)
+                keyboard.key(0xFF52, alt=True)
+                time.sleep(2.2)
+                expect(4)
+                keyboard.key("f", ctrl=True); type_text("x")
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "x", "remapped reading keys remain text inside search"
+                expect(4)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert document.read_bytes() == original
-                print("PASS: current chapter between page starts, explicit mouse reveal clears filter without moving PDF, same-batch input handoff and retained search draft, 240x240 keyboard reveal/confirmation, unchanged PDF")
+                print("PASS: current chapter between page starts, explicit mouse reveal clears filter without moving PDF, same-batch input handoff and retained search draft, 240x240 keyboard reveal/confirmation, ordered counted chapter jumps with exact /Fit view and one history step, previous chapter from middle/start pages, bounded extreme counts without wrapping, configured remapping/disabling and search input isolation, unchanged PDF")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

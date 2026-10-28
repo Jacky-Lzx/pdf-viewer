@@ -1,4 +1,5 @@
 mod appearance;
+mod chapters;
 mod comments;
 #[cfg(test)]
 mod config;

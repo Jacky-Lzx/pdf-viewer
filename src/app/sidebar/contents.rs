@@ -1,5 +1,5 @@
 use super::{Pagewing, appearance, reveal_offset};
-use crate::app::list_focus::ListFocus;
+use crate::app::{list_focus::ListFocus, tooltips::LazyTooltip};
 use eframe::egui::{self, RichText, Vec2};
 
 impl Pagewing {
@@ -51,7 +51,13 @@ impl Pagewing {
                     self.outline.chapter_at(self.nav.page).is_some(),
                     egui::Button::new("Here").small(),
                 )
-                .on_hover_text("Show the chapter at this page · clears the chapter filter")
+                .on_hover_text_lazy(|| {
+                    format!(
+                        "Show the chapter at this page · clears the chapter filter\nChapter starts: {} / {}",
+                        self.library.shortcuts.label("previous_chapter"),
+                        self.library.shortcuts.label("next_chapter"),
+                    )
+                })
                 .id,
             );
             if ui.available_width() < 70.0 {

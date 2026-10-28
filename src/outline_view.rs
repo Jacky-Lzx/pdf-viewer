@@ -67,7 +67,10 @@ impl OutlineView {
         }
         // Destinations need not follow tree order. On the same page, prefer
         // the later navigable entry, typically the more specific heading.
-        prepared.chapter_starts.sort_unstable();
+        prepared
+            .chapter_starts
+            .sort_unstable_by_key(|&(page, index)| (page, std::cmp::Reverse(index)));
+        prepared.chapter_starts.dedup_by_key(|entry| entry.0);
         prepared.entries = entries;
         prepared.refilter();
         (!cancelled()).then_some(prepared)
@@ -94,6 +97,35 @@ impl OutlineView {
             .chapter_starts
             .partition_point(|&(start, _)| start <= page);
         end.checked_sub(1).map(|index| self.chapter_starts[index].1)
+    }
+
+    /// Move among distinct start pages, independent of filtering or folding.
+    /// Previous returns the current chapter's start when reading its later
+    /// pages. Counts clamp at either end; navigation never wraps.
+    pub fn chapter_target(
+        &self,
+        page: usize,
+        reverse: bool,
+        count: usize,
+    ) -> Option<crate::destination::Destination> {
+        let delta = count.saturating_sub(1);
+        let row = if reverse {
+            self.chapter_starts
+                .partition_point(|&(start, _)| start < page)
+                .checked_sub(1)?
+                .saturating_sub(delta)
+        } else {
+            let first = self
+                .chapter_starts
+                .partition_point(|&(start, _)| start <= page);
+            if first == self.chapter_starts.len() {
+                return None;
+            }
+            first
+                .saturating_add(delta)
+                .min(self.chapter_starts.len() - 1)
+        };
+        self.entries[self.chapter_starts[row].1].destination
     }
 
     /// Show the nearest visible ancestor if the active chapter is folded away
@@ -254,6 +286,72 @@ impl OutlineView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counted_chapter_targets_match_distinct_starts_and_keep_exact_destinations() {
+        use crate::destination::Destination;
+        let mut tree = OutlineView::default();
+        let mut random = 91_u64;
+        let entries: Vec<_> = (0..237)
+            .map(|index| {
+                random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                OutlineEntry {
+                    title: format!("Chapter {index}"),
+                    depth: index % 4,
+                    destination: (!random.is_multiple_of(3)).then(|| Destination {
+                        zoom: Some(index as f32 + 1.0),
+                        position: [Some(index as f64), Some(17.0)],
+                        ..Destination::page((random >> 16) as usize % 200 + 2)
+                    }),
+                }
+            })
+            .collect();
+        let mut starts = std::collections::BTreeMap::new();
+        for entry in &entries {
+            if let Some(destination) = entry.destination {
+                starts.insert(destination.page, destination);
+            }
+        }
+        tree.set_entries(entries);
+        tree.fold_all(true);
+        tree.query = "absent".into();
+        tree.refilter();
+        assert!(tree.visible().is_empty());
+        for page in 0..220 {
+            for reverse in [false, true] {
+                let mut candidates: Vec<_> = starts
+                    .values()
+                    .copied()
+                    .filter(|destination| {
+                        if reverse {
+                            destination.page < page
+                        } else {
+                            destination.page > page
+                        }
+                    })
+                    .collect();
+                if reverse {
+                    candidates.reverse();
+                }
+                for count in [0_usize, 1, 2, 7, usize::MAX] {
+                    let expected = candidates
+                        .get(count.saturating_sub(1))
+                        .or_else(|| candidates.last())
+                        .copied();
+                    assert_eq!(
+                        tree.chapter_target(page, reverse, count),
+                        expected,
+                        "page {page}, reverse {reverse}, count {count}"
+                    );
+                }
+            }
+        }
+        assert_eq!(tree.query, "absent");
+        tree.set_entries(Vec::new());
+        for reverse in [false, true] {
+            assert_eq!(tree.chapter_target(usize::MAX, reverse, usize::MAX), None);
+        }
+    }
 
     #[test]
     fn current_chapters_follow_page_starts_and_reveal_only_their_ancestors() {

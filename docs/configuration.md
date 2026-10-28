@@ -113,6 +113,8 @@ night = []
 | `history_forward` | Jump history forward |
 | `next_bookmark` | Next bookmark |
 | `previous_bookmark` | Previous bookmark |
+| `next_chapter` | Next chapter start (`Alt+ArrowDown`) |
+| `previous_chapter` | Previous chapter start (`Alt+ArrowUp`) |
 | `zoom_in` | Zoom in |
 | `zoom` | Set an exact zoom percentage (`Cmd+Alt+Z`) |
 | `zoom_out` | Zoom out |

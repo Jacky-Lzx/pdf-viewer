@@ -602,6 +602,22 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "next_chapter": {
+          "description": "Next chapter start. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "previous_chapter": {
+          "description": "Previous chapter start. Replaces all default bindings; [] disables this action.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     }

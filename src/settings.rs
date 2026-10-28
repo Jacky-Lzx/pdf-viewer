@@ -279,6 +279,20 @@ pub fn commands() -> &'static [Command] {
                 "Alt+ArrowRight",
                 "Alt+ArrowRight|Ctrl+I",
             ),
+            (
+                "next_chapter",
+                "Next chapter start",
+                false,
+                "Alt+ArrowDown",
+                "Alt+ArrowDown",
+            ),
+            (
+                "previous_chapter",
+                "Previous chapter start",
+                false,
+                "Alt+ArrowUp",
+                "Alt+ArrowUp",
+            ),
             ("next_bookmark", "Next bookmark", false, "Alt+J", "Alt+J"),
             (
                 "previous_bookmark",
