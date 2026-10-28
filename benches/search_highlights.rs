@@ -14,6 +14,9 @@ mod text;
 #[path = "../src/visible_rects.rs"]
 mod visible_rects;
 
+#[path = "search_highlights/neighbors.rs"]
+mod neighbors;
+
 use eframe::egui::{Rect, Vec2, pos2};
 use hayro::kurbo::Rect as PdfRect;
 use search_highlights::SearchHighlights;
@@ -66,6 +69,10 @@ fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
+    if std::env::args().nth(2).as_deref() == Some("neighbors") {
+        neighbors::run(passes);
+        return;
+    }
     const FRAMES: usize = 200;
     println!(
         "{passes} alternating passes, {FRAMES} frames/sample; three ordered pages, counts below are per page. Includes page lookup, transform/clipping and visible identities/coordinates/selected-hit checksums. Excludes fixture allocation, PDF/text search, batch acceptance, shape construction, UI and GPU. Cached cases use the production SearchHighlights component."

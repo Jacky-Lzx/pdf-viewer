@@ -127,6 +127,12 @@ fn cached_search_paint_matches_original_across_views_neighbors_and_selected_hits
 
 #[test]
 fn accepted_batches_query_replacement_reload_and_close_update_painted_regions() {
+    for page in [0, 1, 2] {
+        check_snapshot_changes(page);
+    }
+}
+
+fn check_snapshot_changes(page: usize) {
     let (_root, context, mut app) = reader();
     let (sender, receiver) = std::sync::mpsc::channel();
     app.worker.events = receiver;
@@ -145,22 +151,22 @@ fn accepted_batches_query_replacement_reload_and_close_update_painted_regions() 
     };
     let origin = pos2(20.0, 30.0);
     let check = |app: &mut Pagewing| {
-        let expected = draw(app, &context, 1, origin, true);
-        let actual = draw(app, &context, 1, origin, false);
+        let expected = draw(app, &context, page, origin, true);
+        let actual = draw(app, &context, page, origin, false);
         assert_eq!(actual, expected);
         actual
     };
-    batch(&app, app.revision, vec![hit(1, 100.0, 100.0)]);
+    batch(&app, app.revision, vec![hit(page, 100.0, 100.0)]);
     app.events(&context);
     let first = check(&mut app);
-    batch(&app, app.revision, vec![hit(1, 130.0, 140.0)]);
+    batch(&app, app.revision, vec![hit(page, 130.0, 140.0)]);
     app.events(&context);
     let appended = check(&mut app);
     assert_ne!(
         appended, first,
         "same-view accepted batches must add geometry"
     );
-    batch(&app, app.revision + 1, vec![hit(1, 160.0, 180.0)]);
+    batch(&app, app.revision + 1, vec![hit(page, 160.0, 180.0)]);
     batch(&app, app.revision, Vec::new());
     app.events(&context);
     assert_eq!(
@@ -176,7 +182,7 @@ fn accepted_batches_query_replacement_reload_and_close_update_painted_regions() 
     batch(
         &app,
         app.revision,
-        vec![hit(1, 180.0, 200.0), hit(1, 210.0, 240.0)],
+        vec![hit(page, 180.0, 200.0), hit(page, 210.0, 240.0)],
     );
     app.events(&context);
     let replaced = check(&mut app);
@@ -209,7 +215,7 @@ fn accepted_batches_query_replacement_reload_and_close_update_painted_regions() 
         empty,
         "reload must discard the old search snapshot"
     );
-    batch(&app, app.revision, vec![hit(1, 250.0, 280.0)]);
+    batch(&app, app.revision, vec![hit(page, 250.0, 280.0)]);
     app.events(&context);
     assert_ne!(check(&mut app), empty);
     app.clear_document(&context);

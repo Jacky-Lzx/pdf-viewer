@@ -36,9 +36,9 @@ impl SearchHighlights {
         let visible = if view.page == active_page {
             &mut self.current
         } else {
-            // Neighboring pages share one allocation, never a document-sized
-            // cache. Their contents are rebuilt even when drawn consecutively.
-            self.other.invalidate();
+            // One neighbor shares this allocation. Consecutive draws of the
+            // same view reuse it; another page or view replaces its geometry.
+            // Accepted result batches invalidate both buffers together.
             &mut self.other
         };
         visible.update_keyed(
