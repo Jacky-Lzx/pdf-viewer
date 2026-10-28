@@ -100,24 +100,7 @@ impl CommentUi {
 
 impl Pagewing {
     pub(super) fn comment_control_focused(&self, context: &egui::Context) -> bool {
-        if !self.comments.open {
-            return false;
-        }
-        let Some((layer, rect)) = self.comments.region else {
-            return false;
-        };
-        let Some(id) = context.memory(|memory| memory.focused()) else {
-            return false;
-        };
-        // Inspect last frame's focus geometry without treating this lookup as
-        // an outside pointer click on a text field.
-        let _focus = shortcuts::preserve_pointer_focus(context);
-        context.read_response(id).is_some_and(|response| {
-            response.enabled()
-                && response.layer_id == layer
-                && response.interact_rect.is_positive()
-                && rect.contains_rect(response.interact_rect)
-        })
+        self.comments.open && shortcuts::focused_in_region(context, self.comments.region)
     }
 
     fn copy_shown_comments(&mut self, context: &egui::Context) {

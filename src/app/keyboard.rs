@@ -196,9 +196,9 @@ impl Pagewing {
                 && !modifiers.alt
                 && (key == Key::Tab
                     || (!typing && !modifiers.shift && matches!(key, Key::Enter | Key::Space)))
-                && self.comment_control_focused(context)
+                && (self.comment_control_focused(context) || self.sidebar_control_focused(context))
             {
-                // Tab traverses comment controls; activation keys belong to
+                // Tab traverses sidebar controls; activation keys belong to
                 // their focused buttons rather than the reader underneath.
                 continue;
             }

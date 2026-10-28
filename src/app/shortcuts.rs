@@ -83,6 +83,26 @@ pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
     }
 }
 
+/// Locate focused controls without releasing text focus on an outside click.
+pub(super) fn focused_in_region(
+    context: &egui::Context,
+    region: Option<(egui::LayerId, egui::Rect)>,
+) -> bool {
+    let Some((layer, rect)) = region else {
+        return false;
+    };
+    let Some(id) = context.memory(|memory| memory.focused()) else {
+        return false;
+    };
+    let _focus = preserve_pointer_focus(context);
+    context.read_response(id).is_some_and(|response| {
+        response.enabled()
+            && response.layer_id == layer
+            && response.interact_rect.is_positive()
+            && rect.contains_rect(response.interact_rect)
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InputButton {
     Help,

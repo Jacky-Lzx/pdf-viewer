@@ -128,6 +128,7 @@ mod tests {
                 ..Default::default()
             },
             |context| {
+                app.keys(context);
                 app.toolbar(context);
                 app.status(context);
                 app.sidebar(context);
@@ -200,6 +201,153 @@ mod tests {
         );
         assert!(label.right() < button.left());
         button
+    }
+
+    #[test]
+    fn focused_sidebar_buttons_keep_tab_and_activation_out_of_reader_commands() {
+        let (_directory, context, mut app) = app();
+        let size = egui::vec2(1180.0, 820.0);
+        app.library.sidebar = true;
+        app.reading.bookmarks = [0, 2, 4].into_iter().collect();
+        app.refresh_bookmarks();
+        app.outline.set_entries(vec![crate::outline::OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(crate::destination::Destination::page(2)),
+            depth: 0,
+        }]);
+        app.nav.jump(2);
+        app.focus_contents();
+        settle_sidebar(&mut app, &context, size);
+        let key_events = |key, modifiers| {
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                })
+                .into()
+        };
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Tab, egui::Modifiers::NONE),
+        );
+        let focused = context.memory(|memory| memory.focused()).unwrap();
+        assert_ne!(focused, egui::Id::new("pagewing-outline-input"));
+        for (key, modifiers) in [
+            (egui::Key::Tab, egui::Modifiers::NONE),
+            (egui::Key::Tab, egui::Modifiers::SHIFT),
+            (egui::Key::Space, egui::Modifiers::NONE),
+            (egui::Key::Enter, egui::Modifiers::NONE),
+        ] {
+            context.memory_mut(|memory| memory.request_focus(focused));
+            sidebar_frame(&mut app, &context, size, Vec::new());
+            app.pan = egui::vec2(37.0, 53.0);
+            app.pending_destination = None;
+            sidebar_frame(&mut app, &context, size, key_events(key, modifiers));
+            // egui applies Shift+Tab's previous widget on the following pass.
+            sidebar_frame(&mut app, &context, size, Vec::new());
+            assert!(app.library.sidebar, "{key:?} must stay inside the sidebar");
+            assert_eq!(app.nav.page, 2, "{key:?} must not turn the PDF page");
+            if key == egui::Key::Tab {
+                assert_eq!(app.pan, egui::vec2(37.0, 53.0));
+                assert_ne!(
+                    context.memory(|memory| memory.focused()),
+                    Some(focused),
+                    "{modifiers:?}"
+                );
+            } else {
+                assert_eq!(
+                    app.pending_destination
+                        .map(|(destination, _)| destination.page),
+                    Some(2),
+                    "{key:?} must activate the focused chapter"
+                );
+            }
+        }
+        for resized in [egui::vec2(240.0, 240.0), size] {
+            settle_sidebar(&mut app, &context, resized);
+            assert_eq!(
+                context.memory(|memory| memory.focused()),
+                Some(focused),
+                "retain the same chapter button after resizing"
+            );
+            let response = context.read_response(focused).unwrap();
+            assert!(
+                response
+                    .interact_rect
+                    .contains_rect(response.rect.shrink(1.0)),
+                "focused control must be fully visible after resizing"
+            );
+        }
+        // Traverse actual virtual bookmark controls, then activate jump and
+        // delete separately. A focused row must receive Space/Enter itself.
+        context.memory_mut(|memory| memory.request_focus(focused));
+        settle_sidebar(&mut app, &context, size);
+        let mut bookmark = None;
+        for _ in 0..10 {
+            sidebar_frame(
+                &mut app,
+                &context,
+                size,
+                key_events(egui::Key::Tab, egui::Modifiers::NONE),
+            );
+            let output = settle_sidebar(&mut app, &context, size);
+            if let Some(id) = context.memory(|memory| memory.focused())
+                && context.read_response(id).is_some_and(|response| {
+                    row(&output, 2).is_some_and(|label| response.rect.contains_rect(label))
+                })
+            {
+                bookmark = Some(id);
+                break;
+            }
+        }
+        let bookmark = bookmark.expect("Tab must reach the bookmark jump button");
+        app.jump(0);
+        settle_sidebar(&mut app, &context, size);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(bookmark));
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Space, egui::Modifiers::NONE),
+        );
+        assert_eq!(app.nav.page, 2, "Space follows the focused bookmark");
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Tab, egui::Modifiers::SHIFT),
+        );
+        settle_sidebar(&mut app, &context, size);
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Enter, egui::Modifiers::NONE),
+        );
+        assert_eq!(
+            app.bookmark_pages,
+            [0, 4],
+            "Enter activates the delete button"
+        );
+        assert_eq!(app.nav.page, 2, "deletion preserves the current page");
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        sidebar_frame(
+            &mut app,
+            &context,
+            size,
+            key_events(egui::Key::Tab, egui::Modifiers::NONE),
+        );
+        assert!(!app.library.sidebar, "Escape returns Tab to the reader");
     }
 
     #[test]

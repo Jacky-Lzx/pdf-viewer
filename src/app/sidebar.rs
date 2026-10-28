@@ -49,6 +49,12 @@ fn reveal_offset(offset: f32, top: f32, row_height: f32, height: f32) -> f32 {
 }
 
 impl Pagewing {
+    pub(super) fn sidebar_control_focused(&self, context: &egui::Context) -> bool {
+        self.library.sidebar
+            && self.nav.count > 0
+            && super::shortcuts::focused_in_region(context, self.sidebar_region)
+    }
+
     fn sidebar_row_height(ui: &egui::Ui) -> f32 {
         (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y)
             .max(ui.spacing().interact_size.y)
@@ -56,6 +62,7 @@ impl Pagewing {
     }
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {
+        self.sidebar_region = None;
         self.thumbnails.begin_frame();
         if !self.library.sidebar
             || self.nav.count == 0
@@ -72,7 +79,7 @@ impl Pagewing {
         // in a narrow window.
         let maximum = (context.available_rect().width() - 120.0).clamp(100.0, 380.0);
         let short = context.available_rect().height() < 320.0;
-        egui::SidePanel::left("sidebar")
+        let panel = egui::SidePanel::left("sidebar")
             .frame(appearance::panel(context, 14))
             .default_width(256.0_f32.min(maximum))
             .width_range(180.0_f32.min(maximum)..=maximum)
@@ -110,7 +117,17 @@ impl Pagewing {
                         ui.separator();
                         ui.add_space(10.0);
                     }
-                    let contents_navigation = self.contents(ui);
+                    // Responsive headers and preceding lists must not change
+                    // the IDs of focused controls in the following sections.
+                    let contents_navigation = if self.outline.is_empty() {
+                        false
+                    } else {
+                        ui.scope_builder(
+                            egui::UiBuilder::new().id(("sidebar-contents", self.id)),
+                            |ui| self.contents(ui),
+                        )
+                        .inner
+                    };
                     let mut other_focus = chapter_focus || contents_navigation;
                     appearance::section(ui, "BOOKMARKS");
                     if self.reading.bookmarks.is_empty() {
@@ -120,16 +137,36 @@ impl Pagewing {
                         ));
                     }
                     if !self.bookmark_pages.is_empty() {
-                        other_focus |= self.bookmark_list(ui);
+                        other_focus |= ui
+                            .scope_builder(
+                                egui::UiBuilder::new().id(("sidebar-bookmarks", self.id)),
+                                |ui| self.bookmark_list(ui),
+                            )
+                            .inner;
                     }
                     if !self.reading.marks.is_empty() {
-                        other_focus |= self.mark_list(ui);
+                        other_focus |= ui
+                            .scope_builder(
+                                egui::UiBuilder::new().id(("sidebar-marks", self.id)),
+                                |ui| self.mark_list(ui),
+                            )
+                            .inner;
                     }
                     let reveal_search = self.reveal_hit.is_some() && !self.hits.is_empty();
-                    self.search_results(ui, viewport, chapter_focus);
-                    self.pages(ui, viewport, other_focus || reveal_search);
+                    if !self.hits.is_empty() {
+                        ui.scope_builder(
+                            egui::UiBuilder::new().id(("sidebar-results", self.id)),
+                            |ui| self.search_results(ui, viewport, chapter_focus),
+                        );
+                    }
+                    ui.scope_builder(
+                        egui::UiBuilder::new().id(("sidebar-pages", self.id)),
+                        |ui| self.pages(ui, viewport, other_focus || reveal_search),
+                    );
+                    super::shortcuts::reveal_focused_control(ui, viewport);
                 });
             });
+        self.sidebar_region = Some((panel.response.layer_id, panel.response.rect));
         if !self.loading
             && let Some(keys) = self.thumbnails.requests()
         {

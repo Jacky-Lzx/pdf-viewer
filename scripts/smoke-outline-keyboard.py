@@ -39,6 +39,16 @@ def run(binary):
                         return False
                 wait_for(saved, description)
 
+            def expect_sidebar(bookmarks, visible, description):
+                def saved():
+                    try:
+                        state = json.loads(config_path.read_text())
+                        return (state["sidebar"] == visible
+                                and state["recent"][0]["bookmarks"] == bookmarks)
+                    except (OSError, ValueError, KeyError, IndexError):
+                        return False
+                wait_for(saved, description)
+
             def burst(keys):
                 application.send_signal(signal.SIGSTOP)
                 try:
@@ -154,9 +164,48 @@ def run(binary):
                 expect(0, "minimum-size navigation reaches the first chapter")
                 burst([("c", {}), (0xFF50, {"ctrl": True}), (0xFF56, {}), (ENTER, {})])
                 expect(2, "minimum-size PageDown moves by two visible chapter rows")
+                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key("b")
+                expect_sidebar([2], True, "bookmark the current page for keyboard controls")
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "001 chapter"])
+                keyboard.key(0xFF09)
+                keyboard.key(0xFF09, shift=True)
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "001 chapter", "Shift+Tab returns to the chapter filter"
+                keyboard.key(0xFF09)
+                keyboard.key(" ")
+                expect(0, "Space follows a focused chapter without scrolling the reader")
+                keyboard.key(0xFF09)
+                keyboard.key(0xFF09)
+                expect_sidebar([2], True, "Tab traverses bookmark controls without closing the sidebar")
+                keyboard.key(" ")
+                expect(2, "Space follows the focused bookmark")
+                keyboard.key(0xFF09, shift=True)
+                keyboard.key(ENTER)
+                expect_sidebar([], True, "Enter activates the focused bookmark delete button")
+                expect(2, "deleting a bookmark preserves the current page")
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "080 chapter"])
+                keyboard.key(0xFF09)
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key(" ")
+                expect(79, "resizing retains the focused chapter button's activation")
+                wait_for(lambda: selected_row_visible((90, 190), (45, 65, 85)),
+                         "the focused chapter stays visible after shrinking the window")
+                keyboard.key(ESCAPE)
+                keyboard.key(0xFF09)
+                expect_sidebar([], False, "Escape returns Tab to the reader's sidebar shortcut")
+                keyboard.key(0xFF09)
+                expect_sidebar([], True, "reader Tab reopens the sidebar")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion and Escape back to reading")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
