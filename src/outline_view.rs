@@ -6,6 +6,8 @@ use std::collections::HashSet;
 pub struct OutlineView {
     entries: Vec<OutlineEntry>,
     folded_titles: Vec<String>,
+    // Reuse one byte per entry across filter edits; reset with the document.
+    filter_matches: Vec<bool>,
     parents: Vec<Option<usize>>,
     subtree_end: Vec<usize>,
     collapsed: HashSet<usize>,
@@ -133,15 +135,13 @@ impl OutlineView {
                 .split_whitespace()
                 .map(memchr::memmem::Finder::new)
                 .collect();
-            let mut keep: Vec<_> = self
-                .folded_titles
-                .iter()
-                .map(|title| {
-                    words
-                        .iter()
-                        .all(|word| word.find(title.as_bytes()).is_some())
-                })
-                .collect();
+            let mut keep = std::mem::take(&mut self.filter_matches);
+            keep.clear();
+            keep.extend(self.folded_titles.iter().map(|title| {
+                words
+                    .iter()
+                    .all(|word| word.find(title.as_bytes()).is_some())
+            }));
             // Ancestors provide context, but Enter should initially follow a
             // title match rather than the first retained parent.
             if !self.selected.is_some_and(|index| keep[index]) {
@@ -157,6 +157,7 @@ impl OutlineView {
             }
             self.visible
                 .extend((0..keep.len()).filter(|&index| keep[index]));
+            self.filter_matches = keep;
         } else {
             let mut index = 0;
             while index < self.entries.len() {
@@ -249,6 +250,81 @@ mod tests {
         tree.set_entries(Vec::new());
         assert!(tree.is_empty());
         assert!(tree.query.is_empty());
+    }
+
+    #[test]
+    fn filtered_rows_match_ancestor_walks_across_queries_depths_and_snapshots() {
+        let mut tree = OutlineView::default();
+        let mut random = 31_u64;
+        for count in [1, 17, 130, 1000, 0, 29] {
+            tree.set_entries(
+                (0..count)
+                    .map(|index| {
+                        random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        OutlineEntry {
+                            title: format!(
+                                "Node {index} {} {}",
+                                if random & 1 == 0 {
+                                    "Straße"
+                                } else {
+                                    "chapter"
+                                },
+                                if random & 2 == 0 { "中文" } else { "ΟΣ" }
+                            ),
+                            depth: (random >> 32) as usize % 9,
+                            destination: None,
+                        }
+                    })
+                    .collect(),
+            );
+            tree.fold_all(true);
+            for query in [
+                "STRASSE",
+                "中文 chapter",
+                "σ",
+                "missing",
+                "node",
+                "chapter",
+                "strasse 中文",
+                "node 1",
+                "STRASSE",
+            ] {
+                let folded_query = caseless::default_case_fold_str(query);
+                let words: Vec<_> = folded_query.split_whitespace().collect();
+                let matched: Vec<_> = tree
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        let title = caseless::default_case_fold_str(&entry.title);
+                        words.iter().all(|word| title.contains(word))
+                    })
+                    .collect();
+                let selected = tree
+                    .selected
+                    .filter(|&index| matched[index])
+                    .or_else(|| matched.iter().position(|&matched| matched));
+                let mut retained = matched.clone();
+                for (index, &matched) in matched.iter().enumerate() {
+                    if matched {
+                        let mut parent = tree.parents[index];
+                        while let Some(index) = parent {
+                            retained[index] = true;
+                            parent = tree.parents[index];
+                        }
+                    }
+                }
+                let expected: Vec<_> = (0..count).filter(|&index| retained[index]).collect();
+                tree.query = query.into();
+                tree.refilter();
+                assert_eq!(tree.visible(), expected, "{count} nodes, {query}");
+                assert_eq!(tree.selected(), selected, "{count} nodes, {query}");
+                // Sometimes select context rather than a title match before
+                // changing the query, as keyboard navigation in the UI can.
+                if let Some(&index) = tree.visible().first() {
+                    tree.select(index);
+                }
+            }
+        }
     }
 
     #[test]
