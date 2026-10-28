@@ -24,9 +24,9 @@ mod comment_cards;
 #[path = "../src/fifo_cache.rs"]
 mod fifo_cache;
 
-use annotations::{Comment, CommentId, Comments};
+use annotations::{Comment, CommentId, Comments, ReviewStatus};
 use comment_cards::{CardTextCache, card_lines};
-use comment_view::CommentView;
+use comment_view::{CommentFilter, CommentView};
 use std::{hint::black_box, time::Instant};
 #[path = "support/allocations.rs"]
 mod allocation_counter;
@@ -52,9 +52,194 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
-    benchmark_threads(passes);
-    if std::env::args().nth(2).as_deref() != Some("threads") {
-        benchmark(passes);
+    match std::env::args().nth(2).as_deref() {
+        Some("filters") => benchmark_filters(passes),
+        Some("threads") => benchmark_threads(passes),
+        _ => {
+            benchmark_threads(passes);
+            benchmark_filters(passes);
+            benchmark(passes);
+        }
+    }
+}
+
+fn apply_filter(view: &mut CommentView, comments: &Comments, filter: &CommentFilter) -> usize {
+    // Model edits of an existing input field without charging each operation
+    // for constructing the fixture's query string.
+    view.filter.query.clone_from(&filter.query);
+    view.filter.review = filter.review;
+    view.filter.marked = filter.marked;
+    view.filter.current_page = filter.current_page;
+    assert!(view.update(comments, comments.items.len() / 10 - 1));
+    black_box(view.rows()).len()
+}
+
+fn benchmark_filters(passes: usize) {
+    println!(
+        "Changed filters: {passes} passes, median µs/update, 100 updates/sample; warm Unicode search cache, real matching, ancestor retention, counts and row/selection updates. Includes query folding and allocations; excludes PDF parsing, widgets and GPU."
+    );
+    for count in [80, 10_000] {
+        let comments = Comments {
+            items: (0..count)
+                .map(|index| Comment {
+                    page: index / 10,
+                    slot: Some(index % 10),
+                    parent: (index % 10 != 0).then(|| CommentId {
+                        page: index / 10,
+                        slot: index % 10 - 1,
+                    }),
+                    review: match index % 10 {
+                        0 => ReviewStatus::Completed,
+                        9 => ReviewStatus::Accepted,
+                        _ => ReviewStatus::None,
+                    },
+                    marked: index % 10 == 9,
+                    states: Vec::new(),
+                    kind: "Text".into(),
+                    contents: format!(
+                        "Review {index}: Straße 中文 {}",
+                        if index % 10 == 9 {
+                            "needle"
+                        } else {
+                            "ancestor"
+                        }
+                    ),
+                    author: "Pagewing".into(),
+                    rects: Vec::new(),
+                    has_appearance: false,
+                    truncated: false,
+                    locked: false,
+                })
+                .collect(),
+            limited: false,
+        };
+        let all = CommentFilter::default();
+        let groups = [
+            (
+                "text",
+                [
+                    (
+                        CommentFilter {
+                            query: "STRASSE".into(),
+                            ..all.clone()
+                        },
+                        count,
+                        count,
+                    ),
+                    (
+                        CommentFilter {
+                            query: "pagewing needle".into(),
+                            ..all.clone()
+                        },
+                        count / 10,
+                        count,
+                    ),
+                    (
+                        CommentFilter {
+                            query: "missing".into(),
+                            ..all.clone()
+                        },
+                        0,
+                        0,
+                    ),
+                    (all.clone(), count, count),
+                ],
+            ),
+            (
+                "review",
+                [
+                    (
+                        CommentFilter {
+                            review: Some(ReviewStatus::Accepted),
+                            ..all.clone()
+                        },
+                        count / 10,
+                        count,
+                    ),
+                    (
+                        CommentFilter {
+                            review: Some(ReviewStatus::Completed),
+                            ..all.clone()
+                        },
+                        count / 10,
+                        count / 10,
+                    ),
+                    (
+                        CommentFilter {
+                            review: Some(ReviewStatus::Rejected),
+                            ..all.clone()
+                        },
+                        0,
+                        0,
+                    ),
+                    (all.clone(), count, count),
+                ],
+            ),
+            (
+                "page/marked",
+                [
+                    (
+                        CommentFilter {
+                            current_page: true,
+                            ..all.clone()
+                        },
+                        10,
+                        10,
+                    ),
+                    (
+                        CommentFilter {
+                            marked: true,
+                            ..all.clone()
+                        },
+                        count / 10,
+                        count,
+                    ),
+                    (
+                        CommentFilter {
+                            current_page: true,
+                            marked: true,
+                            ..all.clone()
+                        },
+                        1,
+                        10,
+                    ),
+                    (all, count, count),
+                ],
+            ),
+        ];
+        for (name, cases) in groups {
+            let mut view = CommentView::default();
+            view.set_comments(&comments);
+            for (filter, matches, shown) in &cases {
+                assert_eq!(apply_filter(&mut view, &comments, filter), *shown);
+                assert_eq!(view.matches(), *matches);
+                assert_eq!(
+                    view.rows().iter().filter(|row| row.matched).count(),
+                    *matches
+                );
+            }
+            let allocations = allocations(|| {
+                for (filter, _, _) in &cases {
+                    black_box(apply_filter(&mut view, &comments, filter));
+                }
+            });
+            if cases.iter().all(|(filter, _, _)| filter.query.is_empty()) {
+                assert_eq!(
+                    allocations,
+                    (0, 0),
+                    "warm non-text filters must not allocate"
+                );
+            }
+            let mut next = 0;
+            let time = measure(passes, || {
+                let filter = &cases[next % cases.len()].0;
+                next += 1;
+                apply_filter(&mut view, &comments, filter)
+            });
+            println!(
+                "  {count} {name}: {time:.3} µs/update; (alloc,realloc) per four changed filters {allocations:?}"
+            );
+        }
     }
 }
 

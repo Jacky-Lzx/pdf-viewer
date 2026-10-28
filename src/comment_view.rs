@@ -25,6 +25,9 @@ pub struct CommentView {
     pub filter: CommentFilter,
     threads: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
+    // Scratch tables are sized to the snapshot and reused across filters.
+    matched: Vec<bool>,
+    retained: Vec<bool>,
     visible: Vec<CommentRow>,
     overlays: HashMap<usize, Vec<usize>>,
     folded: Vec<Option<[String; 2]>>,
@@ -53,6 +56,8 @@ impl CommentView {
         }
         self.folded = (0..comments.items.len()).map(|_| None).collect();
         self.folded_bytes = 0;
+        self.matched = vec![false; comments.items.len()];
+        self.retained = vec![false; comments.items.len()];
         self.applied = None;
         self.visible.clear();
         self.matches = 0;
@@ -72,7 +77,8 @@ impl CommentView {
         }
         let query = caseless::default_case_fold_str(&self.filter.query);
         let words: Vec<_> = query.split_whitespace().collect();
-        let mut matched = vec![false; comments.items.len()];
+        self.matched.fill(false);
+        let matched = &mut self.matched;
         for (index, comment) in comments.items.iter().enumerate() {
             if page.is_some_and(|p| p != comment.page)
                 || self.filter.review.is_some_and(|r| r != comment.review)
@@ -103,7 +109,8 @@ impl CommentView {
             };
         }
         self.matches = matched.iter().filter(|&&m| m).count();
-        let mut keep = matched.clone();
+        self.retained.copy_from_slice(matched);
+        let keep = &mut self.retained;
         // The preorder is already cycle-safe; one reverse pass retains every
         // ancestor even for very deep threads, without walking each chain.
         for (row, &(index, _)) in self.threads.iter().enumerate().rev() {
@@ -327,6 +334,64 @@ mod tests {
         view.update(&comments, 0);
         assert!(view.rows().is_empty());
         assert!(view.overlays(4).is_empty());
+        let root = comment(5, 0, None, "parent");
+        let reply = comment(5, 1, root.id(), "new needle");
+        comments.items = vec![reply, root];
+        view.set_comments(&comments);
+        assert!(view.update(&comments, 0));
+        assert_eq!(view.matches(), 1);
+        assert_eq!(
+            view.rows()
+                .iter()
+                .map(|row| (row.index, row.matched))
+                .collect::<Vec<_>>(),
+            [(1, false), (0, true)],
+            "growing a replaced snapshot must rebuild context and direct matches"
+        );
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
+    fn successive_filters_reset_context_without_downgrading_direct_parent_matches() {
+        let root = comment(0, 0, None, "shared root");
+        let middle = comment(0, 1, root.id(), "shared middle");
+        let leaf = comment(1, 0, middle.id(), "needle");
+        let comments = Comments {
+            items: vec![leaf, middle, root, comment(2, 0, None, "elsewhere")],
+            limited: false,
+        };
+        let mut view = CommentView::default();
+        view.set_comments(&comments);
+        for (query, expected) in [
+            ("needle", vec![(2, false), (1, false), (0, true)]),
+            ("shared", vec![(2, true), (1, true)]),
+            ("missing", vec![]),
+            ("middle", vec![(2, false), (1, true)]),
+            ("", vec![(2, true), (1, true), (0, true), (3, true)]),
+            ("elsewhere", vec![(3, true)]),
+        ] {
+            view.filter.query = query.into();
+            assert!(view.update(&comments, 0));
+            assert_eq!(
+                view.rows()
+                    .iter()
+                    .map(|row| (row.index, row.matched))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{query:?}"
+            );
+            assert_eq!(
+                view.matches(),
+                expected.iter().filter(|(_, matched)| *matched).count()
+            );
+            assert_eq!(
+                view.selected(),
+                expected
+                    .iter()
+                    .find(|(_, matched)| *matched)
+                    .map(|(index, _)| *index)
+            );
+        }
     }
 
     #[test]
