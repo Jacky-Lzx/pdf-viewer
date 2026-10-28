@@ -191,10 +191,12 @@ def run(binary):
                 keyboard.key(0xFF0D)
                 expect(paths[-2], 4, "last recent result opens at minimum size")
                 picker("alpha")
-                # One result: Tab goes to the row, Open, then Cancel.
+                # One result: Tab goes to the row, Open, Copy, then Cancel.
                 for _ in range(3):
                     keyboard.key(0xFF09)
                 keyboard.key(0xFF0D)
+                assert keyboard.clipboard() == str(paths[0]), "Copy keeps the full selected path at minimum size"
+                keyboard.key(0xFF09); keyboard.key(0xFF0D)
                 keyboard.key("k", shift=True)
                 expect(paths[-2], 3, "Enter on Cancel closes the picker without opening its selected result")
                 picker("alpha")
@@ -230,7 +232,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, Shift+arrow text selection, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, viewport-sized PageUp/PageDown, Ctrl+Home/End, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, Shift+arrow text selection, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, viewport-sized PageUp/PageDown, Ctrl+Home/End, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Copy/Cancel, full path clipboard without opening its document, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

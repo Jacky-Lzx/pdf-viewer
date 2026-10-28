@@ -429,7 +429,7 @@ impl Pagewing {
                 let filter_focused = picker.focus
                     || context
                         .memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")));
-                // Tab can focus a result, Open or Cancel. Leave their activation
+                // Tab can focus a result or footer action. Leave their activation
                 // keys for egui instead of treating every Enter as filter confirm.
                 if key == Key::Enter && filter_focused {
                     picker.confirm = true;
