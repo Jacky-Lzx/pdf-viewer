@@ -474,6 +474,8 @@ cargo bench --locked --bench comments -- 5 slices
 cargo bench --locked --bench annotation_geometry -- 9
 # 阅读视图渲染规划，比较重复计算、缓存命中与滚动失效，包含高分屏和紧张预算
 cargo bench --locked --bench render_plan -- 9
+# 连续布局在视口调整时复用几何，对照原实现并核对滚动边界
+cargo bench --locked --bench continuous_layout -- 17
 # 多页和分块的纹理保护准入，另测重复保护列表更新
 cargo bench --locked --bench texture_protection -- 7
 # 名称与页码标签树，覆盖共享无效/重复数组及跨节点扫描上限

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check continuous/spread drawing, scrolling, mode changes and restored views."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import time
 
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
@@ -49,6 +51,8 @@ def run(binary):
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         config = root / "config/pagewing/library.json"
         keyboard = Keyboard()
+        keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                              ctypes.c_uint, ctypes.c_uint]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
 
@@ -80,7 +84,7 @@ def run(binary):
                 return wait_for(clicked, description)
 
             try:
-                wait_for(keyboard.focus, "continuous reader")
+                window = wait_for(keyboard.focus, "continuous reader")
                 expect(lambda book: book["page"] == 0, "initial page")
                 sequence("ms")
                 sequence("C6j")
@@ -120,6 +124,32 @@ def run(binary):
                 sequence("'a")
                 expect(lambda book: book["continuous"] and abs(book["offset"][1] - first["offset"][1]) < 0.001,
                        "mark restores the reading mode as well as its offset")
+                # Fixed zoom keeps every page's geometry during a height-only
+                # resize, but visible neighbors and the final limit must update.
+                def resize(height):
+                    keyboard.x11.XResizeWindow(keyboard.display, window, 1180, height)
+                    keyboard.x11.XFlush(keyboard.display)
+                    time.sleep(0.3)
+
+                sequence("agg6j")
+                resize(520)
+                wait_for(lambda: keyboard.pixel((600, 400))[0] > 180
+                         and keyboard.pixel((600, 400))[1] < 100,
+                         "short fixed-zoom viewport shows the first page")
+                resize(900)
+                wait_for(lambda: keyboard.pixel((600, 650))[1] > 150
+                         and keyboard.pixel((600, 650))[0] < 100,
+                         "height-only resize reveals the green neighboring page")
+                sequence("G999j")
+                resize(1000)
+                sequence("mz")
+                expect(lambda book: book["page"] == 2 and book["offset"][1] == 0
+                       and book["marks"]["z"]["offset"][1] == 0,
+                       "tall fixed-zoom viewport removes final-page overflow")
+                resize(820)
+                sequence("'a")
+                expect(lambda book: book["continuous"] and abs(book["offset"][1] - first["offset"][1]) < 0.001,
+                       "restore the original view after resizing")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
@@ -169,7 +199,7 @@ def run(binary):
                          and keyboard.pixel((600, 200))[1] < 100, "single-page drawing remains available after releasing shared geometry")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: simultaneous mixed-size pages, links on neighboring continuous/spread pages, keyboard/wheel scrolling, edges, marks, mode switching, restart, two-page restore, final unpaired page and rotated spreads")
+                print("PASS: simultaneous mixed-size pages, links on neighboring continuous/spread pages, keyboard/wheel scrolling, edges, marks, mode switching, height-only fixed-zoom resize updates visible neighbors and final-page limits, restart, two-page restore, final unpaired page and rotated spreads")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

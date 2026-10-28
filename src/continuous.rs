@@ -1,4 +1,7 @@
-use crate::{navigation::Fit, render_plan::RenderView};
+use crate::{
+    navigation::{Fit, MIN_SCALE},
+    render_plan::RenderView,
+};
 use std::ops::Range;
 
 pub const GAP: f32 = 24.0;
@@ -20,13 +23,24 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// Dimensions belong to one immutable document snapshot. Reset the layout
+    /// when replacing that snapshot, including reloads with the same page count.
     pub fn update(&mut self, dimensions: &[[f32; 2]], view: RenderView) {
-        let signature = (view.fit, view.viewport, view.rotation);
+        // Scrolling still depends on height when the page geometry does not.
+        self.height = view.viewport[1].max(1.0);
+        let viewport = match view.fit {
+            Fit::Width => [view.viewport[0], 0.0],
+            Fit::Height => [0.0, view.viewport[1]],
+            Fit::Custom(scale) if scale >= MIN_SCALE => [0.0; 2],
+            // Sub-minimum and NaN custom zooms use the viewport-dependent
+            // minimum/fallback in Fit::scale, as does fitting the whole page.
+            _ => view.viewport,
+        };
+        let signature = (view.fit, viewport, view.rotation % 2);
         if self.signature == Some(signature) && self.pages.len() == dimensions.len() {
             return;
         }
         self.signature = Some(signature);
-        self.height = view.viewport[1].max(1.0);
         self.pages.clear();
         let mut top = 0.0;
         for &dimensions in dimensions {
@@ -138,5 +152,111 @@ mod tests {
         assert_eq!(fitted.pages[0].size, [600.0, 800.0]);
         assert_eq!(fitted.pages[1].size, [600.0, 450.0]);
         assert!(Layout::default().visible(0, 0.0, 0.0).is_empty());
+    }
+
+    #[test]
+    fn resized_cached_layouts_match_fresh_geometry_and_scroll_bounds() {
+        let dimensions = [
+            [600.0, 800.0],
+            [900.0, 120.0],
+            [1.0, 8_000_000.0],
+            [40_000_000.0, 20_000_000.0],
+            [20.0, 30.0],
+        ];
+        let mut cached = Layout::default();
+        for fit in [
+            Fit::Page,
+            Fit::Width,
+            Fit::Height,
+            Fit::Custom(0.01),
+            Fit::Custom(MIN_SCALE),
+            Fit::Custom(3.0),
+            Fit::Custom(f32::NAN),
+            Fit::Custom(f32::INFINITY),
+            Fit::Custom(f32::NEG_INFINITY),
+        ] {
+            for viewport in [
+                [600.0, 700.0],
+                [600.0, 1600.0],
+                [1200.0, 1600.0],
+                [1200.0, 60.0],
+                [0.0, -20.0],
+                [600.0, 700.0],
+            ] {
+                for rotation in [0, 2, 1, 3, 0] {
+                    let view = RenderView {
+                        fit,
+                        viewport,
+                        rotation,
+                        pixels_per_point: 2.0,
+                        night: true,
+                        backwards: true,
+                    };
+                    cached.update(&dimensions, view);
+                    let mut fresh = Layout::default();
+                    fresh.update(&dimensions, view);
+                    for (actual, expected) in cached.pages.iter().zip(&fresh.pages) {
+                        assert_eq!(actual.top, expected.top, "{view:?}");
+                        assert_eq!(actual.size, expected.size, "{view:?}");
+                        assert_eq!(actual.scale, expected.scale, "{view:?}");
+                    }
+                    assert_eq!(cached.maximum(), fresh.maximum(), "{view:?}");
+                    for page in 0..dimensions.len() {
+                        assert_eq!(cached.limit(page), fresh.limit(page), "{view:?}");
+                        for offset in [0.0, 60.0, cached.limit(page)] {
+                            assert_eq!(
+                                cached.visible(page, offset, 24.0),
+                                fresh.visible(page, offset, 24.0),
+                                "{view:?}"
+                            );
+                            for delta in [-f32::MAX, -25.0, 0.0, 120.0, f32::MAX] {
+                                assert_eq!(
+                                    cached.position(page, offset, delta),
+                                    fresh.position(page, offset, delta),
+                                    "{view:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn height_changes_update_visibility_and_the_final_page_limit_at_fixed_zoom() {
+        let dimensions = [[600.0, 800.0]; 4];
+        let mut cached = layout(&dimensions, Fit::Custom(1.0), 0);
+        assert_eq!(cached.visible(0, 0.0, 0.0), 0..1);
+        assert_eq!(cached.limit(3), 100.0);
+        cached.update(
+            &dimensions,
+            RenderView {
+                fit: Fit::Custom(1.0),
+                viewport: [600.0, 1700.0],
+                pixels_per_point: 1.0,
+                rotation: 0,
+                night: false,
+                backwards: false,
+            },
+        );
+        assert_eq!(cached.visible(0, 0.0, 0.0), 0..3);
+        assert_eq!(cached.limit(3), 0.0);
+        assert_eq!(cached.position(0, 0.0, f32::MAX), (3, 0.0));
+        // Count changes still rebuild the geometry even at the same zoom.
+        cached.update(
+            &dimensions[..2],
+            RenderView {
+                fit: Fit::Custom(1.0),
+                viewport: [600.0, 1700.0],
+                pixels_per_point: 1.0,
+                rotation: 0,
+                night: false,
+                backwards: false,
+            },
+        );
+        assert_eq!(cached.pages.len(), 2);
+        assert_eq!(cached.visible(0, 0.0, 0.0), 0..2);
+        assert_eq!(cached.position(0, 0.0, f32::MAX), (1, 0.0));
     }
 }

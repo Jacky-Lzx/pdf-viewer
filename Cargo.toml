@@ -113,6 +113,10 @@ name = "case_folding"
 harness = false
 
 [[bench]]
+name = "continuous_layout"
+harness = false
+
+[[bench]]
 name = "link_reading"
 harness = false
 
