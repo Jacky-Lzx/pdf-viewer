@@ -101,6 +101,7 @@ impl Pagewing {
                         ui.set_max_width(ui.spacing().tooltip_width);
                         ui.label(&hit.snippet);
                         ui.weak("Right-click to copy this snippet");
+                        ui.weak("When focused: Ctrl/Cmd+C to copy · Shift+F10 for menu");
                     });
                 focus.observe(&response, index);
                 if response.secondary_clicked() {
@@ -108,12 +109,13 @@ impl Pagewing {
                     self.hints.cancel();
                     self.mark_action = None;
                 }
-                copied |= crate::app::shortcuts::copy_context_menu(
+                copied |= crate::app::copy_menu::show(
                     &response,
                     // A replacement query must not inherit this row's open menu.
                     response.id.with(("snippet", self.revision)),
                     "Copy snippet",
                     &hit.snippet,
+                    crate::app::copy_menu::Target::Control,
                 );
                 if response.clicked() {
                     selected = Some(index);

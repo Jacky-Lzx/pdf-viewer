@@ -4,6 +4,7 @@ mod comments;
 #[cfg(test)]
 mod config;
 mod continuous;
+mod copy_menu;
 mod dialog;
 mod errors;
 mod focus_input;
@@ -1383,11 +1384,12 @@ impl Pagewing {
                     self.hints.cancel();
                     self.mark_action = None;
                 }
-                copied |= shortcuts::copy_context_menu(
+                copied |= copy_menu::show(
                     &response,
                     egui::Popup::default_response_id(&response),
                     "Copy link address",
                     url,
+                    copy_menu::Target::Document,
                 );
             }
             if response.clicked() {
@@ -1480,6 +1482,7 @@ impl eframe::App for Pagewing {
                 self.viewport,
             )
             && !self.input_buttons.control_menu_open(context)
+            && !copy_menu::control_menu_open(context)
         {
             // Document context menus depend on page geometry. Menus anchored
             // to reader controls retain their focus while the viewport resizes.

@@ -130,6 +130,8 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
         "Right-click search result",
         "Copy its snippet without moving the reading view",
     ),
+    ("Ctrl/Cmd+c (focused result)", "Copy this search snippet"),
+    ("Shift+F10 (focused result)", "Open the snippet copy menu"),
     (
         "Ctrl/Cmd+click PDF",
         "SyncTeX reverse search in the configured editor",
@@ -170,5 +172,7 @@ pub(super) const FIXED_SHORTCUTS: &[(&str, &str)] = &[
         "Right-click search result",
         "Copy its snippet without moving the reading view",
     ),
+    ("Ctrl/Cmd+c (focused result)", "Copy this search snippet"),
+    ("Shift+F10 (focused result)", "Open the snippet copy menu"),
     ("Ctrl/Cmd+click PDF", "SyncTeX reverse search"),
 ];

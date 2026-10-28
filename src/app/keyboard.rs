@@ -170,6 +170,15 @@ impl Pagewing {
                 }
                 continue;
             }
+            if event == ReaderAction::Copy
+                && !typing
+                && !popup_open
+                && !self.help
+                && !self.properties_open
+                && super::copy_menu::request_copy(context)
+            {
+                continue;
+            }
             if event == ReaderAction::Copy && !typing && !popup_open && self.selection.active {
                 self.copy_selection(context);
                 context.input_mut(|input| {
@@ -190,6 +199,18 @@ impl Pagewing {
             let symbol = key_text.character();
             let raw_key = key;
             let raw_modifiers = modifiers;
+            if !typing
+                && !popup_open
+                && !self.help
+                && !self.properties_open
+                && super::copy_menu::open(context, key, modifiers)
+            {
+                self.nav.clear_prefix();
+                self.hints.cancel();
+                self.mark_action = None;
+                context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                continue;
+            }
             if self.nav.count == 0
                 && !typing
                 && !(self.help || self.properties_open || popup_open)

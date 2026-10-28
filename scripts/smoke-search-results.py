@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,7 @@ import time
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
-ENTER, ESCAPE, TAB = 0xFF0D, 0xFF1B, 0xFF09
+ENTER, ESCAPE, TAB, F10 = 0xFF0D, 0xFF1B, 0xFF09, 0xFFC7
 
 
 def run(binary):
@@ -37,6 +38,7 @@ def run(binary):
         keyboard = Keyboard()
         keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                               ctypes.c_uint, ctypes.c_uint]
+        keyboard.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -60,6 +62,18 @@ def run(binary):
                     keyboard.key(TAB)
                 keyboard.key(ENTER)
                 keyboard.key(ESCAPE)
+
+            def burst(keys):
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    _, status = os.waitpid(application.pid, os.WUNTRACED)
+                    assert os.WIFSTOPPED(status)
+                    for symbol, modifiers in keys:
+                        keyboard.key(symbol, delay=0, **modifiers)
+                    keyboard.x11.XSync(keyboard.display, False)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                time.sleep(0.4)
 
             def selected_result(height):
                 # Highlight pixels identify search rows even while bookmarks,
@@ -114,6 +128,47 @@ def run(binary):
                 keyboard.key(ESCAPE)
                 assert keyboard.clipboard() == snippet, "cancelling the menu changes the clipboard"
                 expect(79, "cancelling the snippet menu preserves navigation")
+
+                # Enter the results using real Tab traversal from a known
+                # input. The long outline and bookmark lists precede them;
+                # mouse selection and keyboard focus are independent.
+                keyboard.key("f", ctrl=True)
+                keyboard.key("a", ctrl=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "Needle"
+                for _ in range(256):
+                    keyboard.key(TAB)
+                    keyboard.key("c", ctrl=True)
+                    if keyboard.clipboard() == snippet:
+                        break
+                else:
+                    raise AssertionError("Tab traversal did not reach the selected search result")
+                # Copying belongs to focus, not the selected search match.
+                keyboard.key(TAB, shift=True)
+                keyboard.key("c", ctrl=True)
+                previous_snippet = keyboard.clipboard()
+                assert "Needle 079" in previous_snippet and "Needle 080" not in previous_snippet, previous_snippet
+                expect(79, "copying a focused neighboring snippet preserves navigation")
+                assert selected_result(540), "copying changes the selected search match"
+                keyboard.key(TAB)
+                burst([(F10, {"shift": True}), (ENTER, {})])
+                assert keyboard.clipboard() == snippet, "fast keyboard menu activation must copy the focused result"
+                expect(79, "keyboard menu activation preserves navigation")
+
+                keyboard.key(TAB, shift=True)
+                keyboard.key(F10, shift=True)
+                for width, height in ((860, 240), (1180, 820), (860, 540)):
+                    resize(width, height)
+                keyboard.key(ENTER)
+                assert keyboard.clipboard() == previous_snippet, "resizing must retain the keyboard snippet menu"
+                expect(79, "resized keyboard menu preserves navigation")
+                keyboard.key(TAB)
+                keyboard.key(F10, shift=True)
+                burst([(ESCAPE, {}), ("c", {"ctrl": True})])
+                assert keyboard.clipboard() == snippet, "Escape must restore row focus before a queued copy"
+                expect(79, "menu cancellation and restored-focus copying preserve navigation")
+                keyboard.key(ESCAPE)
+                position = wait_for(lambda: selected_result(540), "keyboard copying preserves the selected match")
                 keyboard.wheel(position, steps=12)
                 time.sleep(0.3)
                 assert not selected_result(540), "manual list scrolling must remain in place"
@@ -138,7 +193,7 @@ def run(binary):
                 expect(78, "Results preserves the current hit while reading another chapter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, right-click single-snippet copying and cancellation, first/last navigation, resize visibility, manual scrolling, Results restoration, clickable rows and chapter focus")
+                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, right-click and focused keyboard snippet copying, fast menu activation, resize and restored-focus copying, first/last navigation, manual scrolling, Results restoration, clickable rows and chapter focus")
             except Exception:
                 log.flush()
                 log.seek(0)
