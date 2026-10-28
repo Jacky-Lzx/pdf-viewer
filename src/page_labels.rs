@@ -145,6 +145,46 @@ impl PageLabels {
         }
     }
 
+    /// Keep the physical page first so narrow preview captions retain it.
+    pub fn preview_caption(&self, page: usize) -> String {
+        let mut caption = format!("Page {}", page + 1);
+        if let Some(label) = self.label(page)
+            && !label.is_empty()
+            && label != caption["Page ".len()..]
+        {
+            let end = label
+                .char_indices()
+                .nth(12)
+                .map_or(label.len(), |(end, _)| end);
+            caption.reserve(" · ".len() + end + '…'.len_utf8());
+            caption.push_str(" · ");
+            caption.extend(label[..end].chars().map(|character| {
+                if character.is_whitespace() {
+                    ' '
+                } else {
+                    character
+                }
+            }));
+            if end < label.len() {
+                caption.push('…');
+            }
+        }
+        caption
+    }
+
+    /// Hover text uses the complete retained label, independently of its caption.
+    pub fn preview_tooltip(&self, page: usize) -> String {
+        let mut tooltip = format!("Go to page {}", page + 1);
+        if let Some(label) = self.label(page)
+            && !label.is_empty()
+            && label != tooltip["Go to page ".len()..]
+        {
+            tooltip.push_str("\nPDF page label: ");
+            tooltip.push_str(&label);
+        }
+        tooltip
+    }
+
     /// Physical page numbers remain stable; `=1` explicitly addresses a numeric PDF label.
     pub fn resolve_input(&self, input: &str, count: usize) -> Option<usize> {
         let input = input.trim();
@@ -514,5 +554,40 @@ mod tests {
             assert_eq!(labels.label(0).as_deref(), Some(label));
         }
         assert_eq!(PageLabels::default().display_name(4), "5");
+    }
+
+    #[test]
+    fn preview_names_prioritize_physical_pages_and_keep_full_labels_in_tooltips() {
+        for (label, caption) in [
+            ("", "Page 1"),
+            ("1", "Page 1"),
+            ("i", "Page 1 · i"),
+            ("first\nline\t!", "Page 1 · first line !"),
+            (
+                "中文😀".repeat(5).as_str(),
+                "Page 1 · 中文😀中文😀中文😀中文😀…",
+            ),
+        ] {
+            let labels = PageLabels {
+                count: 1,
+                ranges: vec![LabelRange {
+                    page: 0,
+                    first: 1,
+                    prefix: label.into(),
+                    style: Style::None,
+                }],
+            };
+            assert_eq!(labels.preview_caption(0), caption);
+            assert_eq!(
+                labels.preview_tooltip(0),
+                if label.is_empty() || label == "1" {
+                    "Go to page 1".to_owned()
+                } else {
+                    format!("Go to page 1\nPDF page label: {label}")
+                }
+            );
+        }
+        assert_eq!(PageLabels::default().preview_caption(4), "Page 5");
+        assert_eq!(PageLabels::default().preview_tooltip(4), "Go to page 5");
     }
 }

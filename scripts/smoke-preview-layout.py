@@ -24,7 +24,8 @@ def run(binary):
             for page in range(80)
         ]
         document = root / "pagewing-smoke.pdf"
-        document.write_bytes(fixture["make_pdf"]())
+        document.write_bytes(fixture["make_pdf"](
+            page_label_prefix="Long appendix 中文😀 with a complete label suffix "))
         config_path = root / "config/pagewing/library.json"
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({

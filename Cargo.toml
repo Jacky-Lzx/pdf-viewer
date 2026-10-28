@@ -131,3 +131,7 @@ harness = false
 [[bench]]
 name = "texture_protection"
 harness = false
+
+[[bench]]
+name = "preview_caption"
+harness = false

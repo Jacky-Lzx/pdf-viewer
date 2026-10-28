@@ -63,7 +63,7 @@ PAGES = [
 ]
 
 
-def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hints=False):
+def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hints=False, page_label_prefix=None):
     def destination(index):
         view = (destination_views or {}).get(index, "/Fit")
         return f"[{5 + index * 2} 0 R {view}]"
@@ -127,11 +127,15 @@ def make_pdf(nested_outline=False, destination_views=None, hint_links=0, web_hin
         objects.append(f"<< /Title ({pdf_string(title)}) /Parent {parent_id} 0 R {previous} {following} {dest}{descendants} >>".encode())
     labels_id = len(objects) + 1
     objects[0] = objects[0][:-2] + f" /PageLabels {labels_id} 0 R >>".encode()
-    objects.extend([
-        f"<< /Kids [{labels_id + 1} 0 R {labels_id + 2} 0 R] >>".encode(),
-        b"<< /Nums [0 << /S /r >>] >>",
-        b"<< /Nums [2 << /S /D >> 4 << /S /D /P (A-) >>] >>",
-    ])
+    if page_label_prefix is None:
+        objects.extend([
+            f"<< /Kids [{labels_id + 1} 0 R {labels_id + 2} 0 R] >>".encode(),
+            b"<< /Nums [0 << /S /r >>] >>",
+            b"<< /Nums [2 << /S /D >> 4 << /S /D /P (A-) >>] >>",
+        ])
+    else:
+        encoded = (b"\xfe\xff" + page_label_prefix.encode("utf-16-be")).hex()
+        objects.append(f"<< /Nums [0 << /S /D /P <{encoded}> >>] >>".encode())
     output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
     for number, obj in enumerate(objects, 1):

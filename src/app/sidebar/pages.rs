@@ -2,6 +2,8 @@ use super::{Pagewing, appearance};
 use crate::{navigation::Fit, thumbnails::PreviewLayout};
 use eframe::egui::{self, Color32, Vec2};
 
+mod caption;
+
 #[derive(Clone, Copy)]
 struct PageViewport {
     document: u64,
@@ -256,17 +258,16 @@ impl Pagewing {
                         },
                     );
                 }
-                painter.text(
-                    egui::pos2(rect.center().x, rect.bottom() - 8.0),
-                    egui::Align2::CENTER_BOTTOM,
-                    format!("Page {}", self.page_name(page)),
-                    egui::FontId::proportional(13.0),
+                caption::paint(
+                    painter,
+                    rect,
+                    self.labels.preview_caption(page),
                     ui.visuals().text_color(),
                 );
                 if response
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
-                        ui.label(format!("Go to page {}", self.page_name(page)));
+                        ui.label(self.labels.preview_tooltip(page));
                     })
                     .clicked()
                 {
@@ -288,6 +289,34 @@ impl Pagewing {
 mod tests {
     use super::*;
     use crate::{destination::Destination, navigation::Navigation, outline::OutlineEntry};
+    use lopdf::dictionary;
+
+    fn labels_with_prefix(prefix: &str) -> crate::page_labels::PageLabels {
+        let mut document =
+            lopdf::Document::load_mem(include_bytes!("../../../assets/pagewing-guide.pdf"))
+                .unwrap();
+        let mut bytes = vec![0xfe, 0xff];
+        bytes.extend(prefix.encode_utf16().flat_map(u16::to_be_bytes));
+        let labels = document.add_object(lopdf::dictionary! {
+            "Nums" => vec![lopdf::Object::Integer(0), lopdf::dictionary! {
+                "S" => lopdf::Object::Name(b"D".to_vec()),
+                "P" => lopdf::Object::String(bytes, lopdf::StringFormat::Hexadecimal),
+            }.into()],
+        });
+        let catalog = document
+            .trailer
+            .get(b"Root")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        document
+            .get_dictionary_mut(catalog)
+            .unwrap()
+            .set("PageLabels", labels);
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).unwrap();
+        crate::page_labels::PageLabels::read(&hayro::hayro_syntax::Pdf::new(bytes).unwrap())
+    }
 
     fn preview_app(outline: bool) -> (tempfile::TempDir, egui::Context, Pagewing) {
         let directory = tempfile::tempdir().unwrap();
@@ -418,6 +447,78 @@ mod tests {
             let output = settle(&mut app, &context, size);
             assert_preview_fits(&context, &output, size);
         }
+    }
+
+    #[test]
+    fn long_pdf_labels_keep_the_preview_caption_inside_its_card() {
+        let (_directory, context, mut app) = preview_app(false);
+        app.nav = Navigation::new(6, 5);
+        app.dimensions.truncate(6);
+        app.labels = labels_with_prefix("Long appendix 中文😀 title\nsecond line ");
+        preview_key(&mut app, &context, Vec2::new(240.0, 240.0));
+        for size in crate::app::dialog::TEST_SIZES {
+            let output = settle(&mut app, &context, size);
+            let caption = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.job.text.starts_with("Page ")
+                            && (text.galley.job.text.ends_with(" · 6")
+                                || text.galley.job.text.starts_with("Page 6")) =>
+                    {
+                        Some((shape.clip_rect, text))
+                    }
+                    _ => None,
+                })
+                .expect("the selected preview caption must be drawn");
+            let bounds = egui::Rect::from_min_size(caption.1.pos, caption.1.galley.size());
+            assert!(
+                caption.0.contains_rect(bounds),
+                "caption {bounds:?} exceeds {:?}",
+                caption.0
+            );
+            assert_eq!(caption.1.galley.rows.len(), 1);
+            let visible: String = caption.1.galley.rows[0]
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.chr)
+                .collect();
+            assert!(
+                visible.starts_with("Page 6"),
+                "physical page number must remain visible: {visible}"
+            );
+        }
+        let size = Vec2::new(860.0, 540.0);
+        let output = settle(&mut app, &context, size);
+        let position = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with("Page 6") => {
+                    Some(text.pos + egui::vec2(5.0, 5.0))
+                }
+                _ => None,
+            })
+            .unwrap();
+        frame(
+            &mut app,
+            &context,
+            size,
+            vec![egui::Event::PointerMoved(position)],
+        );
+        let output = settle(&mut app, &context, size);
+        assert!(
+            output.shapes.iter().any(|shape| match &shape.shape {
+                egui::Shape::Text(text) => text
+                    .galley
+                    .job
+                    .text
+                    .contains("PDF page label: Long appendix 中文😀 title\nsecond line 6"),
+                _ => false,
+            }),
+            "hover must display the full retained label, including the suffix omitted from the caption"
+        );
     }
 
     #[test]
