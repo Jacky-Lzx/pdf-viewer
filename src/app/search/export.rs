@@ -16,6 +16,7 @@ pub(super) struct Snapshot<'a> {
     pub pages: usize,
     pub complete: bool,
     pub limited: bool,
+    pub stopped: bool,
 }
 
 pub(super) struct Report {
@@ -67,7 +68,9 @@ fn render_with_limit(
         "Pages scanned: {} / {}",
         snapshot.scanned, snapshot.pages
     );
-    text.push_str(if snapshot.limited {
+    text.push_str(if snapshot.stopped {
+        "[Search stopped by user; this snapshot contains only the available matches.]\n"
+    } else if snapshot.limited {
         "[Search stopped at the result limit; more matches may exist.]\n"
     } else if !snapshot.complete {
         "[Search in progress; this snapshot contains the currently available matches.]\n"
@@ -143,6 +146,7 @@ mod tests {
             pages: 6,
             complete: true,
             limited: false,
+            stopped: false,
         }
     }
 
@@ -181,6 +185,23 @@ mod tests {
         let report = render(source, |_| None);
         assert!(report.text.contains("result limit; more matches may exist"));
         assert!(!report.text.contains("[Search complete.]"));
+        assert!(report.text.contains("Result 3 · Page 5"));
+    }
+
+    #[test]
+    fn stopped_searches_distinguish_the_terminal_partial_snapshot_from_completion() {
+        let hits = hits();
+        let mut source = snapshot(&hits);
+        source.stopped = true;
+        source.scanned = 2;
+        let report = render(source, |_| None);
+        assert_eq!((report.copied, report.total), (3, 3));
+        assert!(report.text.contains("Pages scanned: 2 / 6\n"));
+        assert!(report.text.contains(
+            "[Search stopped by user; this snapshot contains only the available matches.]\n"
+        ));
+        assert!(!report.text.contains("[Search complete.]"));
+        assert!(!report.text.contains("[Search in progress;"));
         assert!(report.text.contains("Result 3 · Page 5"));
     }
 

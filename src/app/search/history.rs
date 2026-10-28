@@ -1,4 +1,4 @@
-use super::Pagewing;
+use super::{Pagewing, appearance};
 use eframe::egui::{
     self,
     text::{CCursor, CCursorRange},
@@ -10,7 +10,10 @@ impl Pagewing {
         let mut chosen = None;
         let mut clear = false;
         let response = ui
-            .add_enabled(!self.query_history.is_empty(), egui::Button::new("History"))
+            .add_enabled_ui(!self.query_history.is_empty(), |ui| {
+                appearance::action_button(ui, "search-history", egui::Button::new("History"))
+            })
+            .inner
             .on_hover_text(
                 "Reuse a recent search in this window; keeps the current Aa and Word options",
             )

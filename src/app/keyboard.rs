@@ -39,10 +39,16 @@ impl Pagewing {
             }
             Some(shortcuts::InputButton::Search(action)) => {
                 self.search_button(action);
-                if action == shortcuts::SearchButton::Copy && search_input_focused {
+                if matches!(
+                    action,
+                    shortcuts::SearchButton::Copy
+                        | shortcuts::SearchButton::Stop
+                        | shortcuts::SearchButton::Restart
+                ) && search_input_focused
+                {
                     // Reading button responses can release text focus before
                     // TextEdit consumes queued edits. Apply those edits before
-                    // deciding whether these results still belong to the query.
+                    // copying results or stopping/restarting the latest query.
                     self.search_focus = true;
                 }
             }

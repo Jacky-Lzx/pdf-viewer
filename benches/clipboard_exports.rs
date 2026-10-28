@@ -200,6 +200,7 @@ impl Fixture {
                         pages: 10_000,
                         complete: true,
                         limited: false,
+                        stopped: false,
                     },
                     label,
                 );

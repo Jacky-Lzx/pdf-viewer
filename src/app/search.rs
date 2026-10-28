@@ -2,8 +2,10 @@ use super::{Pagewing, appearance, shortcuts, toolbar};
 use eframe::egui::{self, Key};
 use std::time::{Duration, Instant};
 
+mod control;
 mod export;
 mod history;
+pub(super) use control::RunAction;
 
 #[cfg(test)]
 mod highlight_tests;
@@ -31,6 +33,8 @@ impl Pagewing {
                 self.dirty = true;
             }
             SearchButton::Copy => self.copy_search_requested = true,
+            SearchButton::Stop => self.search_run_requested = Some(RunAction::Stop),
+            SearchButton::Restart => self.search_run_requested = Some(RunAction::Restart),
             SearchButton::Close => {
                 self.search_open = false;
                 self.search_navigation.clear();
@@ -41,6 +45,8 @@ impl Pagewing {
     pub(super) fn restart_search(&mut self) {
         self.search_navigation.clear();
         self.copy_search_requested = false;
+        self.search_run_requested = None;
+        self.search_stopped = false;
         self.revision += 1;
         self.hits.clear();
         self.search_highlights.clear();
@@ -153,8 +159,14 @@ impl Pagewing {
         if !self.search_open {
             self.search_region = None;
             self.copy_search_requested = false;
+            self.search_run_requested = None;
             return;
         }
+        // Apply after TextEdit so a same-frame edit followed by Stop stops the
+        // edited query too. Snapshot resets can safely discard stored requests.
+        let run_action = self.search_run_requested.take();
+        self.input_buttons.search_stop = None;
+        self.input_buttons.search_restart = None;
         let panel = egui::TopBottomPanel::top("search")
             .frame(appearance::panel(context, 4))
             .exact_height(42.0)
@@ -172,25 +184,26 @@ impl Pagewing {
                             .hint_text("Search this document…"),
                     );
                     self.input_buttons.search_case = Some(
-                        ui.selectable_label(self.library.search_options.match_case, "Aa")
+                        appearance::action_button(ui, "search-case", egui::Button::selectable(self.library.search_options.match_case, "Aa"))
                             .on_hover_text("Match case · Alt+C")
                             .id,
                     );
                     self.input_buttons.search_word = Some(
-                        ui.selectable_label(self.library.search_options.whole_word, "Word")
+                        appearance::action_button(ui, "search-word", egui::Button::selectable(self.library.search_options.whole_word, "Word"))
                             .on_hover_text("Whole words · Alt+W")
                             .id,
                     );
                     if response.changed() {
                         self.change_search();
                     }
-                    self.input_buttons.search_previous = Some(ui.button("Prev").id);
-                    self.input_buttons.search_next = Some(ui.button("Next").id);
+                    self.input_buttons.search_previous = Some(appearance::action_button(ui, "search-previous", egui::Button::new("Prev")).id);
+                    self.input_buttons.search_next = Some(appearance::action_button(ui, "search-next", egui::Button::new("Next")).id);
                     let index = self.hit_index.map(|i| i + 1).unwrap_or(0);
                     ui.label(format!(
-                        "{index} / {}{} matches",
+                        "{index} / {}{} matches{}",
                         self.hits.len(),
-                        if self.search_limited { "+" } else { "" }
+                        if self.search_limited { "+" } else { "" },
+                        if self.search_stopped { " · stopped" } else { "" }
                     ));
                     if !self.search_complete && !self.query.trim().is_empty() {
                         ui.spinner();
@@ -198,15 +211,16 @@ impl Pagewing {
                             ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
                         }
                     }
-                    self.input_buttons.search_results = Some(ui.button("Results").id);
+                    self.input_buttons.search_results = Some(appearance::action_button(ui, "search-results", egui::Button::new("Results")).id);
                     self.input_buttons.search_copy = Some(
-                        ui.add_enabled(!self.hits.is_empty(), egui::Button::new("Copy results"))
+                        ui.add_enabled_ui(!self.hits.is_empty(), |ui| appearance::action_button(ui, "search-copy", egui::Button::new("Copy results"))).inner
                             .on_hover_text("Copy the available search snippets, including results outside the viewport")
                             .on_disabled_hover_text("No search results available yet.")
                             .id,
                     );
                     let history_action = self.search_history_menu(ui);
-                    self.input_buttons.close_search = Some(ui.button("×").id);
+                    self.search_run_control(ui);
+                    self.input_buttons.close_search = Some(appearance::action_button(ui, "search-close", egui::Button::new("×")).id);
                     // Menu activation belongs to the popup, including Tab and
                     // Enter batched in the frame that releases text focus.
                     if !history_action && !egui::Popup::is_any_open(context)
@@ -219,10 +233,18 @@ impl Pagewing {
                             }
                         });
                     }
-                    if !ui.is_sizing_pass() && std::mem::take(&mut self.copy_search_requested) {
-                        // TextEdit and change_search run first: a pending edit
-                        // must never copy results from the preceding query.
-                        self.copy_search_results(context);
+                    if ui.is_sizing_pass() {
+                        self.search_run_requested = run_action;
+                    } else {
+                        if let Some(action) = run_action {
+                            self.apply_search_run(action);
+                            context.request_repaint();
+                        }
+                        if std::mem::take(&mut self.copy_search_requested) {
+                            // TextEdit and change_search run first: a pending edit
+                            // must never copy results from the preceding query.
+                            self.copy_search_results(context);
+                        }
                     }
                 });
             });
@@ -243,6 +265,7 @@ impl Pagewing {
                 pages: self.scan_total,
                 complete: self.search_complete,
                 limited: self.search_limited,
+                stopped: self.search_stopped,
             },
             |page| self.labels.label(page),
         );
@@ -638,6 +661,8 @@ mod tests {
                 SearchButton::Next,
                 SearchButton::Results,
                 SearchButton::Copy,
+                SearchButton::Stop,
+                SearchButton::Restart,
                 SearchButton::Close,
             ] {
                 let directory = tempfile::tempdir().unwrap();
@@ -655,6 +680,9 @@ mod tests {
                     .collect();
                 app.hit_index = Some(1);
                 app.library.sidebar = false;
+                app.search_complete = action != SearchButton::Stop;
+                app.search_stopped = action == SearchButton::Restart;
+                frame(&mut app, &context, Vec::new());
                 let id = match action {
                     SearchButton::Case => app.input_buttons.search_case,
                     SearchButton::Word => app.input_buttons.search_word,
@@ -662,6 +690,8 @@ mod tests {
                     SearchButton::Next => app.input_buttons.search_next,
                     SearchButton::Results => app.input_buttons.search_results,
                     SearchButton::Copy => app.input_buttons.search_copy,
+                    SearchButton::Stop => app.input_buttons.search_stop,
+                    SearchButton::Restart => app.input_buttons.search_restart,
                     SearchButton::Close => app.input_buttons.close_search,
                 }
                 .unwrap();
@@ -708,6 +738,17 @@ mod tests {
                     SearchButton::Close => {
                         assert!(!app.search_open);
                         assert!(app.search_navigation.first().is_none());
+                    }
+                    SearchButton::Stop => {
+                        assert!(app.search_stopped && app.search_complete);
+                        assert_eq!(app.hits.len(), 3);
+                        assert_eq!(app.hit_index, Some(1));
+                        assert_eq!(app.revision, revision + 1);
+                    }
+                    SearchButton::Restart => {
+                        assert!(!app.search_stopped && !app.search_complete);
+                        assert!(app.hits.is_empty() && app.hit_index.is_none());
+                        assert_eq!(app.revision, revision + 1);
                     }
                 }
                 if !matches!(action, SearchButton::Previous | SearchButton::Next) {

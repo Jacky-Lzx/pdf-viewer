@@ -96,6 +96,8 @@ impl Pagewing {
         self.scan_total = 0;
         self.search_complete = true;
         self.search_limited = false;
+        self.search_stopped = false;
+        self.search_run_requested = None;
         self.revision += 1;
         self.reading = ReadingState::default();
         self.overflow = Vec2::ZERO;

@@ -206,6 +206,8 @@ night = []                 # 停用该动作的快捷键
 
 **Results** 会打开侧栏并显露当前匹配项；尚未选择匹配项时显示首条结果，保留阅读页码。`n` / `N` 会同步显露结果区，相邻行已可见时只移动选择。窗口缩放或字体放大后，原本可见的当前结果会继续保持可见；手动滚离后保留滚动位置，再按 **Results** 可返回当前匹配项。
 
+搜索期间点击 **Stop** 可停止后台扫描，正在进行的单页文字提取会先完成。已找到的结果、当前选中项和阅读位置会保留；`n` / `N`、结果列表和复制仍可使用。匹配数旁会注明 stopped，复制摘要会说明搜索由用户停止。点击 **Restart** 从文档开头重新搜索，替换这份部分结果；修改查询、切换匹配选项或重载文档也会重新搜索。按钮支持 Tab 聚焦后按 Enter 或空格操作，窄窗口中会随焦点横向显露；扫描进度变化或调整窗口尺寸时保留原控件的焦点。
+
 按 `Ctrl/Cmd+Alt+Z` 或点击底栏的缩放比例可直接输入百分比，例如 `125` 或 `125%`，按 Enter 或点击 Apply 应用；也可选择 50%、100%、150%、200% 预设。快捷键可通过配置中的 `zoom` 动作更改或停用。缩放保留视口中心，支持单页、连续和双页模式。超出页面允许范围的比例会限制到实际可用值；错误输入保留在框内，Escape 或 Cancel 放弃修改。
 
 缩放窗口在 240 × 240 的最小阅读窗口中同时显示输入框、错误提示、全部预设及 Apply / Cancel，无需滚动。按 Tab 可依次选择预设与操作，Enter 执行；调整窗口尺寸保留正在编辑的比例。
@@ -529,6 +531,7 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-search-history.py target/rele
 python3 scripts/with-xvfb.py python3 scripts/smoke-view-menu.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-search-phrases.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-search-results.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-stop.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-search-dense.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-persistence.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-paths.py target/release/pagewing

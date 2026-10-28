@@ -151,6 +151,8 @@ pub(super) enum SearchButton {
     Next,
     Results,
     Copy,
+    Stop,
+    Restart,
     Close,
 }
 
@@ -169,6 +171,8 @@ pub(super) struct InputButtons {
     pub search_results: Option<Id>,
     pub search_copy: Option<Id>,
     pub search_history: Option<Id>,
+    pub search_stop: Option<Id>,
+    pub search_restart: Option<Id>,
     pub close_search: Option<Id>,
     pub comments: Option<Id>,
     pub close_comments: Option<Id>,
@@ -265,6 +269,8 @@ impl InputButtons {
                 self.search_results,
                 self.search_copy,
                 self.search_history,
+                self.search_stop,
+                self.search_restart,
                 self.close_search,
             ]
             .into_iter()
@@ -303,6 +309,11 @@ impl InputButtons {
                 InputButton::Search(SearchButton::Results),
             ),
             (self.search_copy, InputButton::Search(SearchButton::Copy)),
+            (self.search_stop, InputButton::Search(SearchButton::Stop)),
+            (
+                self.search_restart,
+                InputButton::Search(SearchButton::Restart),
+            ),
             (self.close_search, InputButton::Search(SearchButton::Close)),
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),
