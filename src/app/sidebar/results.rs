@@ -33,9 +33,9 @@ impl Pagewing {
         // scroll area: wheel scrolling must not change the list's height.
         let height = (viewport.y - heading.rect.height() - 3.0 * ui.spacing().item_spacing.y)
             .clamp(row_height, 280.0);
-        let row_target = self.result_navigation.target(
+        let row_target = self.list_keyboard.target(
             ui.ctx(),
-            (self.id, self.revision),
+            crate::app::list_keyboard::Scope::Results(self.id, self.revision),
             self.hits.len(),
             crate::list_navigation::page_rows(height, row_height, ui.spacing().item_spacing.y),
         );
@@ -128,10 +128,13 @@ impl Pagewing {
                 {
                     response.request_focus();
                     self.result_focus_origin = None;
-                    self.result_navigation.clear();
+                    self.list_keyboard.clear();
                 }
-                self.result_navigation
-                    .register(&response, (self.id, self.revision), index);
+                self.list_keyboard.register(
+                    &response,
+                    crate::app::list_keyboard::Scope::Results(self.id, self.revision),
+                    index,
+                );
                 if response.secondary_clicked() {
                     self.nav.clear_prefix();
                     self.hints.cancel();
@@ -702,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_result_navigation_reveals_offscreen_rows_without_changing_the_reading_view() {
+    fn focused_list_keyboard_reveals_offscreen_rows_without_changing_the_reading_view() {
         let (_directory, context, mut app) = long_sidebar();
         let size = Vec2::new(860.0, 540.0);
         app.select_hit(79);
@@ -806,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn result_navigation_does_not_take_keys_from_a_popup_or_a_replacement_query() {
+    fn list_keyboard_does_not_take_keys_from_a_popup_or_a_replacement_query() {
         let (_directory, context, mut app) = long_sidebar();
         let size = Vec2::new(860.0, 540.0);
         app.select_hit(40);
@@ -834,14 +837,14 @@ mod tests {
         assert_eq!(app.hit_index, Some(40));
 
         // Moving focus to the query abandons a motion awaiting layout.
-        assert!(app.result_navigation_key(&context, egui::Key::End, egui::Modifiers::NONE));
+        assert!(app.list_keyboard_key(&context, egui::Key::End, egui::Modifiers::NONE));
         context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-search-input")));
         settle(&mut app, &context, size);
         assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
         assert_eq!(app.nav.page, 17);
         context.memory_mut(|memory| memory.request_focus(source));
         settle(&mut app, &context, size);
-        assert!(app.result_navigation_key(&context, egui::Key::End, egui::Modifiers::NONE));
+        assert!(app.list_keyboard_key(&context, egui::Key::End, egui::Modifiers::NONE));
         app.restart_search();
         app.hits.push(crate::text::SearchHit {
             page: 0,
@@ -849,7 +852,7 @@ mod tests {
             snippet: "replacement".into(),
             snippet_match: 0..1,
         });
-        assert!(!app.result_navigation_key(&context, egui::Key::Home, egui::Modifiers::NONE));
+        assert!(!app.list_keyboard_key(&context, egui::Key::Home, egui::Modifiers::NONE));
         context.memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-search-input")));
         settle(&mut app, &context, size);
         assert!(!context.memory(|memory| memory.has_focus(source)));

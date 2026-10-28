@@ -52,6 +52,8 @@ impl Pagewing {
         self.synctex.clear_document();
         egui::Popup::close_all(context);
         super::copy_menu::clear(context);
+        self.list_keyboard.begin_frame(context);
+        self.list_keyboard = super::list_keyboard::ListKeyboard::default();
         self.id += 1;
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();

@@ -5,12 +5,18 @@ use std::collections::VecDeque;
 
 #[derive(Clone, Copy)]
 struct Row {
-    scope: (u64, u64),
+    scope: Scope,
     index: usize,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Scope {
+    Results(u64, u64),
+    Pages(u64, bool),
+}
+
 #[derive(Default)]
-pub(super) struct ResultNavigation {
+pub(super) struct ListKeyboard {
     pending: Option<(Id, Row, Motion)>,
     registered: Vec<Id>,
 }
@@ -30,12 +36,9 @@ fn motion(key: Key, modifiers: Modifiers) -> Option<Motion> {
     }
 }
 
-fn focused_row(context: &egui::Context, scope: (u64, u64)) -> Option<(Id, Row)> {
+fn focused_row(context: &egui::Context) -> Option<(Id, Row)> {
     let id = context.memory(|memory| memory.focused())?;
-    let row = context.data(|data| data.get_temp::<Row>(id.with("search-result-navigation")))?;
-    if row.scope != scope {
-        return None;
-    }
+    let row = context.data(|data| data.get_temp::<Row>(id.with("virtual-list-keyboard")))?;
     let _focus = shortcuts::preserve_pointer_focus(context);
     context
         .read_response(id)
@@ -43,7 +46,7 @@ fn focused_row(context: &egui::Context, scope: (u64, u64)) -> Option<(Id, Row)> 
         .map(|_| (id, row))
 }
 
-impl ResultNavigation {
+impl ListKeyboard {
     /// Previous-frame rows serve native input routing, then expire before
     /// layout. Retain capacity, rather than accumulating metadata as we scroll.
     pub fn begin_frame(&mut self, context: &egui::Context) {
@@ -58,11 +61,11 @@ impl ResultNavigation {
         self.pending = None;
     }
 
-    pub fn register(&mut self, response: &Response, scope: (u64, u64), index: usize) {
+    pub fn register(&mut self, response: &Response, scope: Scope, index: usize) {
         if !response.enabled() {
             return;
         }
-        let id = response.id.with("search-result-navigation");
+        let id = response.id.with("virtual-list-keyboard");
         response
             .ctx
             .data_mut(|data| data.insert_temp(id, Row { scope, index }));
@@ -80,16 +83,24 @@ impl ResultNavigation {
         }
     }
 
-    /// Resolve page movement against this frame's actual result viewport.
+    /// Resolve movement against this frame's viewport of the owning list.
     pub fn target(
         &mut self,
         context: &egui::Context,
-        scope: (u64, u64),
+        scope: Scope,
         count: usize,
         page_rows: usize,
     ) -> Option<usize> {
         let (origin, row, motion) = self.pending?;
-        if row.scope != scope || count == 0 || !context.memory(|memory| memory.has_focus(origin)) {
+        if !context.memory(|memory| memory.has_focus(origin)) {
+            self.clear();
+            return None;
+        }
+        // Other lists are drawn first; they must not retire this list's motion.
+        if row.scope != scope {
+            return None;
+        }
+        if count == 0 {
             self.clear();
             return None;
         }
@@ -102,14 +113,13 @@ impl ResultNavigation {
 }
 
 impl Pagewing {
-    fn result_navigation_available(&self, context: &egui::Context) -> bool {
+    fn list_keyboard_available(&self, context: &egui::Context) -> bool {
         // A virtual row can own focus while its old interaction rectangle is
         // clipped during scrolling/resizing. Its registered role, checked by
         // focused_row, determines ownership rather than that stale geometry.
         self.library.sidebar
             && self.nav.count > 0
             && self.sidebar_region.is_some()
-            && !self.hits.is_empty()
             && !self.help
             && !self.properties_open
             && self.recent_picker.is_none()
@@ -120,7 +130,20 @@ impl Pagewing {
             && !egui::Popup::is_any_open(context)
     }
 
-    pub(super) fn result_navigation_key(
+    fn focused_list_row(&self, context: &egui::Context) -> Option<(Id, Row)> {
+        let (id, row) = focused_row(context)?;
+        let live = match row.scope {
+            Scope::Results(document, revision) => {
+                document == self.id && revision == self.revision && !self.hits.is_empty()
+            }
+            Scope::Pages(document, previews) => {
+                document == self.id && previews == self.library.thumbnails
+            }
+        };
+        live.then_some((id, row))
+    }
+
+    pub(super) fn list_keyboard_key(
         &mut self,
         context: &egui::Context,
         key: Key,
@@ -129,13 +152,13 @@ impl Pagewing {
         let Some(motion) = motion(key, modifiers) else {
             return false;
         };
-        if !self.result_navigation_available(context) {
+        if !self.list_keyboard_available(context) {
             return false;
         }
-        let Some((id, row)) = focused_row(context, (self.id, self.revision)) else {
+        let Some((id, row)) = self.focused_list_row(context) else {
             return false;
         };
-        self.result_navigation.pending = Some((id, row, motion));
+        self.list_keyboard.pending = Some((id, row, motion));
         self.nav.clear_prefix();
         self.hints.cancel();
         self.mark_action = None;
@@ -146,7 +169,7 @@ impl Pagewing {
 
     /// Each motion must establish the new virtual row before a later copy,
     /// menu, activation or motion uses focus from the same native event batch.
-    pub(super) fn result_navigation_input_split(
+    pub(super) fn list_keyboard_input_split(
         &self,
         context: &egui::Context,
         events: &VecDeque<Event>,
@@ -156,9 +179,7 @@ impl Pagewing {
             matches!(event, Event::Key { key, modifiers, pressed: true, .. }
                 if motion(*key, *modifiers).is_some())
         })?;
-        if !self.result_navigation_available(context)
-            || focused_row(context, (self.id, self.revision)).is_none()
-        {
+        if !self.list_keyboard_available(context) || self.focused_list_row(context).is_none() {
             return None;
         }
         if events

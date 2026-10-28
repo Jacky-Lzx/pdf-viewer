@@ -74,7 +74,7 @@ impl Pagewing {
             .results_input_split(context, &events, split.unwrap_or(events.len()))
             .or(split);
         split = self
-            .result_navigation_input_split(context, &events, split.unwrap_or(events.len()))
+            .list_keyboard_input_split(context, &events, split.unwrap_or(events.len()))
             .or(split);
         // A bar can disappear before a later activation in the same native
         // batch. Establish its new focus before reading old button responses.

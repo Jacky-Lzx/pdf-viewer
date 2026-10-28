@@ -52,6 +52,12 @@ impl Pagewing {
         } else {
             row_height
         };
+        let row_target = self.list_keyboard.target(
+            ui.ctx(),
+            crate::app::list_keyboard::Scope::Pages(self.id, self.library.thumbnails),
+            self.nav.count,
+            crate::list_navigation::page_rows(height, row_height, ui.spacing().item_spacing.y),
+        );
         let viewport_id = ui.make_persistent_id("page-viewport");
         let previous = ui
             .ctx()
@@ -68,13 +74,15 @@ impl Pagewing {
         let mut reveal = self.reveal_page;
         // A default page list can share the viewport with bookmarks. Only a
         // section the user opened or activated should move the outer sidebar.
-        let reveal_section = explicit
+        let reveal_section = row_target.is_some()
+            || explicit
             || (!other_focus
                 && (resized
                     || (reveal.is_some() && previous.is_some_and(|previous| previous.active))));
         if resized && !other_focus {
             reveal = Some(self.nav.page);
         }
+        reveal = row_target.or(reveal);
         if !ui.is_sizing_pass() {
             self.reveal_page = None;
             self.reveal_page_section = false;
@@ -110,11 +118,15 @@ impl Pagewing {
         }
         let page_before = self.nav.page;
         let mut focus = ListFocus::new(ui, salt, row_height, height);
-        let scroll = focus.scroll(ui, scroll);
-        let output = if self.library.thumbnails {
-            self.page_previews(ui, layout, scroll, &mut focus)
+        let scroll = if row_target.is_some() {
+            scroll
         } else {
-            self.page_list(ui, row_height, scroll, &mut focus)
+            focus.scroll(ui, scroll)
+        };
+        let output = if self.library.thumbnails {
+            self.page_previews(ui, layout, scroll, &mut focus, row_target)
+        } else {
+            self.page_list(ui, row_height, scroll, &mut focus, row_target)
         };
         let bottom = ui.min_rect().bottom();
         if reveal_section {
@@ -132,7 +144,8 @@ impl Pagewing {
                 + self.nav.page as f32 * (row_height + ui.spacing().item_spacing.y)
                 - output.state.offset.y;
             let selected_visible = top >= clip.top() && top + row_height <= clip.bottom();
-            let active = explicit
+            let active = row_target.is_some()
+                || explicit
                 || (!other_focus
                     && (self.nav.page != page_before
                         || previous.map_or(self.library.thumbnails, |previous| previous.active)));
@@ -153,12 +166,35 @@ impl Pagewing {
         focus.finish(ui);
     }
 
+    fn register_page_row(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        page: usize,
+        target: Option<usize>,
+    ) {
+        if target == Some(page)
+            && !ui.is_sizing_pass()
+            && !ui.ctx().will_discard()
+            && response.enabled()
+        {
+            response.request_focus();
+            self.list_keyboard.clear();
+        }
+        self.list_keyboard.register(
+            response,
+            crate::app::list_keyboard::Scope::Pages(self.id, self.library.thumbnails),
+            page,
+        );
+    }
+
     fn page_list(
         &mut self,
         ui: &mut egui::Ui,
         row_height: f32,
         scroll: egui::ScrollArea,
         focus: &mut ListFocus,
+        target: Option<usize>,
     ) -> egui::scroll_area::ScrollAreaOutput<()> {
         scroll.show_rows(ui, row_height, self.nav.count, |ui, range| {
             for page in range {
@@ -174,7 +210,10 @@ impl Pagewing {
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
                         ui.label(self.labels.sidebar_tooltip(page));
+                        ui.weak("When focused: ↑/↓ · PageUp/PageDown · Home/End to browse");
+                        ui.weak("Enter or Space to go to this page");
                     });
+                self.register_page_row(ui, &response, page, target);
                 focus.observe(&response, page);
                 if response.clicked() {
                     self.jump(page);
@@ -190,6 +229,7 @@ impl Pagewing {
         layout: crate::thumbnails::PreviewLayout,
         scroll: egui::ScrollArea,
         focus: &mut ListFocus,
+        focus_target: Option<usize>,
     ) -> egui::scroll_area::ScrollAreaOutput<()> {
         let mut target = None;
         let output = scroll.show_rows(ui, layout.row_height, self.nav.count, |ui, range| {
@@ -198,6 +238,7 @@ impl Pagewing {
                     Vec2::new(ui.available_width(), layout.row_height),
                     egui::Sense::click(),
                 );
+                self.register_page_row(ui, &response, page, focus_target);
                 focus.observe(&response, page);
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(
@@ -289,6 +330,8 @@ impl Pagewing {
                     .on_hover_ui(|ui| {
                         ui.set_max_width(ui.spacing().tooltip_width);
                         ui.label(self.labels.sidebar_tooltip(page));
+                        ui.weak("When focused: ↑/↓ · PageUp/PageDown · Home/End to browse");
+                        ui.weak("Enter or Space to go to this page");
                     })
                     .clicked()
                 {
@@ -368,21 +411,20 @@ mod tests {
         size: Vec2,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
-        context.run(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                time: Some(context.input(|input| input.time) + 0.25),
-                events,
-                ..Default::default()
-            },
-            |context| {
-                app.keys(context);
-                app.toolbar(context);
-                app.status(context);
-                app.sidebar(context);
-                egui::CentralPanel::default().show(context, |_| {});
-            },
-        )
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            time: Some(context.input(|input| input.time) + 0.25),
+            events,
+            ..Default::default()
+        };
+        app.prepare_native_input(context, &mut input);
+        context.run(input, |context| {
+            app.keys(context);
+            app.toolbar(context);
+            app.status(context);
+            app.sidebar(context);
+            egui::CentralPanel::default().show(context, |_| {});
+        })
     }
 
     fn settle(app: &mut Pagewing, context: &egui::Context, size: Vec2) -> egui::FullOutput {
@@ -391,6 +433,211 @@ mod tests {
             output = frame(app, context, size, Vec::new());
         }
         output
+    }
+
+    fn navigation_key(key: egui::Key) -> Vec<egui::Event> {
+        [true, false]
+            .map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .into()
+    }
+
+    fn focused_page(
+        app: &Pagewing,
+        context: &egui::Context,
+        output: &egui::FullOutput,
+    ) -> Option<usize> {
+        let id = context.memory(|memory| memory.focused())?;
+        let response = context.read_response(id)?;
+        (0..app.nav.count).find(|page| {
+            output.shapes.iter().any(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == format!("Page {}", page + 1)
+                {
+                    let label = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    response.rect.contains_rect(label) && shape.clip_rect.contains_rect(label)
+                } else {
+                    false
+                }
+            })
+        })
+    }
+
+    fn focus_second_page(app: &mut Pagewing, context: &egui::Context, size: Vec2) {
+        app.nav.jump(0);
+        app.outline.set_entries(vec![OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(Destination::page(0)),
+            depth: 0,
+        }]);
+        app.focus_contents();
+        settle(app, context, size);
+        for _ in 0..30 {
+            frame(app, context, size, navigation_key(egui::Key::Tab));
+            let output = settle(app, context, size);
+            if focused_page(app, context, &output) == Some(1) {
+                return;
+            }
+        }
+        panic!("Tab must reach the second page row");
+    }
+
+    #[test]
+    fn page_rows_navigate_offscreen_without_turning_the_reading_page() {
+        for previews in [false, true] {
+            let (_directory, context, mut app) = preview_app(false);
+            let size = egui::vec2(1180.0, 820.0);
+            app.library.thumbnails = previews;
+            // Results are drawn before pages. Their unrelated viewport must
+            // not consume a pending page motion from the shared router.
+            app.hits.push(crate::text::SearchHit {
+                page: 0,
+                rects: Vec::new(),
+                snippet: "Needle".into(),
+                snippet_match: 0..6,
+            });
+            focus_second_page(&mut app, &context, size);
+            app.pan = Vec2::new(37.0, 53.0);
+            for (key, expected) in [
+                (egui::Key::End, 79),
+                (egui::Key::ArrowDown, 79),
+                (egui::Key::Home, 0),
+                (egui::Key::ArrowUp, 0),
+                (egui::Key::ArrowDown, 1),
+            ] {
+                frame(&mut app, &context, size, navigation_key(key));
+                let output = settle(&mut app, &context, size);
+                assert_eq!(
+                    app.nav.page, 0,
+                    "{key:?}, previews={previews}: moving focus must preserve the reading page"
+                );
+                assert_eq!(app.pan, Vec2::new(37.0, 53.0));
+                assert_eq!(
+                    focused_page(&app, &context, &output),
+                    Some(expected),
+                    "{key:?}, previews={previews}"
+                );
+            }
+            frame(&mut app, &context, size, navigation_key(egui::Key::Enter));
+            assert_eq!(app.nav.page, 1, "Enter follows the focused page");
+        }
+    }
+
+    #[test]
+    fn page_row_paging_uses_the_current_viewport_font_and_preview_size() {
+        for previews in [false, true] {
+            let mut steps = Vec::new();
+            for (size, font_size) in [
+                (egui::vec2(1180.0, 820.0), 14.0),
+                (egui::vec2(1180.0, 240.0), 14.0),
+                (egui::vec2(1180.0, 820.0), 28.0),
+                (egui::vec2(240.0, 820.0), 14.0),
+            ] {
+                let (_directory, context, mut app) = preview_app(false);
+                app.library.thumbnails = previews;
+                focus_second_page(&mut app, &context, egui::vec2(1180.0, 820.0));
+                context.style_mut(|style| {
+                    style.text_styles.insert(
+                        egui::TextStyle::Button,
+                        egui::FontId::proportional(font_size),
+                    );
+                });
+                // The resize/font change and key arrive together. A cached
+                // viewport from the previous frame would use the wrong stride.
+                frame(
+                    &mut app,
+                    &context,
+                    size,
+                    navigation_key(egui::Key::PageDown),
+                );
+                let output = settle(&mut app, &context, size);
+                let page = focused_page(&app, &context, &output)
+                    .expect("paging target must be fully visible");
+                assert!(page > 1);
+                steps.push(page - 1);
+                assert_eq!(app.nav.page, 0);
+                frame(&mut app, &context, size, navigation_key(egui::Key::PageUp));
+                let output = settle(&mut app, &context, size);
+                assert_eq!(focused_page(&app, &context, &output), Some(1));
+                assert_eq!(app.nav.page, 0);
+            }
+            if previews {
+                assert!(
+                    steps[3] > steps[0],
+                    "narrower previews fit more rows: {steps:?}"
+                );
+            } else {
+                assert!(
+                    steps[0] > steps[1],
+                    "shorter viewport fits fewer rows: {steps:?}"
+                );
+                assert!(
+                    steps[0] > steps[2],
+                    "larger font fits fewer rows: {steps:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn queued_page_motions_activate_the_new_target_and_survive_resizing() {
+        for previews in [false, true] {
+            for activation in [egui::Key::Enter, egui::Key::Space] {
+                let (_directory, context, mut app) = preview_app(false);
+                let large = egui::vec2(1180.0, 820.0);
+                app.library.thumbnails = previews;
+                focus_second_page(&mut app, &context, large);
+                let mut events = navigation_key(egui::Key::End);
+                events.extend(navigation_key(egui::Key::Home));
+                events.extend(navigation_key(egui::Key::ArrowDown));
+                events.extend(navigation_key(activation));
+                let small = egui::vec2(240.0, 240.0);
+                frame(&mut app, &context, small, events);
+                assert_eq!(
+                    app.nav.page, 0,
+                    "first motion must finish before activation"
+                );
+                let output = settle(&mut app, &context, small);
+                assert_eq!(app.nav.page, 1, "{activation:?}, previews={previews}");
+                assert_eq!(focused_page(&app, &context, &output), Some(1));
+                let id = context.memory(|memory| memory.focused());
+                let output = settle(&mut app, &context, large);
+                assert_eq!(context.memory(|memory| memory.focused()), id);
+                assert_eq!(focused_page(&app, &context, &output), Some(1));
+            }
+        }
+    }
+
+    #[test]
+    fn page_navigation_rejects_popups_replaced_lists_and_closed_documents() {
+        for previews in [false, true] {
+            let (_directory, context, mut app) = preview_app(false);
+            let size = egui::vec2(1180.0, 820.0);
+            app.library.thumbnails = previews;
+            focus_second_page(&mut app, &context, size);
+            assert!(!app.list_keyboard_key(&context, egui::Key::Home, egui::Modifiers::SHIFT));
+            egui::Popup::open_id(&context, egui::Id::new("page-keyboard-test-popup"));
+            assert!(!app.list_keyboard_key(&context, egui::Key::End, egui::Modifiers::NONE));
+            egui::Popup::close_all(&context);
+            app.library.thumbnails = !previews;
+            assert!(!app.list_keyboard_key(&context, egui::Key::End, egui::Modifiers::NONE));
+            app.library.thumbnails = previews;
+            assert!(app.list_keyboard_key(&context, egui::Key::End, egui::Modifiers::NONE));
+            app.clear_document(&context);
+            assert!(!app.list_keyboard_key(&context, egui::Key::Home, egui::Modifiers::NONE));
+            app.nav = Navigation::new(80, 17);
+            app.dimensions = vec![[600.0, 800.0]; 80];
+            settle(&mut app, &context, size);
+            assert_eq!(
+                app.nav.page, 17,
+                "opening a document cannot inherit queued page activation"
+            );
+        }
     }
 
     #[test]
