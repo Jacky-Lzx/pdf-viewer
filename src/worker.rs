@@ -16,6 +16,7 @@ use std::{
 };
 
 mod scheduling;
+mod search_updates;
 
 /// Recovery depends on whether one render failed or the whole session stopped.
 pub enum Failure {
@@ -116,6 +117,7 @@ struct SearchProgress {
     hits: usize,
     cursor: text::SearchCursor,
     text: Option<Arc<PageText>>,
+    updates: search_updates::Updates,
 }
 
 impl SearchProgress {
@@ -127,6 +129,7 @@ impl SearchProgress {
             hits: 0,
             cursor: text::SearchCursor::default(),
             text: None,
+            updates: search_updates::Updates::new(Instant::now()),
         }
     }
 }
@@ -868,19 +871,24 @@ fn session(
                         progress.text = Some(text);
                     }
                     let complete = progress.page >= pdf.pages().len() || progress.hits >= 10_000;
-                    emit(
-                        tx,
-                        context,
-                        Event::Search {
-                            id,
-                            revision: progress.request.revision,
-                            hits: batch.hits,
-                            scanned: progress.page,
-                            total: pdf.pages().len(),
-                            complete,
-                            limited: progress.hits >= 10_000,
-                        },
-                    );
+                    if progress
+                        .updates
+                        .publish(!batch.hits.is_empty(), complete, Instant::now())
+                    {
+                        emit(
+                            tx,
+                            context,
+                            Event::Search {
+                                id,
+                                revision: progress.request.revision,
+                                hits: batch.hits,
+                                scanned: progress.page,
+                                total: pdf.pages().len(),
+                                complete,
+                                limited: progress.hits >= 10_000,
+                            },
+                        );
+                    }
                     if complete {
                         search = None;
                     }

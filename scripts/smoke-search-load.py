@@ -69,7 +69,27 @@ def run(binary):
                 keyboard.key("n", shift=True)
                 expect(78, "last match in minimum window")
                 wait_for(selected_result_visible, "last selected result fits the compact sidebar")
-                print("PASS: 80 pages, 10,000 capped matches, last/first navigation and actually visible selections at normal/compact sizes")
+                # A replacement query has 79 empty page batches before its
+                # only hit. Deferred Enter must still reach that hit promptly.
+                keyboard.key("f", ctrl=True)
+                keyboard.key("a", ctrl=True)
+                for character in "Search load 80":
+                    keyboard.key(character.lower(), shift=character.isupper(), delay=0.015)
+                keyboard.key(0xFF0D)
+                expect(79, "sparse query reaches its only match on the final page")
+                keyboard.key(0xFF1B)
+                keyboard.key("f", ctrl=True)
+                for _ in range(6):
+                    keyboard.key(0xFF09)
+                keyboard.key(0xFF0D)
+                def final_snapshot():
+                    report = keyboard.clipboard()
+                    return report if 'Query: Search load 80\n' in report else None
+                report = wait_for(final_snapshot, "sparse search clipboard snapshot")
+                assert "Available results: 1\n" in report, report[:500]
+                assert "Pages scanned: 80 / 80\n" in report and "[Search complete.]" in report, report[:500]
+                assert "Result 1 · Page 80" in report, report[:500]
+                print("PASS: 80 pages, 10,000 capped matches, last/first navigation, visible selections at normal/compact sizes, deferred sparse query navigation and exact final clipboard counts")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
