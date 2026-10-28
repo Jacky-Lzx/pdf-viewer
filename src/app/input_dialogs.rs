@@ -1,4 +1,4 @@
-use super::{Pagewing, dialog, shortcuts};
+use super::{Pagewing, appearance, dialog, shortcuts};
 use eframe::egui;
 
 pub(super) fn page_id() -> egui::Id {
@@ -147,8 +147,12 @@ impl Pagewing {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let go = ui.button("Go").clicked();
-                    cancel = ui.button("Cancel").on_hover_text("Escape").clicked();
+                    let go =
+                        appearance::action_button(ui, "page-go", egui::Button::new("Go")).clicked();
+                    cancel =
+                        appearance::action_button(ui, "page-cancel", egui::Button::new("Cancel"))
+                            .on_hover_text("Escape")
+                            .clicked();
                     if !ui.is_sizing_pass() && !cancel && (go || std::mem::take(&mut input.confirm))
                     {
                         chosen = crate::navigation::relative_page(
@@ -453,6 +457,39 @@ mod tests {
             }
             assert!(app.page_input.is_none(), "{value}");
             assert_eq!(app.nav.page, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn page_actions_keep_focus_and_activation_when_the_window_changes_size() {
+        let directory = tempfile::tempdir().unwrap();
+        for activation in [egui::Key::Enter, egui::Key::Space] {
+            for (tabs, expected) in [(1, 5), (2, 2)] {
+                let (mut app, context) = reader(directory.path());
+                app.open_goto();
+                app.page_input.as_mut().unwrap().value = "6".into();
+                let large = egui::vec2(1180.0, 820.0);
+                for _ in 0..4 {
+                    frame(&mut app, &context, large, Vec::new());
+                }
+                for _ in 0..tabs {
+                    frame(&mut app, &context, large, key(egui::Key::Tab));
+                }
+                let focused = context.memory(|memory| memory.focused()).unwrap();
+                for size in dialog::TEST_SIZES {
+                    for _ in 0..4 {
+                        frame(&mut app, &context, size, Vec::new());
+                    }
+                    assert_eq!(
+                        context.memory(|memory| memory.focused()),
+                        Some(focused),
+                        "{tabs} tabs, {size:?}"
+                    );
+                }
+                frame(&mut app, &context, large, key(activation));
+                assert!(app.page_input.is_none());
+                assert_eq!(app.nav.page, expected);
+            }
         }
     }
 

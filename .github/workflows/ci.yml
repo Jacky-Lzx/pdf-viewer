@@ -73,7 +73,7 @@ jobs:
           - shard: 3
             tests: >-
               input-burst relative outline mouse-history link-menu continuous
-              recent welcome password zoom persistence install-linux preview-layout
+              recent welcome password zoom dialog-focus persistence install-linux preview-layout
           - shard: 4
             tests: >-
               desktop destinations thumbnails toolbar-focus selection selection-scroll

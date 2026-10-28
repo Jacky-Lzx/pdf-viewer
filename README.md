@@ -210,7 +210,7 @@ night = []                 # 停用该动作的快捷键
 
 文档信息窗口在窄窗口中按字段逐条排列，文件路径和长标题会换行，内容可滚动，Copy details 和 Close 按钮保持可见；按 `y` 仍可复制完整信息。文档信息与最近文档窗口都支持 240 × 240 的最小尺寸，放大窗口后恢复桌面布局。
 
-页码跳转和密码输入窗口也支持最小尺寸。无效页码会在输入框下显示提示并保留文字；Go / Unlock 提交，Cancel、窗口关闭按钮或 Escape 取消。批注面板打开时，Escape 优先关闭当前输入窗口。密码默认隐藏，可勾选 Show password 检查输入；取消会丢弃这次输入，密码不写入阅读状态。
+页码跳转和密码输入窗口也支持最小尺寸。页码的 Go / Cancel、缩放预设和 Apply / Cancel 在窗口缩放后保留键盘焦点，Enter 或空格激活原来的操作。无效页码会在输入框下显示提示并保留文字；Go / Unlock 提交，Cancel、窗口关闭按钮或 Escape 取消。批注面板打开时，Escape 优先关闭当前输入窗口。密码默认隐藏，可勾选 Show password 检查输入；取消会丢弃这次输入，密码不写入阅读状态。
 
 | 按键 | 操作 |
 | --- | --- |
@@ -481,6 +481,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-tiles.py target/re
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-zoom.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-dialog-focus.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-destinations.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-thumbnails.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-preview-layout.py target/release/pagewing
