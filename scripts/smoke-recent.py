@@ -30,6 +30,9 @@ def run(binary):
         config_path.parent.mkdir(parents=True)
         config_path.write_text(json.dumps({"recent": [{"path": str(path), "page": index % 6} for index, path in enumerate(paths)]}))
         keyboard = Keyboard()
+        keyboard.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        keyboard.xtst.XTestFakeMotionEvent(keyboard.display, -1, 10, 10, 0)
+        keyboard.x11.XFlush(keyboard.display)
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(paths[0])], env=environment, stdout=log, stderr=log)
 
@@ -65,7 +68,13 @@ def run(binary):
                     colors = [keyboard.pixel((x, y)) for x in (width // 2 - gap, width // 2, width // 2 + gap)]
                     if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         rows.append(y)
-                return rows
+                # Locate one 32-pixel row. Ignore isolated title/input text,
+                # while allowing label glyphs to interrupt its background fill.
+                return max(
+                    ([row for row in rows if y <= row < y + 32] for y in rows),
+                    key=len,
+                    default=[],
+                )
 
             def selected_row_visible(size=(860, 540)):
                 # Require a broad fill on several scanlines, excluding thin
@@ -103,6 +112,28 @@ def run(binary):
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
                 picker()
+                for _ in range(12):
+                    keyboard.key("j", ctrl=True, delay=0.015)
+                wait_for(selected_row_visible, "middle recent result is visible")
+                time.sleep(0.3)
+                before_rows = selected_rows()
+                before_y = sum(before_rows) / len(before_rows)
+                keyboard.key(0xFF52)
+
+                def visible_neighbor_kept_its_position():
+                    rows = selected_rows()
+                    return rows and abs(sum(rows) / len(rows) - (before_y - 40)) <= 3
+
+                wait_for(visible_neighbor_kept_its_position,
+                         "ArrowUp selects the visible preceding row without recentering the list")
+                keyboard.key(0xFF54)
+
+                def returned_to_the_same_row_position():
+                    rows = selected_rows()
+                    return rows and abs(sum(rows) / len(rows) - before_y) <= 3
+
+                wait_for(returned_to_the_same_row_position,
+                         "ArrowDown returns to the same row position without moving the list")
                 for _ in range(23):
                     keyboard.key("j", ctrl=True, delay=0.015)
                 wait_for(selected_row_visible, "last selected recent document is drawn in the compact window")
@@ -166,7 +197,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

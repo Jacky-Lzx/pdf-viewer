@@ -101,7 +101,12 @@ impl Pagewing {
                                 )
                                 .on_hover_text(picker.display(row));
                             if reveal && picker.selected == row {
-                                response.scroll_to_me(Some(egui::Align::Center));
+                                // Keep visible neighbors still; only reveal the
+                                // portion that lies outside the result viewport.
+                                response.scroll_to_me_animation(
+                                    None,
+                                    egui::style::ScrollAnimation::none(),
+                                );
                             }
                             if response.clicked() {
                                 picker.selected = row;
@@ -201,6 +206,50 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    #[test]
+    fn selecting_a_visible_recent_document_keeps_neighboring_rows_still() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.recent_picker =
+            Some(RecentPicker::new((0..24).map(|index| {
+                directory.path().join(format!("book-{index}.pdf"))
+            })));
+        for _ in 0..4 {
+            frame(&mut app, &context, Vec::new());
+        }
+        app.recent_picker.as_mut().unwrap().step(12);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = sized_frame(&mut app, &context, egui::vec2(1180.0, 820.0), Vec::new());
+        }
+        let row_rect = |output: &egui::FullOutput, label: &str| {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    shape.clip_rect.contains_rect(rect).then_some(rect)
+                }
+                _ => None,
+            })
+        };
+        let label = app.recent_picker.as_ref().unwrap().label(11).to_owned();
+        let before = row_rect(&output, &label).expect("the previous result is fully visible");
+        for (motion, selected) in [(egui::Key::ArrowUp, 11), (egui::Key::ArrowDown, 12)] {
+            frame(&mut app, &context, key(motion));
+            for _ in 0..4 {
+                output = sized_frame(&mut app, &context, egui::vec2(1180.0, 820.0), Vec::new());
+            }
+            assert_eq!(app.recent_picker.as_ref().unwrap().selected, selected);
+            assert!(selected_row(&context, &output).is_some());
+            assert_eq!(
+                row_rect(&output, &label),
+                Some(before),
+                "keyboard navigation must preserve the position of an already visible result"
+            );
+        }
     }
 
     #[test]
