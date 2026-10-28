@@ -3,6 +3,18 @@ use crate::app::list_focus::ListFocus;
 use eframe::egui::{self, RichText, Vec2};
 
 impl Pagewing {
+    pub(in crate::app) fn show_current_chapter(&mut self, context: &egui::Context) {
+        if self.outline.reveal_chapter_at(self.nav.page) {
+            self.outline.cancel_input();
+            self.outline.focus = true;
+            self.search_focus = false;
+            // Establish the new input before comments/search can consume this
+            // frame's edits, including a click followed immediately by text.
+            context
+                .memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-outline-input")));
+        }
+    }
+
     pub(in crate::app) fn focus_contents(&mut self) {
         if self.outline.is_empty() {
             self.notify("This document has no chapter outline");
@@ -28,7 +40,20 @@ impl Pagewing {
         let mut target = None;
         let mut toggle = None;
         ui.horizontal(|ui| {
-            appearance::section(ui, "CONTENTS");
+            let heading = if ui.available_width() < 110.0 {
+                "TOC"
+            } else {
+                "CONTENTS"
+            };
+            appearance::section(ui, heading);
+            self.input_buttons.current_chapter = Some(
+                ui.add_enabled(
+                    self.outline.chapter_at(self.nav.page).is_some(),
+                    egui::Button::new("Here").small(),
+                )
+                .on_hover_text("Show the chapter at this page · clears the chapter filter")
+                .id,
+            );
             if ui.available_width() < 70.0 {
                 return;
             }
@@ -124,6 +149,7 @@ impl Pagewing {
             ));
         }
         let mut selected = None;
+        let current_chapter = self.outline.visible_chapter_at(self.nav.page);
         let mut focus = ListFocus::new(ui, "contents", row_height, viewport_height);
         let scroll = focus.scroll(ui, scroll);
         scroll.show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
@@ -172,7 +198,7 @@ impl Pagewing {
                                         if keyboard_focus {
                                             self.outline.selected() == Some(index)
                                         } else {
-                                            self.nav.page == page
+                                            current_chapter == Some(index)
                                         },
                                         &entry.title,
                                     )
@@ -194,7 +220,11 @@ impl Pagewing {
                         } else {
                             let response = ui.add(
                                 egui::Button::selectable(
-                                    keyboard_focus && self.outline.selected() == Some(index),
+                                    if keyboard_focus {
+                                        self.outline.selected() == Some(index)
+                                    } else {
+                                        current_chapter == Some(index)
+                                    },
                                     RichText::new(&entry.title).weak(),
                                 )
                                 .truncate(),
@@ -224,3 +254,6 @@ impl Pagewing {
         navigated
     }
 }
+
+#[cfg(test)]
+mod tests;

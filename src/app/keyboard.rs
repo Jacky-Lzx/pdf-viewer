@@ -16,6 +16,7 @@ impl Pagewing {
         // Otherwise a click that releases search focus can send following text
         // to reader commands before the new input has opened.
         match self.input_buttons.clicked(context) {
+            Some(shortcuts::InputButton::CurrentChapter) => self.show_current_chapter(context),
             Some(shortcuts::InputButton::ReadingControls) => self.toggle_reading_controls(context),
             Some(shortcuts::InputButton::Help) => {
                 if self.help {

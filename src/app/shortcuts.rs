@@ -122,6 +122,7 @@ pub(super) fn focused_in_region(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InputButton {
+    CurrentChapter,
     ReadingControls,
     Help,
     Find,
@@ -155,6 +156,7 @@ pub(super) enum SearchButton {
 
 #[derive(Default)]
 pub(super) struct InputButtons {
+    pub current_chapter: Option<Id>,
     pub reading_controls: Option<Id>,
     pub help: Option<Id>,
     pub find: Option<Id>,
@@ -283,6 +285,7 @@ impl InputButtons {
             }
         }
         for (id, action) in [
+            (self.current_chapter, InputButton::CurrentChapter),
             (self.reading_controls, InputButton::ReadingControls),
             (self.help, InputButton::Help),
             (self.find, InputButton::Find),

@@ -288,6 +288,8 @@ night = []                 # 停用该动作的快捷键
 
 目录筛选支持以空白分隔的多个关键词，顺序不限，所有关键词需出现在同一章节标题中；例如 `080 chapter` 可找到 `Chapter 080`。支持 Unicode 大小写折叠，如 `strasse` 匹配 `Straße`；保留匹配标题的祖先作为上下文，首次回车优先定位实际匹配标题，清空后恢复原来的折叠状态。
 
+阅读时，目录按章节起始页持续高亮当前章节，直到下一个章节开始；同页有多个目标时取目录中后出现的可跳转条目，不区分页内位置。条目被折叠或筛选隐藏时，高亮其最近的可见上级；翻页不会自动展开或滚动目录。点击目录标题旁的 **Here** 可清除章节筛选，只展开当前章节的必要上级，并显露、选中条目及聚焦筛选框；PDF 的页码、缩放和滚动位置保持不变，搜索词和批注草稿也会保留。随后按回车才跳到章节起点。窄侧栏以 **TOC** 显示目录标题，保留 Here 入口。
+
 章节筛选框中的 `PageUp/PageDown` 按当前视口可容纳的完整行数移动选择，`Ctrl/Cmd+Home/End` 到首尾，只计入当前可见的章节和上下文标题。窗口大小与字体改变后使用新的行数；普通 `Home/End` 继续编辑文字。回车跟随目标；没有目标的标题可用回车展开或折叠。按 `Escape` 返回阅读。
 
 单条目录标题最多保留 2048 个 Unicode 字符，超过时加省略号，跳转目标不受影响。筛选和悬停使用保留的标题前缀，避免超长标题反复占用解码、大小写折叠和排版资源。
@@ -492,6 +494,7 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-desktop.py target/release/pag
 python3 scripts/with-xvfb.py python3 scripts/smoke-cli.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-outline.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-outline-keyboard.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-outline-current.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-long-title.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-bookmarks.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-marks.py target/release/pagewing

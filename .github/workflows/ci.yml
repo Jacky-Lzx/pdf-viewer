@@ -69,7 +69,7 @@ jobs:
           - shard: 2
             tests: >-
               search-options search-phrases percentage bookmarks link-copy link-hints
-              search-dense outline-keyboard search-load help comments comment-filter-load
+              search-dense outline-keyboard outline-current search-load help comments comment-filter-load
           - shard: 3
             tests: >-
               input-burst relative outline mouse-history link-menu continuous

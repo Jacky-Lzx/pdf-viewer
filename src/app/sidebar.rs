@@ -65,6 +65,7 @@ impl Pagewing {
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {
         self.sidebar_region = None;
+        self.input_buttons.current_chapter = None;
         self.thumbnails.begin_frame();
         if !self.library.sidebar
             || self.nav.count == 0
