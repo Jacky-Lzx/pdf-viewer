@@ -45,8 +45,7 @@ impl Pagewing {
             self.jump(page);
         }
         if let Some(page) = remove {
-            self.set_bookmark(page, false);
-            self.notify("Bookmark removed");
+            self.remove_bookmark(page);
         }
         target.is_some()
     }
@@ -238,7 +237,7 @@ mod tests {
             assert!(app.dirty, "deletion must be persisted");
             assert_eq!(app.bookmark_pages, [4]);
             assert_eq!(app.reading.bookmarks, [4].into_iter().collect());
-            assert_eq!(app.message.as_ref().unwrap().0, "Bookmark removed");
+            assert_eq!(app.message.as_ref().unwrap().text, "Bookmark removed");
             assert!(app.reveal_page.is_none());
             let output = settle_sidebar(&mut app, &context, size);
             click_sidebar(&mut app, &context, size, row(&output, 4).unwrap().center());

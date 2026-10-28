@@ -159,6 +159,9 @@ impl Pagewing {
         self.auto_reload_pending = false;
         self.automatic_reload = false;
         self.remember();
+        if let Some(message) = &mut self.message {
+            message.restore_bookmark = None;
+        }
         self.nav.clear_prefix();
         self.loading = true;
         self.reloading = self.nav.count > 0;
@@ -249,7 +252,7 @@ mod tests {
                 app.message
                     .as_ref()
                     .unwrap()
-                    .0
+                    .text
                     .contains("No recently closed")
             );
             assert!(
