@@ -58,6 +58,23 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "relative page reader window")
                 expect(0, fit="Page")
+                sequence(":=1")
+                time.sleep(0.3)
+                expect(0, fit="Page")
+                keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "=1", "preview must preserve the literal query"
+                sequence("1"); keyboard.key(0xFF0D)
+                expect(0, fit="Page")
+                # Let a valid relative preview settle, then cancel it. Neither
+                # displaying nor cancelling the target should change history.
+                sequence(":+2")
+                time.sleep(0.3)
+                expect(0, fit="Page")
+                keyboard.key(0xFF1B)
+                keyboard.key("j", shift=True)
+                expect(1, fit="Page")
+                keyboard.key("k", shift=True)
+                expect(0, fit="Page")
                 for query, page in [("+2", 2), ("-1", 1), ("A-2", 5), ("-3", 2),
                                     ("2", 1), ("+9999999", 5), ("-9999999", 0)]:
                     goto(query)
@@ -135,7 +152,7 @@ def run(binary):
                 expect(2, fit="Page")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: relative page offsets, same-frame dialog input/Enter, edge clamping, retained zoom/rotation/scroll/history, zero-offset Forward, count cleanup, minimum-size validation and Tab/Enter Cancel, search isolation and explicit signed/numeric PDF labels")
+                print("PASS: non-navigating target previews, editing a cached numeric label before Enter, preview cancellation, relative page offsets, same-frame dialog input/Enter, edge clamping, retained zoom/rotation/scroll/history, zero-offset Forward, count cleanup, minimum-size validation and Tab/Enter Cancel, search isolation and explicit signed/numeric PDF labels")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

@@ -858,6 +858,9 @@ impl Pagewing {
                     self.reveal_page_section = self.library.thumbnails;
                     self.outline = *outline;
                     self.labels = labels;
+                    if let Some(input) = &mut self.page_input {
+                        input.invalidate_preview();
+                    }
                     if reloaded {
                         self.restart_search();
                     }

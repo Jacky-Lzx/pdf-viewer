@@ -1,6 +1,8 @@
 use super::{Pagewing, appearance, dialog, shortcuts};
 use eframe::egui;
 
+mod page_preview;
+
 pub(super) fn page_id() -> egui::Id {
     egui::Id::new("pagewing-page-input")
 }
@@ -14,6 +16,7 @@ pub(super) struct PageInput {
     pub focus: bool,
     pub confirm: bool,
     invalid: bool,
+    preview: page_preview::Preview,
 }
 
 impl Default for PageInput {
@@ -23,7 +26,15 @@ impl Default for PageInput {
             focus: true,
             confirm: false,
             invalid: false,
+            preview: page_preview::Preview::default(),
         }
+    }
+}
+
+impl PageInput {
+    pub(super) fn invalidate_preview(&mut self) {
+        self.preview.invalidate();
+        self.invalid = false;
     }
 }
 
@@ -48,6 +59,17 @@ impl Default for PasswordInput {
 }
 
 impl Pagewing {
+    fn goto_target(&self, value: &str) -> Option<page_preview::Target> {
+        let page = crate::navigation::relative_page(value, self.nav.page, self.nav.count)
+            .or_else(|| crate::navigation::percentage_input(value, self.nav.count))
+            .or_else(|| self.labels.resolve_input(value, self.nav.count))?;
+        Some(page_preview::Target {
+            page,
+            caption: format!("Target: {}", self.labels.sidebar_caption(page)),
+            tooltip: self.labels.sidebar_tooltip(page),
+        })
+    }
+
     pub(super) fn open_goto(&mut self) {
         if self.nav.count == 0 {
             return;
@@ -115,6 +137,11 @@ impl Pagewing {
         let mut open = true;
         let mut cancel = false;
         let mut chosen = None;
+        let source = page_preview::Source {
+            document: self.id,
+            page: self.nav.page,
+            count: self.nav.count,
+        };
         dialog::window(context, "Go to page", "Go to page", 360.0)
             .open(&mut open)
             .show(context, |ui| {
@@ -140,6 +167,31 @@ impl Pagewing {
                         ui.visuals().error_fg_color,
                         "Use a page, +offset, 50% or label.",
                     );
+                } else {
+                    match input.preview.update(
+                        &input.value,
+                        source,
+                        std::time::Instant::now(),
+                        false,
+                        |value| self.goto_target(value),
+                    ) {
+                        page_preview::State::Target(target) => {
+                            ui.add(egui::Label::new(&target.caption).truncate())
+                                .on_hover_text(&target.tooltip);
+                        }
+                        state => {
+                            let text = match state {
+                                page_preview::State::Empty => "Enter a page or PDF label.",
+                                page_preview::State::Pending(delay) => {
+                                    context.request_repaint_after(delay);
+                                    "Checking target…"
+                                }
+                                page_preview::State::Missing => "No matching page.",
+                                page_preview::State::Target(_) => unreachable!(),
+                            };
+                            ui.add(egui::Label::new(egui::RichText::new(text).weak()).truncate());
+                        }
+                    }
                 }
                 if context.content_rect().height() >= 420.0 {
                     ui.weak("Relative: +5, -5. Progress: 50%.");
@@ -155,15 +207,15 @@ impl Pagewing {
                             .clicked();
                     if !ui.is_sizing_pass() && !cancel && (go || std::mem::take(&mut input.confirm))
                     {
-                        chosen = crate::navigation::relative_page(
+                        if let page_preview::State::Target(target) = input.preview.update(
                             &input.value,
-                            self.nav.page,
-                            self.nav.count,
-                        )
-                        .or_else(|| {
-                            crate::navigation::percentage_input(&input.value, self.nav.count)
-                        })
-                        .or_else(|| self.labels.resolve_input(&input.value, self.nav.count));
+                            source,
+                            std::time::Instant::now(),
+                            true,
+                            |value| self.goto_target(value),
+                        ) {
+                            chosen = Some(target.page);
+                        }
                         if chosen.is_none() {
                             input.invalid = true;
                             input.focus = true;
@@ -290,6 +342,235 @@ mod tests {
         app.nav = Navigation::new(6, 2);
         app.dimensions = vec![[600.0, 800.0]; 6];
         (app, context)
+    }
+
+    fn label_reader(directory: &std::path::Path) -> (Pagewing, egui::Context) {
+        let (mut app, context) = reader(directory);
+        app.labels = crate::page_labels::PageLabels::read(
+            &hayro::hayro_syntax::Pdf::new(
+                include_bytes!("../../assets/pagewing-guide.pdf").to_vec(),
+            )
+            .unwrap(),
+        );
+        (app, context)
+    }
+
+    // Advance the preview's scheduling clock without a wall-clock sleep; its
+    // actual lookup and display still execute through the next dialog frame.
+    fn due_preview(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2) {
+        // Opening-frame edits can be deferred until text focus is established.
+        for _ in 0..4 {
+            frame(app, context, size, Vec::new());
+        }
+        let source = page_preview::Source {
+            document: app.id,
+            page: app.nav.page,
+            count: app.nav.count,
+        };
+        let input = app.page_input.as_mut().unwrap();
+        assert!(!input.value.is_empty());
+        input.preview.invalidate();
+        input.preview.update(
+            &input.value,
+            source,
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+            false,
+            |_| panic!("a new edit should wait before resolving"),
+        );
+    }
+
+    fn preview_text(output: &egui::FullOutput) -> Option<&str> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("Target: ") => {
+                Some(text.galley.text())
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn page_target_preview_distinguishes_labels_and_physical_pages_without_navigating() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = label_reader(directory.path());
+        let size = egui::vec2(1180.0, 820.0);
+        app.viewport = egui::vec2(400.0, 300.0);
+        app.reading.fit = crate::navigation::Fit::Custom(2.0);
+        app.reading.rotation = 1;
+        app.pan = egui::vec2(13.0, 27.0);
+        app.query = "retained search".into();
+        let position = app.current_position();
+        for (value, expected) in [
+            ("1", "Target: Page 1 · i"),
+            ("=1", "Target: Page 3 · 1"),
+            ("ii", "Target: Page 2 · ii"),
+            ("A-2", "Target: Page 6 · A-2"),
+            ("+2", "Target: Page 5 · A-1"),
+            ("50%", "Target: Page 3 · 1"),
+        ] {
+            app.open_goto();
+            frame(
+                &mut app,
+                &context,
+                size,
+                vec![egui::Event::Paste(value.into())],
+            );
+            due_preview(&mut app, &context, size);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame(&mut app, &context, size, Vec::new());
+            }
+            assert_eq!(preview_text(&output), Some(expected), "{value}");
+            assert_eq!(app.nav.page, 2);
+            assert_eq!(app.pan, egui::vec2(13.0, 27.0));
+            assert_eq!(app.reading.fit, crate::navigation::Fit::Custom(2.0));
+            assert_eq!(app.reading.rotation, 1);
+            assert_eq!(app.query, "retained search");
+            assert!(!app.history.can_go(false, &position, app.nav.count));
+            assert!(!app.history.can_go(true, &position, app.nav.count));
+            assert!(app.history.previous_jump(app.nav.count).is_none());
+            frame(&mut app, &context, size, key(egui::Key::Escape));
+        }
+    }
+
+    #[test]
+    fn page_target_preview_keeps_actions_visible_and_submits_the_latest_edit() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = label_reader(directory.path());
+        app.open_goto();
+        let size = egui::vec2(1180.0, 820.0);
+        frame(
+            &mut app,
+            &context,
+            size,
+            vec![egui::Event::Paste("1".into())],
+        );
+        due_preview(&mut app, &context, size);
+        for size in dialog::TEST_SIZES {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame(&mut app, &context, size, Vec::new());
+            }
+            dialog::assert_visible_actions(
+                &context,
+                &output,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+                "Go to page",
+                &["Go", "Cancel", "Target: Page 1 · i"],
+            );
+        }
+        let mut events: Vec<_> = key(egui::Key::A)
+            .into_iter()
+            .map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    repeat,
+                    ..
+                } => egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    repeat,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+                other => other,
+            })
+            .collect();
+        events.push(egui::Event::Paste("=1".into()));
+        events.extend(key(egui::Key::Enter));
+        frame(&mut app, &context, size, events);
+        for _ in 0..4 {
+            frame(&mut app, &context, size, Vec::new());
+        }
+        assert!(app.page_input.is_none());
+        assert_eq!(app.nav.page, 2, "Enter must use =1, not the preview of 1");
+    }
+
+    fn check_reloaded_preview(
+        value: &str,
+        old_caption: Option<&str>,
+        range_start: i64,
+        expected_page: usize,
+        new_caption: &str,
+    ) {
+        use std::time::{Duration, Instant};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("labels.pdf");
+        std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+        let context = egui::Context::default();
+        let mut app = Pagewing::with_context(
+            &context,
+            Some(path.clone()),
+            None,
+            directory.path().join("library.json"),
+        );
+        let wait = |app: &mut Pagewing| {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while app.loading && Instant::now() < deadline {
+                app.events(&context);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!app.loading, "the PDF should finish loading");
+            assert!(app.error.is_none());
+        };
+        wait(&mut app);
+        let size = egui::vec2(240.0, 240.0);
+        app.open_goto();
+        frame(
+            &mut app,
+            &context,
+            size,
+            vec![egui::Event::Paste(value.into())],
+        );
+        due_preview(&mut app, &context, size);
+        for _ in 0..4 {
+            frame(&mut app, &context, size, Vec::new());
+        }
+        let output = frame(&mut app, &context, size, Vec::new());
+        assert_eq!(preview_text(&output), old_caption);
+        if old_caption.is_none() {
+            frame(&mut app, &context, size, key(egui::Key::Enter));
+            assert!(app.page_input.as_ref().unwrap().invalid);
+        }
+        let id = app.id;
+        let mut document = lopdf::Document::load(&path).unwrap();
+        let root = document
+            .trailer
+            .get(b"Root")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        document.get_object_mut(root).unwrap().as_dict_mut().unwrap().set("PageLabels",
+            lopdf::dictionary! { "Nums" => vec![range_start.into(), lopdf::dictionary! { "S" => "D" }.into()] });
+        document.save(&path).unwrap();
+        app.reload(&context);
+        wait(&mut app);
+        assert_eq!((app.id, app.nav.count), (id, 6));
+        assert_eq!(app.page_input.as_ref().unwrap().value, value);
+        assert!(!app.page_input.as_ref().unwrap().invalid);
+        frame(&mut app, &context, size, Vec::new());
+        std::thread::sleep(Duration::from_millis(180));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = frame(&mut app, &context, size, Vec::new());
+        }
+        assert_eq!(preview_text(&output), Some(new_caption));
+        frame(&mut app, &context, size, key(egui::Key::Enter));
+        for _ in 0..4 {
+            frame(&mut app, &context, size, Vec::new());
+        }
+        assert!(app.page_input.is_none());
+        assert_eq!(
+            app.nav.page, expected_page,
+            "reload must invalidate the old preview or error"
+        );
+    }
+
+    #[test]
+    fn reloaded_page_labels_replace_a_preview_even_when_document_page_count_is_unchanged() {
+        check_reloaded_preview("=1", Some("Target: Page 3 · 1"), 4, 4, "Target: Page 5 · 1");
+        check_reloaded_preview("=3", None, 3, 5, "Target: Page 6 · 3");
     }
 
     #[test]
