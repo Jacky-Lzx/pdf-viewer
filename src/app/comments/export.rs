@@ -1,6 +1,7 @@
 //! Plain text for the saved comments in the currently filtered thread order.
 use crate::annotations::{Comments, ReviewStatus};
 use crate::comment_view::CommentRow;
+use crate::export_text::{PageLabelLine, push_single_line};
 use std::fmt::Write;
 
 const MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -38,6 +39,7 @@ fn render_with_limit(
             .push_str("[The loaded annotation list is limited.]\n\n");
     }
     let mut entry = String::new();
+    let mut labels = PageLabelLine::new(usize::MAX);
     for row in rows {
         let comment = &comments.items[row.index];
         entry.clear();
@@ -51,11 +53,11 @@ fn render_with_limit(
                 &comment.kind
             }
         );
-        if let Some(label) = label(comment.page) {
-            let _ = writeln!(entry, "PDF page label: {}", single_line(&label));
-        }
+        labels.push(&mut entry, comment.page, &mut label);
         if !comment.author.is_empty() {
-            let _ = writeln!(entry, "Author: {}", single_line(&comment.author));
+            entry.push_str("Author: ");
+            push_single_line(&mut entry, &comment.author, usize::MAX);
+            entry.push('\n');
         }
         if comment.parent.is_some() {
             let _ = writeln!(entry, "Reply depth: {}", row.depth);
@@ -89,12 +91,6 @@ fn render_with_limit(
         );
     }
     report
-}
-
-fn single_line(text: &str) -> String {
-    text.chars()
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .collect()
 }
 
 #[cfg(test)]
@@ -215,5 +211,81 @@ mod tests {
         let empty = render(&comments, &[], |_| panic!("no rows"));
         assert_eq!((empty.copied, empty.total), (0, 0));
         assert!(empty.text.is_empty());
+    }
+
+    #[test]
+    fn nonmonotonic_rows_reuse_only_adjacent_labels_and_preserve_byte_boundaries() {
+        let comments = Comments {
+            items: [0, 0, 1, 1, 2, 2, 0]
+                .into_iter()
+                .enumerate()
+                .map(|(index, page)| {
+                    let mut entry = comment(index, &format!("record-{index}: 中文😀\nsecond line"));
+                    entry.page = page;
+                    entry.author = "Alice\u{2028}Reviewer".into();
+                    entry
+                })
+                .collect(),
+            limited: true,
+        };
+        let rows: Vec<_> = (0..comments.items.len())
+            .map(|index| CommentRow {
+                index,
+                depth: 0,
+                matched: true,
+            })
+            .collect();
+        let label = |page| match page {
+            0 => Some("iv\u{85}附录".into()),
+            1 => None,
+            2 => Some(String::new()),
+            _ => unreachable!(),
+        };
+        let mut calls = Vec::new();
+        let full = render(&comments, &rows, |page| {
+            calls.push(page);
+            label(page)
+        });
+        assert_eq!(calls, [0, 1, 2, 0]);
+        let mut expected = String::from("[The loaded annotation list is limited.]\n\n");
+        let start = expected.len();
+        let ends: Vec<_> = comments
+            .items
+            .iter()
+            .map(|comment| {
+                let _ = writeln!(expected, "Page {} · Text", comment.page + 1);
+                match comment.page {
+                    0 => expected.push_str("PDF page label: iv 附录\n"),
+                    2 => expected.push_str("PDF page label: \n"),
+                    _ => {}
+                }
+                let _ = write!(
+                    expected,
+                    "Author: Alice Reviewer\n\n{}\n\n",
+                    comment.contents
+                );
+                expected.len()
+            })
+            .collect();
+        assert_eq!(full.text, expected);
+        for limit in 0..=expected.len() + NOTICE_BYTES + 1 {
+            let report = render_with_limit(&comments, &rows, label, limit);
+            let count = ends.partition_point(|&end| end <= limit.saturating_sub(NOTICE_BYTES));
+            let end = count.checked_sub(1).map_or(start, |index| ends[index]);
+            let mut text = expected[..end].to_owned();
+            if count < rows.len() {
+                let _ = writeln!(
+                    text,
+                    "[Copied {count} of 7 shown comments: clipboard size limit reached.]"
+                );
+            }
+            assert_eq!((report.copied, report.total), (count, 7), "limit {limit}");
+            assert_eq!(report.text, text, "limit {limit}");
+        }
+        assert!(
+            !render(&comments, &rows, |_| None)
+                .text
+                .contains("PDF page label:")
+        );
     }
 }

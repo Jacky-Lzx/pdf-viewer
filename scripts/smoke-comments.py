@@ -14,7 +14,7 @@ desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
 
 
-def comments_pdf(rows=0, row_contents=None):
+def comments_pdf(rows=0, row_contents=None, page_label_prefix=None):
     author = (b"\xfe\xff" + "Straße".encode("utf-16-be")).hex()
     extra = " ".join(f"{10 + index} 0 R" for index in range(rows))
     objects = [
@@ -30,6 +30,9 @@ def comments_pdf(rows=0, row_contents=None):
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Review) /State (Completed) /F 2 >>",
         "<< /Type /Annot /Subtype /Text /Rect [0 0 0 0] /IRT 6 0 R /T (Pagewing) /StateModel (Marked) /State (Marked) /F 2 >>",
     ]
+    if page_label_prefix is not None:
+        encoded = (b"\xfe\xff" + page_label_prefix.encode("utf-16-be")).hex()
+        objects[0] = f"<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [0 << /S /D /P <{encoded}> >>] >> >>"
     # Large-filter fixtures share one PDF string but decode separate comment
     # fields, keeping the input file small while exercising the real scan.
     for index in range(rows):
@@ -55,7 +58,7 @@ def run(binary):
     with tempfile.TemporaryDirectory(prefix="pagewing-comments-") as directory:
         root = Path(directory)
         document = root / "pagewing-smoke.pdf"
-        original = comments_pdf()
+        original = comments_pdf(page_label_prefix="附录\u2028审阅-")
         document.write_bytes(original)
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
@@ -111,7 +114,7 @@ def run(binary):
                 keyboard.key(0xFF09, shift=True)  # Filter -> Copy.
                 keyboard.key(0xFF0D)
                 exported = keyboard.clipboard()
-                for expected in ["Page 2 · Highlight", "Author: Bob", "Elsewhere comment"]:
+                for expected in ["Page 2 · Highlight", "PDF page label: 附录 审阅-2\n", "Author: Bob", "Elsewhere comment"]:
                     assert expected in exported, (expected, exported)
                 assert "Root question" not in exported
                 keyboard.key(0xFF09)  # Copy -> filter, without toggling the left sidebar.
@@ -165,6 +168,7 @@ def run(binary):
                 for expected in ["[Thread context]", "Root question", "Author: Straße", "Reply depth: 1", "Status: Completed / resolved", "Marked: yes", "Nested needle jkg"]:
                     assert expected in exported, (expected, exported)
                 assert exported.index("Root question") < exported.index("Nested needle jkg")
+                assert exported.count("PDF page label: 附录 审阅-1\n") == 2
                 assert "Saved elsewhere comment" not in exported
                 query("jkg STRASSE")
                 keyboard.key("k", ctrl=True)

@@ -195,3 +195,7 @@ harness = false
 [[bench]]
 name = "input_actions"
 harness = false
+
+[[bench]]
+name = "clipboard_exports"
+harness = false

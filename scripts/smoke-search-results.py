@@ -95,7 +95,8 @@ def run(binary):
                 exported = keyboard.clipboard()
                 for required in ("Pagewing search snippets\n", f"File: {document}\n", "Query: Needle\n",
                                  "Available results: 80\n", "[Search complete.]", "Result 1 · Page 1",
-                                 "Result 80 · Page 80", "Needle 080"):
+                                 "Result 80 · Page 80", "Needle 080", "PDF page label: i\n",
+                                 "PDF page label: A-76\n"):
                     assert required in exported, (required, exported)
                 expect(79, "copying all results preserves the selected hit and reading page")
                 keyboard.key(ESCAPE)

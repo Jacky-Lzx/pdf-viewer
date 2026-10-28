@@ -13,6 +13,7 @@ mod destination;
 mod document;
 mod document_bytes;
 mod document_info;
+mod export_text;
 mod fifo_cache;
 mod file_watch;
 mod fonts;

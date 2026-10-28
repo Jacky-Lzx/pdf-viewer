@@ -453,6 +453,8 @@ cargo bench --locked --bench lazy_tooltips -- 21
 cargo bench --locked --bench notice_panels -- 21
 # 阅读器输入快照：比较完整事件数组与精简动作缓冲，包含文字分类、混合事件和突发输入
 cargo bench --locked --bench input_actions -- 9
+# 完整搜索/批注剪贴板导出，对照旧实现的时间与分配（含 8 MiB 上限）
+cargo bench --locked --bench clipboard_exports -- 17
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
 cargo bench --locked --bench search_matching -- 9
 # 选区转换为单行搜索词，比较临时词数组与直接拼接

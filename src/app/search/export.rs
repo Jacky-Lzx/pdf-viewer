@@ -1,4 +1,5 @@
 //! A bounded snapshot of available search previews, without page text extraction.
+use crate::export_text::{PageLabelLine, push_single_line};
 use crate::text::{SearchHit, SearchOptions};
 use std::{fmt::Write, path::Path};
 
@@ -33,12 +34,15 @@ fn render_with_limit(
     limit: usize,
 ) -> Report {
     let mut text = String::from("Pagewing search snippets\n");
-    let _ = writeln!(
-        text,
-        "File: {}",
-        single_line(&snapshot.path.to_string_lossy())
+    text.push_str("File: ");
+    push_single_line(
+        &mut text,
+        &snapshot.path.to_string_lossy(),
+        HEADER_CHARACTERS,
     );
-    let _ = writeln!(text, "Query: {}", single_line(snapshot.query));
+    text.push_str("\nQuery: ");
+    push_single_line(&mut text, snapshot.query, HEADER_CHARACTERS);
+    text.push('\n');
     let _ = writeln!(
         text,
         "Match case: {}",
@@ -77,12 +81,11 @@ fn render_with_limit(
         total: snapshot.hits.len(),
     };
     let mut entry = String::new();
+    let mut labels = PageLabelLine::new(HEADER_CHARACTERS);
     for (index, hit) in snapshot.hits.iter().enumerate() {
         entry.clear();
         let _ = writeln!(entry, "Result {} · Page {}", index + 1, hit.page + 1);
-        if let Some(label) = label(hit.page) {
-            let _ = writeln!(entry, "PDF page label: {}", single_line(&label));
-        }
+        labels.push(&mut entry, hit.page, &mut label);
         entry.push('\n');
         // Check before copying a potentially large snippet. Keep whole records
         // and reserve the notice so partial exports always explain their limit.
@@ -108,19 +111,6 @@ fn render_with_limit(
         );
     }
     report
-}
-
-fn single_line(value: &str) -> String {
-    let mut characters = value.chars();
-    let mut text: String = characters
-        .by_ref()
-        .take(HEADER_CHARACTERS)
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .collect();
-    if characters.next().is_some() {
-        text.push_str("… [truncated]");
-    }
-    text
 }
 
 #[cfg(test)]
@@ -212,5 +202,69 @@ mod tests {
         assert_eq!((report.copied, report.total), (0, 3));
         assert!(report.text.len() <= 1024);
         assert!(!report.text.contains("Result 1"));
+    }
+
+    #[test]
+    fn labels_follow_adjacent_groups_and_every_byte_limit_keeps_exact_records() {
+        let hits: Vec<_> = [0, 0, 1, 1, 2, 2, 0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, page)| SearchHit {
+                page,
+                snippet: format!("record-{index}: 中文😀\nsecond line"),
+                rects: Vec::new(),
+                snippet_match: 0..0,
+            })
+            .collect();
+        let label = |page| match page {
+            0 => Some("iv\u{85}附录".into()),
+            1 => None,
+            2 => Some(String::new()),
+            _ => unreachable!(),
+        };
+        let mut calls = Vec::new();
+        let full = render(snapshot(&hits), |page| {
+            calls.push(page);
+            label(page)
+        });
+        assert_eq!(calls, [0, 1, 2, 0]);
+        assert_eq!(full.text.matches("PDF page label: iv 附录\n").count(), 3);
+        assert_eq!(full.text.matches("PDF page label: \n").count(), 2);
+        let start = full.text.find("Result 1 ·").unwrap();
+        let mut expected = full.text[..start].to_owned();
+        let ends: Vec<_> = hits
+            .iter()
+            .enumerate()
+            .map(|(index, hit)| {
+                let _ = writeln!(expected, "Result {} · Page {}", index + 1, hit.page + 1);
+                match hit.page {
+                    0 => expected.push_str("PDF page label: iv 附录\n"),
+                    2 => expected.push_str("PDF page label: \n"),
+                    _ => {}
+                }
+                let _ = write!(expected, "\n{}\n\n", hit.snippet);
+                expected.len()
+            })
+            .collect();
+        assert_eq!(full.text, expected);
+        for limit in 0..=expected.len() + NOTICE_BYTES + 1 {
+            let report = render_with_limit(snapshot(&hits), label, limit);
+            let count = ends.partition_point(|&end| end <= limit.saturating_sub(NOTICE_BYTES));
+            let end = count.checked_sub(1).map_or(start, |index| ends[index]);
+            let mut text = expected[..end].to_owned();
+            if count < hits.len() {
+                let _ = writeln!(
+                    text,
+                    "[Copied {count} of 7 available search snippets: clipboard size limit reached.]"
+                );
+            }
+            assert_eq!((report.copied, report.total), (count, 7), "limit {limit}");
+            assert_eq!(report.text, text, "limit {limit}");
+        }
+        assert!(
+            !render(snapshot(&hits), |_| None)
+                .text
+                .contains("PDF page label:")
+        );
     }
 }
