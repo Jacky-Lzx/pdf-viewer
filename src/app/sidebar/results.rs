@@ -1,4 +1,4 @@
-use super::{Pagewing, appearance};
+use super::{Pagewing, appearance, reveal_offset};
 use eframe::egui::{self, Color32, RichText, Vec2};
 
 #[derive(Clone, Copy)]
@@ -71,7 +71,7 @@ impl Pagewing {
             let top = index.min(self.hits.len() - 1) as f32 * stride;
             // Compute this before show_rows: an inner list outside the parent's
             // clip rect cannot use scroll_to_rect to measure its own viewport.
-            let offset = offset.max((top + row_height - height).max(0.0)).min(top);
+            let offset = reveal_offset(offset, top, row_height, height);
             results = results.vertical_scroll_offset(offset);
         }
         let mut selected = None;

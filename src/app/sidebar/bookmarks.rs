@@ -1,4 +1,4 @@
-use super::Pagewing;
+use super::{Pagewing, reveal_offset};
 use eframe::egui::{self, Vec2};
 
 impl Pagewing {
@@ -17,8 +17,7 @@ impl Pagewing {
             let top = row as f32 * (row_height + ui.spacing().item_spacing.y);
             // Reveal only the part outside the viewport. Navigation between
             // bookmarks already on screen should keep their neighbors still.
-            scroll = scroll
-                .vertical_scroll_offset(offset.max((top + row_height - height).max(0.0)).min(top));
+            scroll = scroll.vertical_scroll_offset(reveal_offset(offset, top, row_height, height));
         }
         let mut target = None;
         scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {

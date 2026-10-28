@@ -5,6 +5,11 @@ mod bookmarks;
 mod pages;
 mod results;
 
+/// Reveal only the part of a row outside the current list viewport.
+fn reveal_offset(offset: f32, top: f32, row_height: f32, height: f32) -> f32 {
+    offset.max((top + row_height - height).max(0.0)).min(top)
+}
+
 impl Pagewing {
     pub(super) fn focus_contents(&mut self) {
         if self.outline.is_empty() {
@@ -105,12 +110,20 @@ impl Pagewing {
             .id_salt("contents")
             .max_height(viewport_height);
         if keyboard_focus
+            && !ui.is_sizing_pass()
             && std::mem::take(&mut self.outline.reveal)
             && let Some(row) = self.outline.selected_row()
         {
-            let row_top = row as f32 * (row_height + ui.spacing().item_spacing.y);
-            scroll = scroll
-                .vertical_scroll_offset((row_top - (viewport_height - row_height) * 0.5).max(0.0));
+            let id = ui.make_persistent_id(egui::Id::new("contents"));
+            let offset =
+                egui::scroll_area::State::load(ui.ctx(), id).map_or(0.0, |state| state.offset.y);
+            let top = row as f32 * (row_height + ui.spacing().item_spacing.y);
+            scroll = scroll.vertical_scroll_offset(reveal_offset(
+                offset,
+                top,
+                row_height,
+                viewport_height,
+            ));
         }
         let mut selected = None;
         scroll.show_rows(ui, row_height, self.outline.visible().len(), |ui, range| {
@@ -240,7 +253,7 @@ impl Pagewing {
             .default_width(256.0_f32.min(maximum))
             .width_range(180.0_f32.min(maximum)..=maximum)
             .show(context, |ui| {
-                // Recenter focused chapters when resizing changes how many rows fit.
+                // Reveal focused chapters when resizing changes how many rows fit.
                 let viewport_id = ui.make_persistent_id("chapter-viewport");
                 let viewport = ui.available_size();
                 let resized = ui.ctx().data_mut(|data| {
@@ -425,6 +438,38 @@ mod tests {
 
     #[test]
     fn chapter_focus_keeps_the_input_and_selected_row_visible_in_short_windows() {
+        fn paint(
+            app: &mut Pagewing,
+            context: &egui::Context,
+            screen: egui::Rect,
+            events: Vec<egui::Event>,
+        ) -> egui::FullOutput {
+            context.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |context| {
+                    app.keys(context);
+                    app.toolbar(context);
+                    app.status(context);
+                    app.sidebar(context);
+                    egui::CentralPanel::default().show(context, |_| {});
+                },
+            )
+        }
+        let bounds = |output: &egui::FullOutput, page: usize| {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == format!("Chapter {page:03}") => {
+                    Some((
+                        shape.clip_rect,
+                        egui::Rect::from_min_size(text.pos, text.galley.size()),
+                    ))
+                }
+                _ => None,
+            })
+        };
         let directory = tempfile::tempdir().unwrap();
         let context = egui::Context::default();
         let mut app =
@@ -448,19 +493,7 @@ mod tests {
                 let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                 let mut output = egui::FullOutput::default();
                 for _ in 0..6 {
-                    output = context.run(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            ..Default::default()
-                        },
-                        |context| {
-                            app.keys(context);
-                            app.toolbar(context);
-                            app.status(context);
-                            app.sidebar(context);
-                            egui::CentralPanel::default().show(context, |_| {});
-                        },
-                    );
+                    output = paint(&mut app, &context, screen, Vec::new());
                 }
                 let input = context
                     .read_response(egui::Id::new("pagewing-outline-input"))
@@ -477,24 +510,36 @@ mod tests {
                     "{size:?}: {:?}",
                     input.rect
                 );
-                let (clip, text) = output
-                    .shapes
-                    .iter()
-                    .find_map(|shape| match &shape.shape {
-                        egui::Shape::Text(text)
-                            if text.galley.text() == format!("Chapter {page:03}") =>
-                        {
-                            Some((shape.clip_rect, text))
-                        }
-                        _ => None,
-                    })
-                    .expect("the selected row should be drawn");
-                let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
-                assert!(screen.contains_rect(bounds), "{size:?}: {bounds:?}");
+                let (clip, selected) =
+                    bounds(&output, page).expect("the selected row should be drawn");
+                assert!(screen.contains_rect(selected), "{size:?}: {selected:?}");
                 assert!(
-                    clip.contains_rect(bounds),
-                    "{size:?}: {bounds:?} clipped by {clip:?}"
+                    clip.contains_rect(selected),
+                    "{size:?}: {selected:?} clipped by {clip:?}"
                 );
+                if page == 40 && size == egui::vec2(1180.0, 820.0) {
+                    let (clip, previous) = bounds(&output, 39).unwrap();
+                    assert!(clip.contains_rect(previous));
+                    for (key, selected) in [(egui::Key::ArrowUp, 39), (egui::Key::ArrowDown, 40)] {
+                        let events = [true, false]
+                            .map(|pressed| egui::Event::Key {
+                                key,
+                                physical_key: None,
+                                pressed,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            })
+                            .into();
+                        paint(&mut app, &context, screen, events);
+                        for _ in 0..6 {
+                            output = paint(&mut app, &context, screen, Vec::new());
+                        }
+                        assert_eq!(app.outline.selected(), Some(selected));
+                        let (clip, current) = bounds(&output, 39).unwrap();
+                        assert!(clip.contains_rect(current));
+                        assert_eq!(current, previous, "keep visible neighboring chapters still");
+                    }
+                }
             }
         }
     }

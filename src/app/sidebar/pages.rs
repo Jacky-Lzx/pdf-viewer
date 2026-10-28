@@ -1,4 +1,4 @@
-use super::{Pagewing, appearance};
+use super::{Pagewing, appearance, reveal_offset};
 use crate::{navigation::Fit, thumbnails::PreviewLayout};
 use eframe::egui::{self, Color32, Vec2};
 
@@ -103,7 +103,7 @@ impl Pagewing {
             }
             if let Some(page) = reveal {
                 let top = page as f32 * (row_height + ui.spacing().item_spacing.y);
-                offset = offset.max((top + row_height - height).max(0.0)).min(top);
+                offset = reveal_offset(offset, top, row_height, height);
             }
             scroll = scroll.vertical_scroll_offset(offset);
         }
