@@ -5,10 +5,36 @@ use std::collections::HashSet;
 pub const IMAGE_SIZE: [f32; 2] = [144.0, 192.0];
 pub const ROW_HEIGHT: f32 = 224.0;
 
-pub fn key(page: usize, dimensions: [f32; 2], rotation: u8, night: bool, dpi: f32) -> RenderKey {
+#[derive(Clone, Copy)]
+pub struct PreviewLayout {
+    pub image_size: [f32; 2],
+    pub row_height: f32,
+}
+
+impl PreviewLayout {
+    pub fn new(width: f32, height: f32) -> Self {
+        let caption = ROW_HEIGHT - IMAGE_SIZE[1];
+        let scale = ((width - 8.0).max(1.0) / IMAGE_SIZE[0])
+            .min((height - caption).max(1.0) / IMAGE_SIZE[1])
+            .min(1.0);
+        Self {
+            image_size: IMAGE_SIZE.map(|dimension| dimension * scale),
+            row_height: IMAGE_SIZE[1] * scale + caption,
+        }
+    }
+}
+
+pub fn key(
+    page: usize,
+    dimensions: [f32; 2],
+    rotation: u8,
+    night: bool,
+    dpi: f32,
+    image_size: [f32; 2],
+) -> RenderKey {
     let scale = crate::render_plan::RenderView {
         fit: crate::navigation::Fit::Page,
-        viewport: IMAGE_SIZE,
+        viewport: image_size,
         pixels_per_point: dpi,
         rotation,
         night,
@@ -120,6 +146,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn responsive_previews_fit_their_cards_and_request_smaller_rasters() {
+        for width in [64.0, 92.0, 228.0, 352.0] {
+            for height in [48.0, 80.0, 140.0, 400.0] {
+                let layout = PreviewLayout::new(width, height);
+                assert!(layout.image_size[0] + 8.0 <= width);
+                assert!(layout.row_height <= height);
+                assert!(layout.image_size[1] + 32.0 <= layout.row_height);
+                assert!(layout.image_size[0] <= IMAGE_SIZE[0]);
+                for dimensions in [[600.0, 800.0], [1200.0, 200.0], [2.0, 10000.0]] {
+                    for rotation in 0..4 {
+                        for dpi in [1.0, 2.0, 4.0] {
+                            let compact =
+                                key(0, dimensions, rotation, false, dpi, layout.image_size);
+                            let normal = key(0, dimensions, rotation, false, dpi, IMAGE_SIZE);
+                            let compact =
+                                crate::document::RasterSize::new(dimensions, compact.width)
+                                    .unwrap();
+                            let normal =
+                                crate::document::RasterSize::new(dimensions, normal.width).unwrap();
+                            assert!(compact.bytes() <= normal.bytes());
+                        }
+                    }
+                }
+            }
+        }
+        let layout = PreviewLayout::new(72.0, 80.0);
+        let compact = key(0, [600.0, 800.0], 0, false, 1.0, layout.image_size);
+        let compact = crate::document::RasterSize::new([600.0, 800.0], compact.width).unwrap();
+        let normal = key(0, [600.0, 800.0], 0, false, 1.0, IMAGE_SIZE);
+        let normal = crate::document::RasterSize::new([600.0, 800.0], normal.width).unwrap();
+        assert!(compact.bytes() <= normal.bytes() / 4);
+        let normal = PreviewLayout::new(228.0, 400.0);
+        assert_eq!(normal.image_size, IMAGE_SIZE);
+        assert_eq!(normal.row_height, ROW_HEIGHT);
+    }
+
+    #[test]
     fn preview_keys_fit_mixed_pages_rotations_and_high_dpi_without_large_allocations() {
         for dimensions in [
             [600.0, 800.0],
@@ -130,7 +193,7 @@ mod tests {
         ] {
             for rotation in 0..4 {
                 for dpi in [1.0, 2.0, 4.0] {
-                    let key = key(0, dimensions, rotation, false, dpi);
+                    let key = key(0, dimensions, rotation, false, dpi, IMAGE_SIZE);
                     let raster = crate::document::RasterSize::new(dimensions, key.width).unwrap();
                     assert!(raster.bytes() <= 512 * 512 * 4);
                     assert_eq!(key.rotation, rotation);
@@ -143,8 +206,8 @@ mod tests {
     fn scrolling_replaces_requests_and_ignores_late_images() {
         let context = egui::Context::default();
         let mut previews = Thumbnails::default();
-        let first = key(0, [600.0, 800.0], 0, false, 1.0);
-        let second = key(1, [600.0, 800.0], 0, false, 1.0);
+        let first = key(0, [600.0, 800.0], 0, false, 1.0, IMAGE_SIZE);
+        let second = key(1, [600.0, 800.0], 0, false, 1.0, IMAGE_SIZE);
         previews.begin_frame();
         previews.want(first);
         assert_eq!(previews.requests(), Some(vec![first]));
@@ -179,7 +242,7 @@ mod tests {
             ..Default::default()
         };
         let keys: Vec<_> = (0..3)
-            .map(|page| key(page, [600.0, 800.0], 0, false, 1.0))
+            .map(|page| key(page, [600.0, 800.0], 0, false, 1.0, IMAGE_SIZE))
             .collect();
         let image = || egui::ColorImage::filled([2, 2], egui::Color32::WHITE);
         for &key in &keys[..2] {

@@ -75,6 +75,7 @@ impl Pagewing {
         self.cache.clear();
         self.thumbnails.clear();
         self.reveal_page = None;
+        self.reveal_page_section = false;
         self.requested = None;
         self.render_planner = RenderPlanner::default();
         self.pan = Vec2::ZERO;

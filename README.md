@@ -276,6 +276,8 @@ night = []                 # 停用该动作的快捷键
 
 侧栏 `PAGES` 可切换 `List` 页码列表和 `Previews` 缩略图，也可按 `t` 切换并打开侧栏。两种模式都会跟随键盘跳页；手动滚动侧栏后再次按 `gg` / `G`，会重新显示目标页所在行。点击跳页时保留列表的滚动位置，便于连续点击相邻页。预览支持页面旋转和颜色反转，并记住所选模式。
 
+切换页面列表或预览模式时，会显露当前页所在的页面区，长目录和书签不会遮住入口。缩略图会随侧栏宽度和窗口高度缩小，保留完整图像和页码，并按实际展示尺寸渲染。调整窗口大小时，正在查看的页面预览继续可见；手动滚到其他预览后，缩放窗口会保留附近的页面。
+
 `v` 选择模式中双击按 Unicode 词边界选词，三击选中当前文本行；之后拖动会按相同单位扩展，单击恢复按字形选择。拖选时把指针停在阅读区域边缘会自动滚动，支持上下、左右与旋转页面；松开鼠标或到达页边后停止，不会自动翻页。双击选择时保留缩放；普通阅读模式下双击不改变缩放或阅读位置。组合重音和 emoji 不会在词选择中被拆开；中文按 Unicode 默认词边界处理，整行范围取决于 PDF 提取出的文本换行。
 
 重新编译或更新 PDF 后，按 `Ctrl/Cmd+r` 可重新加载，保留页码、缩放、旋转、相对滚动位置和有效标记，并重新搜索当前查询。只有解析成功才切换文档；若文件暂时写入不完整，原文档仍可阅读，文件恢复后再次重新加载即可。
@@ -391,6 +393,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py targ
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-zoom.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-destinations.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-thumbnails.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-preview-layout.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-hints.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-menu.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-copy.py target/release/pagewing

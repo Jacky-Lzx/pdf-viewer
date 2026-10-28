@@ -88,6 +88,7 @@ pub struct Pagewing {
     cache: TextureCache,
     thumbnails: crate::thumbnails::Thumbnails,
     reveal_page: Option<usize>,
+    reveal_page_section: bool,
     id: u64,
     loading: bool,
     reloading: bool,
@@ -244,6 +245,7 @@ impl Pagewing {
             cache: TextureCache::default(),
             thumbnails: crate::thumbnails::Thumbnails::default(),
             reveal_page: None,
+            reveal_page_section: false,
             id: 0,
             loading: false,
             reloading: false,
@@ -777,6 +779,7 @@ impl Pagewing {
                     self.comments.reset(reloaded);
                     self.worker.comments();
                     self.reveal_page = Some(self.nav.page);
+                    self.reveal_page_section = self.library.thumbnails;
                     self.outline.set_entries(outline);
                     self.labels = labels;
                     if reloaded {
@@ -1713,6 +1716,7 @@ impl Pagewing {
                     self.library.thumbnails = !self.library.thumbnails;
                     self.library.sidebar = true;
                     self.reveal_page = Some(self.nav.page);
+                    self.reveal_page_section = true;
                     self.dirty = true;
                 }
                 Key::D => {

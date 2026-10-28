@@ -1,7 +1,7 @@
 use super::{MarkAction, Pagewing, appearance};
-use crate::navigation::Fit;
-use eframe::egui::{self, Color32, RichText, Vec2};
+use eframe::egui::{self, RichText, Vec2};
 
+mod pages;
 mod results;
 
 impl Pagewing {
@@ -23,9 +23,9 @@ impl Pagewing {
         self.dirty = true;
     }
 
-    fn contents(&mut self, ui: &mut egui::Ui) {
+    fn contents(&mut self, ui: &mut egui::Ui) -> bool {
         if self.outline.is_empty() {
-            return;
+            return false;
         }
         let mut target = None;
         let mut toggle = None;
@@ -203,10 +203,12 @@ impl Pagewing {
         if let Some(index) = toggle {
             self.outline.toggle(index);
         }
+        let navigated = target.is_some();
         if let Some(destination) = target {
             self.follow_destination(destination);
         }
         ui.add_space(20.0);
+        navigated
     }
 
     fn sidebar_row_height(ui: &egui::Ui) -> f32 {
@@ -215,7 +217,7 @@ impl Pagewing {
             .max(20.0)
     }
 
-    fn bookmark_list(&mut self, ui: &mut egui::Ui) {
+    fn bookmark_list(&mut self, ui: &mut egui::Ui) -> bool {
         let row_height = Self::sidebar_row_height(ui);
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("bookmarks")
@@ -248,122 +250,7 @@ impl Pagewing {
         if let Some(page) = target {
             self.jump(page);
         }
-    }
-
-    fn page_previews(&mut self, ui: &mut egui::Ui) {
-        let mut scroll = egui::ScrollArea::vertical()
-            .id_salt("page-previews")
-            .max_height((ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 400.0));
-        if let Some(page) = self.reveal_page.take() {
-            scroll = scroll.vertical_scroll_offset(
-                page as f32 * (crate::thumbnails::ROW_HEIGHT + ui.spacing().item_spacing.y),
-            );
-        }
-        let mut target = None;
-        scroll.show_rows(
-            ui,
-            crate::thumbnails::ROW_HEIGHT,
-            self.nav.count,
-            |ui, range| {
-                for page in range {
-                    let (rect, response) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width(), crate::thumbnails::ROW_HEIGHT),
-                        egui::Sense::click(),
-                    );
-                    if !ui.is_rect_visible(rect) {
-                        continue;
-                    }
-                    let dimensions = self.dimensions[page];
-                    let key = crate::thumbnails::key(
-                        page,
-                        dimensions,
-                        self.reading.rotation,
-                        self.library.night,
-                        ui.ctx().pixels_per_point(),
-                    );
-                    let texture = self.thumbnails.want(key);
-                    let painter = ui.painter();
-                    if page == self.nav.page {
-                        painter.rect_filled(rect, 8.0, ui.visuals().selection.bg_fill);
-                        painter.rect_stroke(
-                            rect,
-                            4.0,
-                            egui::Stroke::new(1.0_f32, appearance::accent(ui)),
-                            egui::StrokeKind::Inside,
-                        );
-                    } else if response.hovered() {
-                        painter.rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
-                    }
-                    let box_size = crate::thumbnails::IMAGE_SIZE;
-                    let center = egui::pos2(rect.center().x, rect.top() + box_size[1] * 0.5 + 4.0);
-                    let rotated = if key.rotation % 2 == 1 {
-                        [dimensions[1], dimensions[0]]
-                    } else {
-                        dimensions
-                    };
-                    let scale = Fit::Page.scale(rotated, box_size);
-                    let image_rect = egui::Rect::from_center_size(
-                        center,
-                        Vec2::new(rotated[0] * scale, rotated[1] * scale),
-                    );
-                    painter.rect_filled(
-                        image_rect,
-                        0.0,
-                        if key.night {
-                            Color32::BLACK
-                        } else {
-                            Color32::WHITE
-                        },
-                    );
-                    if let Some(texture) = texture {
-                        painter.image(
-                            texture,
-                            image_rect,
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
-                    } else {
-                        painter.text(
-                            center,
-                            egui::Align2::CENTER_CENTER,
-                            if self.thumbnails.failed(key) {
-                                "Unavailable"
-                            } else {
-                                "Loading…"
-                            },
-                            egui::FontId::proportional(12.0),
-                            if key.night {
-                                Color32::LIGHT_GRAY
-                            } else {
-                                Color32::DARK_GRAY
-                            },
-                        );
-                    }
-                    painter.text(
-                        egui::pos2(rect.center().x, rect.bottom() - 8.0),
-                        egui::Align2::CENTER_BOTTOM,
-                        format!("Page {}", self.page_name(page)),
-                        egui::FontId::proportional(13.0),
-                        ui.visuals().text_color(),
-                    );
-                    if response
-                        .on_hover_ui(|ui| {
-                            ui.set_max_width(ui.spacing().tooltip_width);
-                            ui.label(format!("Go to page {}", self.page_name(page)));
-                        })
-                        .clicked()
-                    {
-                        target = Some(page);
-                    }
-                }
-            },
-        );
-        if let Some(page) = target {
-            self.jump(page);
-            // The clicked row is already visible. Keep the preview scroll stable
-            // so adjacent pages remain under the pointer after navigation.
-            self.reveal_page = None;
-        }
+        target.is_some()
     }
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {
@@ -421,7 +308,8 @@ impl Pagewing {
                         ui.separator();
                         ui.add_space(10.0);
                     }
-                    self.contents(ui);
+                    let contents_navigation = self.contents(ui);
+                    let mut other_focus = chapter_focus || contents_navigation;
                     appearance::section(ui, "BOOKMARKS");
                     if self.reading.bookmarks.is_empty() {
                         ui.weak(format!(
@@ -430,7 +318,7 @@ impl Pagewing {
                         ));
                     }
                     if !self.bookmark_pages.is_empty() {
-                        self.bookmark_list(ui);
+                        other_focus |= self.bookmark_list(ui);
                     }
                     if !self.reading.marks.is_empty() {
                         ui.add_space(20.0);
@@ -458,59 +346,16 @@ impl Pagewing {
                         }
                         if let Some(name) = target {
                             self.mark(name, MarkAction::Jump);
+                            other_focus = true;
                         }
                         if let Some(name) = remove {
                             self.reading.marks.remove(&name);
                             self.dirty = true;
                         }
                     }
+                    let reveal_search = self.reveal_hit.is_some() && !self.hits.is_empty();
                     self.search_results(ui, viewport, chapter_focus);
-                    ui.add_space(20.0);
-                    ui.horizontal_wrapped(|ui| {
-                        appearance::section(ui, "PAGES");
-                        let changed = ui
-                            .selectable_value(&mut self.library.thumbnails, false, "List")
-                            .changed()
-                            | ui.selectable_value(&mut self.library.thumbnails, true, "Previews")
-                                .changed();
-                        if changed {
-                            self.dirty = true;
-                            self.reveal_page = Some(self.nav.page);
-                        }
-                    });
-                    if self.library.thumbnails {
-                        self.page_previews(ui);
-                    } else {
-                        let row_height = Self::sidebar_row_height(ui);
-                        let mut scroll = egui::ScrollArea::vertical()
-                            .id_salt("page-list")
-                            .max_height(
-                                (ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 300.0),
-                            );
-                        if let Some(page) = self.reveal_page.take() {
-                            scroll = scroll.vertical_scroll_offset(
-                                page as f32 * (row_height + ui.spacing().item_spacing.y),
-                            );
-                        }
-                        scroll.show_rows(ui, row_height, self.nav.count, |ui, range| {
-                            for page in range {
-                                if ui
-                                    .add_sized(
-                                        Vec2::new(ui.available_width(), row_height),
-                                        egui::Button::selectable(
-                                            page == self.nav.page,
-                                            format!("Page {}", self.page_name(page)),
-                                        )
-                                        .truncate(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.jump(page);
-                                    self.reveal_page = None;
-                                }
-                            }
-                        });
-                    }
+                    self.pages(ui, viewport, other_focus || reveal_search);
                 });
             });
         if !self.loading
@@ -525,6 +370,7 @@ impl Pagewing {
 mod tests {
     use super::*;
     use crate::{destination::Destination, navigation::Navigation, outline::OutlineEntry};
+    use eframe::egui::Color32;
 
     #[test]
     fn result_highlights_update_with_queries_themes_and_fonts() {
