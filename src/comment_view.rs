@@ -76,7 +76,12 @@ impl CommentView {
             return false;
         }
         let query = caseless::default_case_fold_str(&self.filter.query);
-        let words: Vec<_> = query.split_whitespace().collect();
+        // Prepare each keyword once for the whole snapshot, including both
+        // author and contents fields, instead of rebuilding substring search.
+        let words: Vec<_> = query
+            .split_whitespace()
+            .map(memchr::memmem::Finder::new)
+            .collect();
         self.matched.fill(false);
         let matched = &mut self.matched;
         for (index, comment) in comments.items.iter().enumerate() {
@@ -91,7 +96,7 @@ impl CommentView {
             } else if let Some(fields) = &self.folded[index] {
                 words
                     .iter()
-                    .all(|word| fields.iter().any(|s| s.contains(word)))
+                    .all(|word| fields.iter().any(|s| word.find(s.as_bytes()).is_some()))
             } else {
                 let fields = [
                     caseless::default_case_fold_str(&comment.author),
@@ -99,7 +104,7 @@ impl CommentView {
                 ];
                 let found = words
                     .iter()
-                    .all(|word| fields.iter().any(|s| s.contains(word)));
+                    .all(|word| fields.iter().any(|s| word.find(s.as_bytes()).is_some()));
                 let bytes = fields.iter().map(String::capacity).sum::<usize>();
                 if bytes <= SEARCH_BYTES - self.folded_bytes {
                     self.folded_bytes += bytes;
@@ -197,6 +202,84 @@ mod tests {
             has_appearance: false,
             truncated: false,
             locked: false,
+        }
+    }
+
+    #[test]
+    fn keyword_search_matches_the_string_model_across_fields_and_cache_states() {
+        let fields = [
+            ("Straße reviewer", "中文 annotation Σ ﬁnish"),
+            ("İstanbul", "Combining e\u{301} and 👩‍💻 notes"),
+            ("split", "field"),
+            ("", "punctuation: [needle] aaaaab"),
+            ("Reviewer", ""),
+        ];
+        let comments = Comments {
+            items: fields
+                .iter()
+                .enumerate()
+                .map(|(index, &(author, contents))| {
+                    let mut item = comment(0, index, None, contents);
+                    item.author = author.into();
+                    item
+                })
+                .collect(),
+            limited: false,
+        };
+        let queries = [
+            "",
+            "\u{2003}\t",
+            "STRASSE 中文",
+            "Σ FINISH",
+            "i\u{307}stanbul 👩‍💻",
+            "e\u{301}",
+            "é",
+            "split field",
+            "splitfield",
+            "field split split",
+            "[needle]",
+            "aaaaab",
+            "aaaaabc",
+            "needle missing",
+            "reviewer",
+            "中文\u{2003}reviewer",
+        ];
+        for uncached in [false, true] {
+            let mut view = CommentView::default();
+            view.set_comments(&comments);
+            if uncached {
+                view.folded_bytes = SEARCH_BYTES;
+            }
+            // Repeat after warm-up to cover both prepared and uncached fields.
+            for query in queries.into_iter().cycle().take(queries.len() * 2) {
+                view.filter.query = query.into();
+                assert!(view.update(&comments, 0));
+                let query = caseless::default_case_fold_str(query);
+                let expected: Vec<_> = fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, &(author, contents))| {
+                        let fields = [
+                            caseless::default_case_fold_str(author),
+                            caseless::default_case_fold_str(contents),
+                        ];
+                        query
+                            .split_whitespace()
+                            .all(|word| fields.iter().any(|field| field.contains(word)))
+                            .then_some(index)
+                    })
+                    .collect();
+                assert_eq!(
+                    view.rows().iter().map(|row| row.index).collect::<Vec<_>>(),
+                    expected,
+                    "{query:?}, uncached={uncached}"
+                );
+                assert_eq!(view.matches(), expected.len());
+                assert_eq!(view.selected(), expected.first().copied());
+                if uncached {
+                    assert!(view.folded.iter().all(Option::is_none));
+                }
+            }
         }
     }
 
