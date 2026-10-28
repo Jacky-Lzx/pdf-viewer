@@ -13,7 +13,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Ctrl+d / Ctrl+u", "Half screen down / up"),
     ("Space / Shift+Space", "Screen down / up"),
-    ("50%", "Jump to a percentage of the document's pages"),
+    (
+        "50%   or   :50% Enter",
+        "Jump to a percentage of the document's pages",
+    ),
     (
         "zt / zz / zb",
         "Current page top / vertical center / bottom",
@@ -177,7 +180,10 @@ impl HelpFilter {
         for &(keys, action) in &[
             ("gg / 42gg / 42 Enter", "First page / counted page"),
             ("Backspace", "Edit count and cancel unfinished g/z command"),
-            ("50%", "Jump to a percentage of the document's pages"),
+            (
+                "50%   or   :50% Enter",
+                "Jump to a percentage of the document's pages",
+            ),
             ("zt / zz / zb", "Align current page top / center / bottom"),
             (
                 "zH / zL / z0 / z$",

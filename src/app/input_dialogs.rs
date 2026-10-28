@@ -127,20 +127,22 @@ impl Pagewing {
                     egui::TextEdit::singleline(&mut input.value)
                         .desired_width(f32::INFINITY)
                         .char_limit(4096)
-                        .hint_text("42, +5 or PDF label"),
+                        .hint_text("42, +5, 50% or PDF label"),
                 );
                 if response.changed() {
                     input.invalid = false;
                 }
-                response.on_hover_text("Relative: +5, -5. PDF label: iv, A-3; =1 for label 1.");
+                response.on_hover_text(
+                    "Relative: +5, -5. Progress: 50%. PDF label: iv, A-3; =1 for label 1.",
+                );
                 if input.invalid {
                     ui.colored_label(
                         ui.visuals().error_fg_color,
-                        "Enter a page, +offset or PDF label.",
+                        "Use a page, +offset, 50% or label.",
                     );
                 }
                 if context.content_rect().height() >= 420.0 {
-                    ui.weak("Relative: +5, -5.");
+                    ui.weak("Relative: +5, -5. Progress: 50%.");
                     ui.weak("PDF label: iv, A-3; =1 for label 1.");
                 }
                 ui.separator();
@@ -154,6 +156,9 @@ impl Pagewing {
                             self.nav.page,
                             self.nav.count,
                         )
+                        .or_else(|| {
+                            crate::navigation::percentage_input(&input.value, self.nav.count)
+                        })
                         .or_else(|| self.labels.resolve_input(&input.value, self.nav.count));
                         if chosen.is_none() {
                             input.invalid = true;
@@ -325,7 +330,7 @@ mod tests {
                         } else if password {
                             &["Unlock", "Cancel", "Show password"]
                         } else if extra {
-                            &["Go", "Cancel", "Enter a page, +offset or PDF label."]
+                            &["Go", "Cancel", "Use a page, +offset, 50% or label."]
                         } else {
                             &["Go", "Cancel"]
                         },
@@ -379,7 +384,17 @@ mod tests {
             .unwrap(),
         );
         let size = egui::vec2(240.0, 240.0);
-        for (value, expected) in [("+2", 4), ("A-2", 5), ("=1", 2), ("2", 1)] {
+        for (value, expected) in [
+            ("+2", 4),
+            ("A-2", 5),
+            ("=1", 2),
+            ("50%", 2),
+            ("51%", 3),
+            ("0%", 0),
+            ("101%", 5),
+            (" 25 % ", 1),
+            ("2", 1),
+        ] {
             app.nav.page = 2;
             let mut events = key(egui::Key::Colon);
             events.push(egui::Event::Paste(value.into()));
@@ -410,6 +425,35 @@ mod tests {
         assert_eq!(input.value, "jkd");
         assert_eq!(app.nav.page, 1);
         assert!(!app.library.dark);
+    }
+
+    #[test]
+    fn percentage_submission_keeps_literal_pdf_labels_accessible() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path());
+        let mut data = include_bytes!("../../assets/pagewing-guide.pdf").to_vec();
+        // Preserve xref offsets while making the last range a literal 5% label.
+        let original = b"/S /D /P (A-)";
+        let replacement = b"      /P (5%)";
+        let offset = data
+            .windows(original.len())
+            .position(|bytes| bytes == original)
+            .unwrap();
+        data[offset..offset + original.len()].copy_from_slice(replacement);
+        app.labels =
+            crate::page_labels::PageLabels::read(&hayro::hayro_syntax::Pdf::new(data).unwrap());
+        let size = egui::vec2(240.0, 240.0);
+        for (value, expected) in [("5%", 0), ("=5%", 4), ("50%", 2), ("=1", 2)] {
+            let mut events = key(egui::Key::Colon);
+            events.push(egui::Event::Paste(value.into()));
+            events.extend(key(egui::Key::Enter));
+            frame(&mut app, &context, size, events);
+            for _ in 0..4 {
+                frame(&mut app, &context, size, Vec::new());
+            }
+            assert!(app.page_input.is_none(), "{value}");
+            assert_eq!(app.nav.page, expected, "{value}");
+        }
     }
 
     #[test]

@@ -19,6 +19,17 @@ pub fn percentage_page(pages: usize, percentage: usize) -> usize {
     (pages / 100 * percentage + (pages % 100 * percentage).div_ceil(100)).saturating_sub(1)
 }
 
+/// Parse an unsigned integer percentage entered in the page dialog.
+/// Leave other inputs available for physical offsets and PDF page labels.
+pub fn percentage_input(input: &str, pages: usize) -> Option<usize> {
+    let percentage = input.trim().strip_suffix('%')?.trim();
+    if pages == 0 || percentage.is_empty() || !percentage.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(percentage_page(pages, percentage.parse().ok()?))
+}
+
 /// Resolve an explicitly signed physical page offset, clamped to the document.
 /// Other inputs remain available for absolute page numbers and PDF labels.
 pub fn relative_page(input: &str, current: usize, pages: usize) -> Option<usize> {
@@ -263,6 +274,48 @@ mod tests {
         }
         assert_eq!(relative_page("+1", 0, 0), None);
         assert_eq!(relative_page("-1", 0, 0), None);
+    }
+
+    #[test]
+    fn dialog_percentages_share_page_rounding_and_leave_other_inputs_for_labels() {
+        for (input, expected) in [
+            ("0%", 0),
+            ("1%", 0),
+            ("25%", 1),
+            ("50%", 2),
+            ("51%", 3),
+            ("99%", 5),
+            ("100%", 5),
+            ("101%", 5),
+            ("  050 % \t", 2),
+        ] {
+            assert_eq!(percentage_input(input, 6), Some(expected), "{input}");
+        }
+        assert_eq!(percentage_input("50%", 0), None);
+        assert_eq!(percentage_input("0%", 1), Some(0));
+        assert_eq!(percentage_input("100%", usize::MAX), Some(usize::MAX - 1));
+        assert_eq!(
+            percentage_input(&format!("{}%", usize::MAX), usize::MAX),
+            Some(usize::MAX - 1)
+        );
+        for input in [
+            "",
+            "%",
+            "50",
+            "50%%",
+            "5 0%",
+            "-1%",
+            "+1%",
+            "50.5%",
+            "1e2%",
+            "５０%",
+            "=50%",
+            "A-1%",
+            "50% tail",
+            "9999999999999999999999999999999999999999%",
+        ] {
+            assert_eq!(percentage_input(input, 6), None, "{input}");
+        }
     }
 
     #[test]
