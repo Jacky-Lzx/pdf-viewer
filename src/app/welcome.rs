@@ -197,11 +197,11 @@ mod tests {
             // Opening a document canonicalizes its path, including macOS's
             // /var -> /private/var temporary-directory symlink.
             let path = std::fs::canonicalize(path).unwrap();
-            app.library.recent.push(ReadingState {
+            app.library.recent.push(std::sync::Arc::new(ReadingState {
                 path,
                 page: index,
                 ..Default::default()
-            });
+            }));
         }
         (directory, context, app)
     }
@@ -372,7 +372,7 @@ mod tests {
         }
         let size = Vec2::new(1180.0, 820.0);
         for path in paths {
-            app.library.recent[0].path = path.clone();
+            std::sync::Arc::make_mut(&mut app.library.recent[0]).path = path.clone();
             frame(&mut app, &context, size, vec![egui::Event::PointerGone]);
             settle(&mut app, &context, size);
             let mut output = frame(&mut app, &context, size, Vec::new());

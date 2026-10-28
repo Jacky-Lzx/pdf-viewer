@@ -10,7 +10,7 @@ license = "MIT"
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence"] }
 hayro = "0.8.0"
 rfd = "0.17.2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 toml = "1.1"
 directories = "6"
@@ -158,4 +158,8 @@ harness = false
 
 [[bench]]
 name = "bookmark_edits"
+harness = false
+
+[[bench]]
+name = "library_snapshots"
 harness = false

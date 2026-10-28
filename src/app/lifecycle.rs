@@ -17,7 +17,7 @@ impl Pagewing {
             .recent
             .iter()
             .find(|item| item.path == path)
-            .cloned()
+            .map(|item| item.as_ref().clone())
             .unwrap_or(ReadingState {
                 path,
                 ..Default::default()

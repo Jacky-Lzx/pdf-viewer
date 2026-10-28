@@ -188,4 +188,38 @@ mod tests {
         drop(writer);
         assert_eq!(Library::load(&path).recent[0].page, 42);
     }
+
+    #[test]
+    fn in_flight_shared_records_stay_immutable_while_the_next_snapshot_is_prepared() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let completed = Arc::clone(&written);
+        let mut writer = StateWriter::spawn(egui::Context::default(), move |library| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            completed
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(library).unwrap());
+            Ok(())
+        });
+        let mut source = snapshot(7);
+        let mut current = source.recent[0].as_ref().clone();
+        current.bookmarks.extend(0..600);
+        source.remember(current.clone());
+        let first = serde_json::to_value(&source).unwrap();
+        writer.save(source.clone());
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        current.page = 8;
+        current.bookmarks.remove(&7);
+        source.remember(current);
+        let latest = serde_json::to_value(&source).unwrap();
+        writer.save(source);
+        release_tx.send(()).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        release_tx.send(()).unwrap();
+        drop(writer);
+        assert_eq!(*written.lock().unwrap(), [first, latest]);
+    }
 }
