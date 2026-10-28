@@ -1,5 +1,6 @@
 use super::{Pagewing, dialog};
 use eframe::egui;
+use std::borrow::Cow;
 use std::fmt::Write;
 
 impl Pagewing {
@@ -28,26 +29,26 @@ impl Pagewing {
         });
     }
 
-    fn property_rows(&self) -> Vec<(&str, String)> {
+    fn property_rows(&self) -> impl Iterator<Item = (&str, Cow<'_, str>)> {
         let dimensions = self.dimensions[self.nav.page];
-        let mut rows = vec![
-            ("File", self.reading.path.display().to_string()),
-            ("Format", format!("PDF {}", self.info.version)),
-            ("Size", format!("{} bytes", self.info.bytes)),
-            ("Pages", self.nav.count.to_string()),
-            ("Current page", self.page_name(self.nav.page)),
+        [
+            ("File", Cow::Owned(self.reading.path.display().to_string())),
+            ("Format", Cow::Owned(format!("PDF {}", self.info.version))),
+            ("Size", Cow::Owned(format!("{} bytes", self.info.bytes))),
+            ("Pages", Cow::Owned(self.nav.count.to_string())),
+            ("Current page", Cow::Owned(self.page_name(self.nav.page))),
             (
                 "Page size",
-                format!("{:.1} × {:.1} pt", dimensions[0], dimensions[1]),
+                Cow::Owned(format!("{:.1} × {:.1} pt", dimensions[0], dimensions[1])),
             ),
-        ];
-        rows.extend(
+        ]
+        .into_iter()
+        .chain(
             self.info
                 .fields
                 .iter()
-                .map(|(label, value)| (*label, value.clone())),
-        );
-        rows
+                .map(|(label, value)| (*label, Cow::Borrowed(value.as_str()))),
+        )
     }
 
     pub(super) fn copy_properties(&mut self, context: &egui::Context) {
