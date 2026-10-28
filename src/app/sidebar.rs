@@ -1,4 +1,4 @@
-use super::{Pagewing, appearance};
+use super::{Pagewing, appearance, tooltips::LazyTooltip};
 use eframe::egui::{self, RichText, Vec2};
 
 mod bookmarks;
@@ -68,7 +68,7 @@ impl Pagewing {
                         ui.add(
                             egui::Label::new(RichText::new(self.filename()).strong()).truncate(),
                         )
-                        .on_hover_text(self.reading.path.display().to_string());
+                        .on_hover_text_lazy(|| self.reading.path.display().to_string());
                         ui.weak(format!("PDF document  ·  {} pages", self.nav.count));
                         ui.add_space(10.0);
                         ui.separator();

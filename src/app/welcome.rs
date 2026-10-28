@@ -1,4 +1,4 @@
-use super::{ACCENT, Pagewing, appearance, shortcuts};
+use super::{ACCENT, Pagewing, appearance, shortcuts, tooltips::LazyTooltip};
 use eframe::egui::{self, Color32, RichText, Vec2};
 
 impl Pagewing {
@@ -134,7 +134,7 @@ impl Pagewing {
                                         egui::Sense::click(),
                                     )
                                     .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text(item.path.display().to_string());
+                                    .on_hover_text_lazy(|| item.path.display().to_string());
                                 response.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Button,
@@ -343,5 +343,66 @@ mod tests {
         let size = Vec2::new(240.0, 400.0);
         settle(&mut app, &context, size);
         assert_eq!(assert_focused_visible(&context, size).id, target);
+    }
+
+    #[test]
+    fn recent_card_tooltips_show_the_current_full_path_without_changing_it() {
+        let (directory, context, mut app) = app();
+        context.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut paths = vec![
+            directory
+                .path()
+                .join("文档 📝/a long parent directory/Recent document 0.pdf"),
+            directory
+                .path()
+                .join("different parent/Recent document 0.pdf"),
+        ];
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            paths.push(
+                directory
+                    .path()
+                    .join(std::ffi::OsString::from_vec(b"raw-\xff-parent".to_vec()))
+                    .join("Recent document 0.pdf"),
+            );
+        }
+        let size = Vec2::new(1180.0, 820.0);
+        for path in paths {
+            app.library.recent[0].path = path.clone();
+            frame(&mut app, &context, size, vec![egui::Event::PointerGone]);
+            settle(&mut app, &context, size);
+            let mut output = frame(&mut app, &context, size, Vec::new());
+            let expected = path.display().to_string();
+            let contains_path = |output: &egui::FullOutput| {
+                output.shapes.iter().any(|shape|
+                matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == expected))
+            };
+            assert!(
+                !contains_path(&output),
+                "a hidden tooltip must not paint a path"
+            );
+            let position = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "Recent document 0.pdf" => {
+                        Some(text.pos + egui::vec2(4.0, 4.0))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            frame(
+                &mut app,
+                &context,
+                size,
+                vec![egui::Event::PointerMoved(position)],
+            );
+            for _ in 0..12 {
+                output = frame(&mut app, &context, size, Vec::new());
+            }
+            assert!(contains_path(&output), "the tooltip must show {expected}");
+            assert_eq!(app.library.recent[0].path, path);
+        }
     }
 }

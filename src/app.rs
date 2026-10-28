@@ -21,6 +21,7 @@ mod status;
 mod sync;
 mod tiles;
 mod toolbar;
+mod tooltips;
 mod welcome;
 mod zoom;
 

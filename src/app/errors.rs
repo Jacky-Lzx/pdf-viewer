@@ -1,4 +1,4 @@
-use super::Pagewing;
+use super::{Pagewing, tooltips::LazyTooltip};
 use crate::{document::LoadError, worker::Failure};
 use eframe::egui;
 
@@ -146,12 +146,6 @@ impl Pagewing {
                             Recovery::Document => "Retry reload",
                             Recovery::Page => "Retry page",
                         };
-                        let hint = match recovery {
-                            Recovery::Document => {
-                                format!("{label} — {}", self.library.shortcuts.label("reload"))
-                            }
-                            Recovery::Page => "Render the current view again".into(),
-                        };
                         let retry = ui
                             .add_enabled(
                                 !self.loading,
@@ -161,7 +155,12 @@ impl Pagewing {
                                     label
                                 }),
                             )
-                            .on_hover_text(hint);
+                            .on_hover_text_lazy(|| match recovery {
+                                Recovery::Document => {
+                                    format!("{label} — {}", self.library.shortcuts.label("reload"))
+                                }
+                                Recovery::Page => "Render the current view again".into(),
+                            });
                         retry.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,

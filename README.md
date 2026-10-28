@@ -378,6 +378,8 @@ cargo bench --locked --bench page_label_text -- 9
 cargo bench --locked --bench status_text -- 21
 # 快捷键帮助筛选：比较每次格式化与复用目录检索文字，含分配计数
 cargo bench --locked --bench help_filter -- 21
+# 四条路径悬停提示：比较提前格式化与显示时格式化，含完整 egui 帧和分配计数
+cargo bench --locked --bench lazy_tooltips -- 21
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
 cargo bench --locked --bench search_matching -- 9
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径

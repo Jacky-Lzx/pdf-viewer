@@ -1,21 +1,6 @@
-use super::{Pagewing, appearance, set_theme, shortcuts};
+use super::{Pagewing, appearance, set_theme, shortcuts, tooltips::LazyTooltip};
 use crate::navigation::Fit;
 use eframe::egui::{self, RichText, scroll_area::ScrollAreaOutput};
-
-// Match egui's text tooltip layout while deferring shortcut formatting until
-// the tooltip is actually shown. Ordinary toolbar frames only create a closure.
-trait LazyTooltip {
-    fn on_hover_text_lazy(self, text: impl FnOnce() -> String) -> Self;
-}
-
-impl LazyTooltip for egui::Response {
-    fn on_hover_text_lazy(self, text: impl FnOnce() -> String) -> Self {
-        self.on_hover_ui(|ui| {
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui.add(egui::Label::new(text()));
-        })
-    }
-}
 
 impl Pagewing {
     pub(super) fn toolbar(&mut self, context: &egui::Context) {

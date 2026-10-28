@@ -1,4 +1,4 @@
-use super::Pagewing;
+use super::{Pagewing, tooltips::LazyTooltip};
 use eframe::egui;
 
 impl Pagewing {
@@ -25,10 +25,12 @@ impl Pagewing {
                         ui.label("PDF changed on disk.");
                         let reload = ui
                             .add_enabled(!self.loading, egui::Button::new("Reload"))
-                            .on_hover_text(format!(
-                                "{} — keep current reading position",
-                                self.library.shortcuts.label("reload")
-                            ));
+                            .on_hover_text_lazy(|| {
+                                format!(
+                                    "{} — keep current reading position",
+                                    self.library.shortcuts.label("reload")
+                                )
+                            });
                         self.input_buttons.reload_changed = Some(reload.id);
                         self.input_buttons.dismiss_change = Some(ui.button("Dismiss").id);
                     });

@@ -1,4 +1,4 @@
-use super::{Pagewing, shortcuts};
+use super::{Pagewing, shortcuts, tooltips::LazyTooltip};
 use crate::annotations::{Comment, Comments, ReviewStatus};
 use crate::comment_cards::CardTextCache;
 use crate::comment_view::{CommentFilter, CommentView};
@@ -301,10 +301,12 @@ impl Pagewing {
                     }
                     self.input_buttons.close_comments = Some(
                         ui.small_button("×")
-                            .on_hover_text(format!(
-                                "Hide comments · {}",
-                                self.library.shortcuts.label("comments")
-                            ))
+                            .on_hover_text_lazy(|| {
+                                format!(
+                                    "Hide comments · {}",
+                                    self.library.shortcuts.label("comments")
+                                )
+                            })
                             .id,
                     );
                 });

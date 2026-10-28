@@ -147,3 +147,7 @@ harness = false
 [[bench]]
 name = "help_filter"
 harness = false
+
+[[bench]]
+name = "lazy_tooltips"
+harness = false
