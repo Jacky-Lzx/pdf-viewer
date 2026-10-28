@@ -1129,6 +1129,7 @@ mod tests {
                 source: Some(search_index::SourceMap {
                     start: 0,
                     offsets: (0..value.len()).collect(),
+                    end: value.len(),
                 }),
             })
             .unwrap();
@@ -1172,78 +1173,108 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_unicode_boundaries_preserve_search_geometry_without_a_map() {
+    fn direct_unicode_offsets_preserve_search_geometry_and_batched_results() {
         use caseless::Caseless;
 
-        let value = "ÉCOLE école Σσς ΟΣ ος 中文 cafe\u{301} 👩‍💻\n".repeat(20);
-        let optimized = PageText {
-            spans: value
-                .char_indices()
-                .enumerate()
-                .map(|(glyph, (offset, ch))| TextSpan {
-                    range: offset..offset + ch.len_utf8(),
-                    rect: Rect::new(glyph as f64 * 10.0, 0.0, glyph as f64 * 10.0 + 8.0, 10.0),
-                })
-                .collect(),
-            text: value.clone(),
-            ..Default::default()
-        };
-        let reference = optimized.clone();
-        let mut folded = String::new();
-        let mut offsets = Vec::new();
-        for (offset, ch) in value.char_indices() {
-            for lower in std::iter::once(ch).default_case_fold() {
-                folded.push(lower);
-                offsets.extend(std::iter::repeat_n(offset, lower.len_utf8()));
+        for (value, mapped) in [
+            (
+                "ÉCOLE école Σσς ΟΣ ος 中文 cafe\u{301} 👩‍💻\n".repeat(20),
+                false,
+            ),
+            (
+                format!(
+                    "前 ß ASCII\n中 İΣ ﬃ Ⱥ ſ K ΐ{}",
+                    "尾中文 ÉCOLE Σσς ΟΣ cafe\u{301} 👩‍💻\n".repeat(20)
+                ),
+                true,
+            ),
+        ] {
+            let optimized = PageText {
+                spans: value
+                    .char_indices()
+                    .enumerate()
+                    .map(|(glyph, (offset, ch))| TextSpan {
+                        range: offset..offset + ch.len_utf8(),
+                        rect: Rect::new(glyph as f64 * 10.0, 0.0, glyph as f64 * 10.0 + 8.0, 10.0),
+                    })
+                    .collect(),
+                text: value.clone(),
+                ..Default::default()
+            };
+            let reference = optimized.clone();
+            let mut folded = String::new();
+            let mut offsets = Vec::new();
+            for (offset, ch) in value.char_indices() {
+                for lower in std::iter::once(ch).default_case_fold() {
+                    folded.push(lower);
+                    offsets.extend(std::iter::repeat_n(offset, lower.len_utf8()));
+                }
             }
-        }
-        reference
-            .index
-            .set(SearchIndex {
-                folded,
-                source: Some(search_index::SourceMap { start: 0, offsets }),
-            })
-            .unwrap();
-        for whole_word in [false, true] {
-            for needle in [
-                "École",
-                "σ",
-                "οσ",
-                "中",
-                "中文",
-                "e\u{301}",
-                "👩‍💻",
-                "missing",
-            ] {
-                let query = SearchQuery::new(
-                    needle.into(),
-                    SearchOptions {
-                        match_case: false,
-                        whole_word,
-                    },
-                );
-                let expected = reference.search_with(4, &query);
-                let mut cursor = SearchCursor::default();
-                let mut hits = Vec::new();
-                loop {
-                    let batch = optimized.search_batch(4, &query, &mut cursor, 7);
-                    hits.extend(batch.hits);
-                    if batch.complete {
-                        break;
+            reference
+                .index
+                .set(SearchIndex {
+                    folded,
+                    source: Some(search_index::SourceMap {
+                        start: 0,
+                        offsets,
+                        end: value.len(),
+                    }),
+                })
+                .unwrap();
+            for whole_word in [false, true] {
+                for needle in [
+                    "École",
+                    "σ",
+                    "οσ",
+                    "中",
+                    "中文",
+                    "e\u{301}",
+                    "👩‍💻",
+                    "ss",
+                    "s",
+                    "i",
+                    "i\u{307}σ",
+                    "中 i\u{307}σ",
+                    "ss ascii 中",
+                    "ffi",
+                    "ff",
+                    "ⱥ",
+                    "k",
+                    "ΐ尾中文",
+                    "missing",
+                ] {
+                    let query = SearchQuery::new(
+                        needle.into(),
+                        SearchOptions {
+                            match_case: false,
+                            whole_word,
+                        },
+                    );
+                    let expected = reference.search_with(4, &query);
+                    let mut cursor = SearchCursor::default();
+                    let mut hits = Vec::new();
+                    loop {
+                        let batch = optimized.search_batch(4, &query, &mut cursor, 7);
+                        hits.extend(batch.hits);
+                        if batch.complete {
+                            break;
+                        }
+                    }
+                    assert_eq!(hits.len(), expected.len(), "{needle}, {whole_word}");
+                    for (actual, expected) in hits.iter().zip(expected) {
+                        assert_eq!(actual.page, expected.page);
+                        assert_eq!(actual.rects, expected.rects);
+                        assert_eq!(actual.snippet, expected.snippet);
+                        assert_eq!(actual.snippet_match, expected.snippet_match);
                     }
                 }
-                assert_eq!(hits.len(), expected.len(), "{needle}, {whole_word}");
-                for (actual, expected) in hits.iter().zip(expected) {
-                    assert_eq!(actual.page, expected.page);
-                    assert_eq!(actual.rects, expected.rects);
-                    assert_eq!(actual.snippet, expected.snippet);
-                    assert_eq!(actual.snippet_match, expected.snippet_match);
-                }
+            }
+            let index = optimized.index.get().unwrap();
+            assert_eq!(index.source.is_some(), mapped);
+            if !mapped {
+                assert_eq!(index.memory_bytes(), value.len());
             }
         }
-        let index = optimized.index.get().unwrap();
-        assert!(index.source.is_none());
-        assert_eq!(index.memory_bytes(), value.len());
     }
 
     #[test]
@@ -1278,7 +1309,7 @@ mod tests {
         assert!(page.memory_bytes() <= reserve);
         let index = page.index.get().unwrap();
         let source = &index.source.as_ref().unwrap().offsets;
-        assert_eq!(source.len(), index.folded.len());
+        assert_eq!(source.len(), "i\u{307}中i\u{307}".len());
         assert!(
             source
                 .iter()

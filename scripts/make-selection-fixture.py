@@ -5,8 +5,8 @@ from pathlib import Path
 TEXT = "Rust cafe\u0301 中文 👩‍💻 word " * 200
 
 
-def make_pdf():
-    mapping = TEXT.encode("utf-16-be").hex()
+def make_pdf(text=TEXT):
+    mapping = text.encode("utf-16-be").hex()
     cmap = f"""/CIDInit /ProcSet findresource begin
 12 dict begin
 begincmap

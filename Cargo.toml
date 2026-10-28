@@ -207,3 +207,7 @@ harness = false
 [[bench]]
 name = "word_boundaries"
 harness = false
+
+[[bench]]
+name = "search_map_suffix"
+harness = false
