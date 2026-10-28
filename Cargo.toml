@@ -165,6 +165,10 @@ name = "lazy_tooltips"
 harness = false
 
 [[bench]]
+name = "notice_panels"
+harness = false
+
+[[bench]]
 name = "search_selection"
 harness = false
 

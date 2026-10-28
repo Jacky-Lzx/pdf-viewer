@@ -1,5 +1,5 @@
 use super::{Pagewing, tooltips::LazyTooltip};
-use crate::{document::LoadError, worker::Failure};
+use crate::{document::LoadError, notice_panel::NoticePanel, worker::Failure};
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,130 +108,95 @@ impl Pagewing {
         // Keep actions outside the scrolling message, including when both
         // notices share a minimum-size reader window.
         let budget = (context.available_rect().height() - 8.0) / notices as f32;
-        if let Some(error) = self.configuration_error.clone() {
-            let (panel, height, compact) =
-                notice_panel(context, "configuration-error", &error, budget);
-            panel.show(context, |ui| {
-                compact_spacing(ui, compact);
-                message(ui, "configuration-error-message", &error, height);
-                ui.horizontal_wrapped(|ui| {
-                    let dismiss = ui.button("Dismiss");
-                    self.input_buttons.dismiss_config = Some(dismiss.id);
-                    if dismiss.clicked() {
-                        self.configuration_error = None;
-                    }
-                    let copy = copy_button(ui);
-                    self.input_buttons.copy_config = Some(copy.id);
-                    if copy.clicked() {
-                        copy.request_focus();
-                        context.copy_text(error);
-                    }
-                });
-            });
-        }
-        if let Some(error) = self.error.clone() {
-            let (panel, height, compact) = notice_panel(context, "error", &error.message, budget);
-            panel.show(context, |ui| {
-                compact_spacing(ui, compact);
-                message(ui, "reader-error-message", &error.message, height);
-                ui.horizontal_wrapped(|ui| {
-                    let dismiss = ui.button("Dismiss");
-                    self.input_buttons.dismiss_error = Some(dismiss.id);
-                    if dismiss.clicked() {
-                        self.error = None;
-                    }
-                    if let Some(recovery) = error.recovery {
-                        let label = match recovery {
-                            Recovery::Document if self.nav.count == 0 => "Retry open",
-                            Recovery::Document => "Retry reload",
-                            Recovery::Page => "Retry page",
-                        };
-                        let retry = ui
-                            .add_enabled(
-                                !self.loading,
-                                egui::Button::new(if ui.max_rect().width() < 360.0 {
-                                    "Retry"
-                                } else {
-                                    label
-                                }),
-                            )
-                            .on_hover_text_lazy(|| match recovery {
-                                Recovery::Document => {
-                                    format!("{label} — {}", self.library.shortcuts.label("reload"))
-                                }
-                                Recovery::Page => "Render the current view again".into(),
-                            });
-                        retry.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                !self.loading,
-                                label,
-                            )
-                        });
-                        self.input_buttons.retry_error = Some(retry.id);
-                        if retry.clicked() {
-                            self.retry_error(context);
+        if let Some(error) = &self.configuration_error {
+            let mut dismissed = false;
+            NoticePanel::new(context, "configuration-error", error, budget).show(
+                context,
+                "configuration-error-message",
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let dismiss = ui.button("Dismiss");
+                        self.input_buttons.dismiss_config = Some(dismiss.id);
+                        if dismiss.clicked() {
+                            dismissed = true;
                         }
-                    }
-                    let copy = copy_button(ui);
-                    self.input_buttons.copy_error = Some(copy.id);
-                    if copy.clicked() {
-                        copy.request_focus();
-                        context.copy_text(error.message);
-                    }
-                });
-            });
+                        let copy = copy_button(ui);
+                        self.input_buttons.copy_config = Some(copy.id);
+                        if copy.clicked() {
+                            copy.request_focus();
+                            context.copy_text(error.clone());
+                        }
+                    });
+                },
+            );
+            if dismissed {
+                self.configuration_error = None;
+            }
         }
-    }
-}
-
-/// Recompute the height when messages or the viewport change. Bottom panels
-/// otherwise keep a previous height and can clip newly wrapped contents.
-fn notice_panel(
-    context: &egui::Context,
-    id: &'static str,
-    text: &str,
-    budget: f32,
-) -> (egui::TopBottomPanel, f32, bool) {
-    let style = context.style();
-    let compact = budget < 100.0;
-    let margin = if compact { 2 } else { 6 };
-    let gap = if compact {
-        2.0
-    } else {
-        style.spacing.item_spacing.y
-    };
-    let padding = if compact {
-        2.0
-    } else {
-        style.spacing.button_padding.y
-    };
-    let body = egui::TextStyle::Body.resolve(&style);
-    let button = egui::TextStyle::Button.resolve(&style);
-    let width = (context.available_rect().width() - 32.0).max(1.0);
-    let (row, desired) = context.fonts_mut(|fonts| {
-        let row = (fonts.row_height(&button) + padding * 2.0).max(style.spacing.interact_size.y);
-        let desired = fonts
-            .layout(text.to_owned(), body, style.visuals.error_fg_color, width)
-            .size()
-            .y;
-        (row, desired)
-    });
-    let height = desired.min((budget - row - gap - f32::from(margin) * 2.0).clamp(1.0, 160.0));
-    let panel = egui::TopBottomPanel::bottom(id)
-        .frame(
-            egui::Frame::NONE
-                .fill(style.visuals.panel_fill)
-                .inner_margin(egui::Margin::symmetric(8, margin)),
-        )
-        .exact_height(height + row + gap + f32::from(margin) * 2.0);
-    (panel, height, compact)
-}
-
-fn compact_spacing(ui: &mut egui::Ui, compact: bool) {
-    if compact {
-        ui.spacing_mut().button_padding.y = 2.0;
-        ui.spacing_mut().item_spacing.y = 2.0;
+        if let Some(error) = &self.error {
+            let mut dismissed = false;
+            let mut retried = false;
+            NoticePanel::new(context, "error", &error.message, budget).show(
+                context,
+                "reader-error-message",
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let dismiss = ui.button("Dismiss");
+                        self.input_buttons.dismiss_error = Some(dismiss.id);
+                        if dismiss.clicked() {
+                            dismissed = true;
+                        }
+                        if let Some(recovery) = error.recovery {
+                            let label = match recovery {
+                                Recovery::Document if self.nav.count == 0 => "Retry open",
+                                Recovery::Document => "Retry reload",
+                                Recovery::Page => "Retry page",
+                            };
+                            let retry = ui
+                                .add_enabled(
+                                    !self.loading,
+                                    egui::Button::new(if ui.max_rect().width() < 360.0 {
+                                        "Retry"
+                                    } else {
+                                        label
+                                    }),
+                                )
+                                .on_hover_text_lazy(|| match recovery {
+                                    Recovery::Document => {
+                                        format!(
+                                            "{label} — {}",
+                                            self.library.shortcuts.label("reload")
+                                        )
+                                    }
+                                    Recovery::Page => "Render the current view again".into(),
+                                });
+                            retry.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    !self.loading,
+                                    label,
+                                )
+                            });
+                            self.input_buttons.retry_error = Some(retry.id);
+                            if retry.clicked() {
+                                retried = true;
+                            }
+                        }
+                        let copy = copy_button(ui);
+                        self.input_buttons.copy_error = Some(copy.id);
+                        if copy.clicked() {
+                            copy.request_focus();
+                            context.copy_text(error.message.clone());
+                        }
+                    });
+                },
+            );
+            if dismissed {
+                self.error = None;
+            } else if retried {
+                self.retry_error(context);
+            }
+        }
     }
 }
 
@@ -245,20 +210,6 @@ fn copy_button(ui: &mut egui::Ui) -> egui::Response {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Copy error")
     });
     response.on_hover_text("Copy the complete error message")
-}
-
-fn message(ui: &mut egui::Ui, id: &'static str, text: &str, height: f32) {
-    egui::ScrollArea::vertical()
-        .id_salt(id)
-        .max_height(height)
-        .min_scrolled_height(height)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(egui::RichText::new(text).color(ui.visuals().error_fg_color))
-                    .wrap(),
-            );
-        });
 }
 
 #[cfg(test)]

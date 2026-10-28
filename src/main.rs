@@ -27,6 +27,7 @@ mod list_navigation;
 #[cfg(target_os = "macos")]
 mod macos_open;
 mod navigation;
+mod notice_panel;
 mod outline;
 mod outline_view;
 mod output;

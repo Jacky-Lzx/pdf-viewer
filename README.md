@@ -445,6 +445,8 @@ cargo bench --locked --bench status_text -- 21
 cargo bench --locked --bench help_filter -- 21
 # 四条路径悬停提示：比较提前格式化与显示时格式化，含完整 egui 帧和分配计数
 cargo bench --locked --bench lazy_tooltips -- 21
+# 错误栏：完整 egui 帧对比消息复制与共用排版，含分配计数及文字/坐标校验
+cargo bench --locked --bench notice_panels -- 21
 # 阅读器输入快照：比较完整事件数组与精简动作缓冲，包含文字分类、混合事件和突发输入
 cargo bench --locked --bench input_actions -- 9
 # 完整分批文本搜索，包含匹配、高亮范围和摘要，复用已准备的文本与查询
