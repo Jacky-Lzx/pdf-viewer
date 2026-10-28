@@ -127,6 +127,7 @@ pub struct Pagewing {
     search_due: Option<Instant>,
     revision: u64,
     hits: Vec<SearchHit>,
+    search_highlights: crate::search_highlights::SearchHighlights,
     result_text: crate::search_result_text::ResultTextCache,
     hit_index: Option<usize>,
     reveal_hit: Option<usize>,
@@ -295,6 +296,7 @@ impl Pagewing {
             search_due: None,
             revision: 0,
             hits: Vec::new(),
+            search_highlights: crate::search_highlights::SearchHighlights::default(),
             result_text: crate::search_result_text::ResultTextCache::default(),
             hit_index: None,
             reveal_hit: None,
@@ -910,6 +912,9 @@ impl Pagewing {
                     complete,
                     limited,
                 } if id == self.id && revision == self.revision => {
+                    if !hits.is_empty() {
+                        self.search_highlights.invalidate();
+                    }
                     self.hits.extend(hits);
                     self.scanned = scanned;
                     self.scan_total = total;
@@ -1186,7 +1191,7 @@ impl Pagewing {
     }
 
     fn highlights(
-        &self,
+        &mut self,
         painter: &egui::Painter,
         page: usize,
         page_rect: egui::Rect,
@@ -1196,21 +1201,28 @@ impl Pagewing {
         if !clip.is_positive() {
             return;
         }
-        painter.extend(crate::text::page_hits(&self.hits, page).flat_map(|index| {
-            let hit = &self.hits[index];
-            let color = if self.hit_index == Some(index) {
-                CURRENT_SEARCH_COLOR
-            } else {
-                SEARCH_COLOR
-            };
-            hit.rects.iter().filter_map(move |rect| {
-                let rect = self
-                    .link_rect(*rect, page_rect, dimensions)
-                    .intersect(page_rect);
-                (rect.is_positive() && clip.intersects(rect))
-                    .then(|| egui::Shape::rect_filled(rect, 1.0, color))
-            })
-        }));
+        let view = crate::visible_rects::PageView {
+            document: self.id,
+            page,
+            page_rect,
+            clip,
+            dimensions,
+            rotation: self.reading.rotation,
+            scale: self.scale,
+        };
+        let selected = self.hit_index;
+        painter.extend(
+            self.search_highlights
+                .visible(&self.hits, view, self.nav.page)
+                .map(|(index, rect)| {
+                    let color = if selected == Some(index) {
+                        CURRENT_SEARCH_COLOR
+                    } else {
+                        SEARCH_COLOR
+                    };
+                    egui::Shape::rect_filled(rect, 1.0, color)
+                }),
+        );
     }
 
     fn follow_destination(&mut self, destination: crate::destination::Destination) {

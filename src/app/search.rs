@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 
 mod export;
 
+#[cfg(test)]
+mod highlight_tests;
+
 impl Pagewing {
     pub(super) fn search_button(&mut self, action: shortcuts::SearchButton) {
         use shortcuts::SearchButton;
@@ -39,6 +42,7 @@ impl Pagewing {
         self.copy_search_requested = false;
         self.revision += 1;
         self.hits.clear();
+        self.search_highlights.clear();
         self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;

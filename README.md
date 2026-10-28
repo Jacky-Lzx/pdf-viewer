@@ -424,6 +424,8 @@ cargo bench --locked --bench input_actions -- 9
 cargo bench --locked --bench search_matching -- 9
 # 选区转换为单行搜索词，比较临时词数组与直接拼接
 cargo bench --locked --bench search_selection -- 9
+# 页内搜索高亮几何，比较逐帧变换与缓存复用，包含当前命中身份读取
+cargo bench --locked --bench search_highlights -- 21
 # PDF 标题解码，比较 UTF-16 直接解码和 ASCII 复制路径
 cargo bench --locked --bench pdf_strings -- 9
 # 有界标题和元数据前缀，比较完整解码后截断与按需解码

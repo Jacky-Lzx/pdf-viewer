@@ -161,6 +161,10 @@ name = "search_selection"
 harness = false
 
 [[bench]]
+name = "search_highlights"
+harness = false
+
+[[bench]]
 name = "bookmark_edits"
 harness = false
 

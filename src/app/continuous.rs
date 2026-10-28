@@ -10,6 +10,7 @@ use std::time::Duration;
 impl Pagewing {
     pub(super) fn clear_multi_page_buffers(&mut self) {
         self.comments.clear_multi_page_overlays();
+        self.search_highlights.clear_other();
         self.continuous_geometry = crate::page_geometry::PageGeometry::default();
         self.other_visible_links = crate::visible_rects::VisibleRects::default();
     }

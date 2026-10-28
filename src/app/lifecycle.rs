@@ -83,6 +83,7 @@ impl Pagewing {
         self.pending_focus = None;
         self.pending_destination = None;
         self.hits = Vec::new();
+        self.search_highlights.clear();
         self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
