@@ -10,7 +10,7 @@ pub(super) fn configure_input(context: &eframe::egui::Context) {
 }
 
 /// Filter navigation must leave selection keys and generated text to TextEdit.
-pub(super) fn filter_step(key: Key, modifiers: Modifiers) -> Option<isize> {
+fn filter_step(key: Key, modifiers: Modifiers) -> Option<isize> {
     if modifiers.is_none() {
         match key {
             Key::ArrowUp => Some(-1),

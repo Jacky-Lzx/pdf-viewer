@@ -1,6 +1,6 @@
 const FILTER_NAVIGATION: (&str, &str) = (
     "PageUp/PageDown · Ctrl/Cmd+Home/End",
-    "Move by visible rows / to first or last result (chapter or recent filter)",
+    "Move by visible rows / to first or last result (chapter, recent or comment filter)",
 );
 
 pub(super) const SHORTCUTS: &[(&str, &str)] = &[

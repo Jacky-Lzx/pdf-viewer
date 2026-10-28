@@ -4,6 +4,7 @@ import ctypes
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -54,19 +55,60 @@ def run(binary):
                 keyboard.key("c", ctrl=True)
                 return keyboard.clipboard()
 
-            try:
-                window = wait_for(keyboard.focus, "comment navigation window")
-                resize((1180, 820))
+            def expect_body(expected, description):
+                actual = None
+
+                def matches():
+                    nonlocal actual
+                    actual = copied()
+                    return actual == expected
+
+                try:
+                    wait_for(matches, description)
+                except AssertionError as error:
+                    raise AssertionError(f"{description}: expected {expected!r}, got {actual!r}") from error
+
+            def filter_comments():
                 keyboard.key("m", ctrl=True, shift=True)
                 keyboard.click((1000, 114))
                 for char in "Row":
                     keyboard.key(char.lower(), shift=char.isupper())
+
+            def burst(keys):
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    for key, control in keys:
+                        keyboard.key(key, ctrl=control, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+
+            try:
+                window = wait_for(keyboard.focus, "comment navigation window")
+                resize((1180, 820))
+                filter_comments()
                 for edge, arrow in [(0xFF57, 0xFF52), (0xFF50, 0xFF54)]:
                     keyboard.key(edge)
                     keyboard.key(arrow, shift=True)
                     keyboard.key("c", ctrl=True)
                     assert keyboard.clipboard() == "Row", "Shift+arrows select comment filter text"
                 keyboard.key(0xFF57)
+                burst([(0xFF50, True), (0xFF56, False), (0xFF0D, False)])
+                expect_body("Row 7", "PageDown selects seven visible cards before Enter")
+                keyboard.click((1000, 114))
+                burst([(0xFF57, True), (0xFF56, False), (0xFF52, False), (0xFF0D, False)])
+                expect_body("Row 78", "boundary actions clamp in order with an editor open")
+                keyboard.click((1000, 114))
+                burst([(0xFF57, True), (0xFF55, False), (0xFF0D, False)])
+                expect_body("Row 78", "PageUp moves by one fully visible card in the editor layout")
+                assert document.read_bytes() == original
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                # Reopen with no editor to exercise the original full-list path.
+                application = subprocess.Popen([str(binary), str(document)], env=environment,
+                                               stdout=log, stderr=log)
+                window = wait_for(keyboard.focus, "reopened comment navigation window")
+                resize((1180, 820))
+                filter_comments()
                 for _ in range(79):
                     keyboard.key("j", ctrl=True, delay=0.015)
                 wait_for(lambda: selected_card((1180, 820)), "last comment selected")
@@ -90,7 +132,7 @@ def run(binary):
                 assert document.read_bytes() == original, "navigation does not write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 virtual comments, Shift+arrow text selection, keyboard selection, filter/editor focus, "
+                print("PASS: 80 virtual comments, Shift+arrow text selection, viewport-sized PageUp/PageDown, Ctrl+Home/End and ordered boundary actions, keyboard selection, filter/editor focus, "
                       "full card after resize, manual scroll retention and resumed keyboard navigation")
             except Exception:
                 log.flush()

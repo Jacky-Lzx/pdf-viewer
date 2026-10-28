@@ -87,7 +87,7 @@ def run(binary):
                 assert len(copied.splitlines()) == 4, copied
                 query("")
                 # The scroll content and vertical scroll bar precede the copy button.
-                copy_matches(["Zoom in / out", "Toggle bookmark", "Copy page text", "Go to page dialog", "PageUp/PageDown", "chapter or recent filter"], tabs=3)
+                copy_matches(["Zoom in / out", "Toggle bookmark", "Copy page text", "Go to page dialog", "PageUp/PageDown", "chapter, recent or comment filter"], tabs=3)
                 query("jkgdi missing")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "jkgdi missing"
@@ -162,7 +162,7 @@ def run(binary):
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
                 burst("?pageup")
-                copy_matches(["PageUp/PageDown", "chapter or recent filter"])
+                copy_matches(["PageUp/PageDown", "chapter, recent or comment filter"])
                 keyboard.key(ESCAPE)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0

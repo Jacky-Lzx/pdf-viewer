@@ -433,8 +433,8 @@ impl Pagewing {
                 if key == Key::Enter && modifiers.is_none() {
                     self.comments.filter_confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if let Some(delta) = shortcuts::filter_step(key, modifiers) {
-                    self.comments.filter_motions.push(delta);
+                } else if let Some(motion) = shortcuts::filter_motion(key, modifiers) {
+                    self.comments.filter_motions.push(motion);
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                     });
