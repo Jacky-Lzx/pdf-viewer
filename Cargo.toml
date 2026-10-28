@@ -151,3 +151,7 @@ harness = false
 [[bench]]
 name = "lazy_tooltips"
 harness = false
+
+[[bench]]
+name = "search_selection"
+harness = false

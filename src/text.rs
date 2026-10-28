@@ -9,7 +9,7 @@ mod search_index;
 mod snippet;
 #[path = "text/span.rs"]
 mod span;
-pub use query::SearchQuery;
+pub use query::{SearchQuery, selection_query};
 pub use span::TextSpan;
 
 #[cfg(test)]
