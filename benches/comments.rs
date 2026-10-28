@@ -47,15 +47,18 @@ fn measure(passes: usize, mut run: impl FnMut() -> usize) -> f64 {
 }
 
 fn main() {
-    benchmark();
-}
-
-fn benchmark() {
     let passes: usize = std::env::args()
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
+    benchmark_threads(passes);
+    if std::env::args().nth(2).as_deref() != Some("threads") {
+        benchmark(passes);
+    }
+}
+
+fn benchmark(passes: usize) {
     println!(
         "{passes} passes; median µs/operation, 100 operations/sample; real thread ordering and page overlay lookup. Prepared comments; no PDF parsing, widgets, text layout or GPU."
     );
@@ -248,4 +251,115 @@ fn benchmark_cards(passes: usize, name: &str, comments: &[Comment]) {
     println!(
         "  {name}: rebuild {rebuilt:.3} µs/frame, cached {cached:.3}, scrolling misses {churn:.3}; allocation/reallocation calls per warm frame {before:?} -> {after:?}"
     );
+}
+
+// Captured allocation-heavy implementation from 3fc3fb1.
+fn previous_thread_rows(comments: &Comments) -> Vec<(usize, usize)> {
+    use std::collections::HashMap;
+    let indices: HashMap<_, _> = comments
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| Some((c.id()?, i)))
+        .collect();
+    let mut children = vec![Vec::new(); comments.items.len()];
+    let mut roots = Vec::new();
+    for (index, comment) in comments.items.iter().enumerate() {
+        if let Some(parent) = comment
+            .parent
+            .and_then(|p| indices.get(&p))
+            .copied()
+            .filter(|p| *p != index)
+        {
+            children[parent].push(index);
+        } else {
+            roots.push(index);
+        }
+    }
+    let mut rows = Vec::with_capacity(comments.items.len());
+    let mut visited = vec![false; comments.items.len()];
+    for root in roots.into_iter().chain(0..comments.items.len()) {
+        let mut stack = vec![(root, 0)];
+        while let Some((index, depth)) = stack.pop() {
+            if std::mem::replace(&mut visited[index], true) {
+                continue;
+            }
+            rows.push((index, depth));
+            stack.extend(
+                children[index]
+                    .iter()
+                    .rev()
+                    .map(|&child| (child, depth + 1)),
+            );
+        }
+    }
+    rows
+}
+
+fn benchmark_threads(passes: usize) {
+    println!(
+        "Thread preparation: {passes} alternating passes, 100 operations/sample; µs/preorder including ID lookup, adjacency construction, traversal and output release. Prepared comments; excludes PDF parsing, text, filters, UI and GPU."
+    );
+    for count in [0, 1, 80, 10_000] {
+        for shape in ["flat", "chains", "wide", "cycle"] {
+            let comments = Comments {
+                items: (0..count)
+                    .map(|index| Comment {
+                        page: 0,
+                        slot: Some(index),
+                        parent: match shape {
+                            "chains" if index % 10 != 0 => Some(index - 1),
+                            "wide" if index > 0 => Some(0),
+                            "cycle" => Some(if index == 0 { count - 1 } else { index - 1 }),
+                            _ => None,
+                        }
+                        .map(|slot| CommentId { page: 0, slot }),
+                        review: Default::default(),
+                        marked: false,
+                        states: Vec::new(),
+                        kind: "Text".into(),
+                        contents: String::new(),
+                        author: String::new(),
+                        rects: Vec::new(),
+                        has_appearance: false,
+                        truncated: false,
+                        locked: false,
+                    })
+                    .collect(),
+                limited: false,
+            };
+            let expected = previous_thread_rows(&comments);
+            assert_eq!(comments.thread_rows(), expected);
+            assert_eq!(expected.len(), count);
+            let old_allocations = allocations(|| {
+                black_box(previous_thread_rows(&comments));
+            });
+            let new_allocations = allocations(|| {
+                black_box(comments.thread_rows());
+            });
+            let mut times = [Vec::with_capacity(passes), Vec::with_capacity(passes)];
+            for pass in 0..passes {
+                for order in 0..2 {
+                    let mode = (pass + order) % 2;
+                    let start = Instant::now();
+                    for _ in 0..100 {
+                        black_box(if mode == 0 {
+                            previous_thread_rows(black_box(&comments))
+                        } else {
+                            black_box(&comments).thread_rows()
+                        });
+                    }
+                    times[mode].push(start.elapsed().as_secs_f64() * 1e6 / 100.0);
+                }
+            }
+            let [old, new] = times.map(|mut values| {
+                values.sort_by(f64::total_cmp);
+                values[values.len() / 2]
+            });
+            assert_eq!(comments.thread_rows(), expected);
+            println!(
+                "  {count} {shape}: {old:.4} -> {new:.4} µs; (alloc,realloc) {old_allocations:?} -> {new_allocations:?}"
+            );
+        }
+    }
 }

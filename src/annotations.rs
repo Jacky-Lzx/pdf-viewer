@@ -152,8 +152,14 @@ impl Comments {
         }
         let mut rows = Vec::with_capacity(self.items.len());
         let mut visited = vec![false; self.items.len()];
+        let mut stack = Vec::new();
         for root in roots.into_iter().chain(0..self.items.len()) {
-            let mut stack = vec![(root, 0)];
+            if visited[root] {
+                continue;
+            }
+            // Each traversal drains the stack. Reuse its storage for the next
+            // root, including the fallback roots that expose malformed cycles.
+            stack.push((root, 0));
             while let Some((index, depth)) = stack.pop() {
                 if std::mem::replace(&mut visited[index], true) {
                     continue;
@@ -1403,6 +1409,72 @@ mod tests {
             read(&pdf, || false).items[0].review,
             ReviewStatus::Completed
         );
+    }
+
+    #[test]
+    fn thread_preorder_matches_reference_with_multiple_roots_and_malformed_relations() {
+        fn visit(
+            index: usize,
+            depth: usize,
+            parents: &[Option<usize>],
+            rows: &mut Vec<(usize, usize)>,
+            seen: &mut [bool],
+        ) {
+            if std::mem::replace(&mut seen[index], true) {
+                return;
+            }
+            rows.push((index, depth));
+            for (child, parent) in parents.iter().enumerate() {
+                if *parent == Some(index) {
+                    visit(child, depth + 1, parents, rows, seen);
+                }
+            }
+        }
+        for mut seed in 0..64_u64 {
+            for count in [0, 1, 2, 7, 24, 96] {
+                let mut comments = Comments::default();
+                for index in 0..count {
+                    let mut comment = draft();
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    comment.page = index / 12;
+                    // Include missing and duplicate IDs as well as valid IDs.
+                    comment.slot = (seed % 7 != 0).then_some(index % 9);
+                    comment.parent = match seed % 5 {
+                        0 => None,
+                        1 => comment.id(),
+                        _ => Some(CommentId {
+                            page: (seed >> 32) as usize % (count / 12 + 2),
+                            slot: (seed >> 48) as usize % 12,
+                        }),
+                    };
+                    comments.items.push(comment);
+                }
+                // Resolve IDs independently with a reverse linear search, then
+                // recursively walk children in source order for this small graph.
+                let parents: Vec<_> = comments
+                    .items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, comment)| {
+                        comment
+                            .parent
+                            .and_then(|id| comments.items.iter().rposition(|c| c.id() == Some(id)))
+                            .filter(|&parent| parent != index)
+                    })
+                    .collect();
+                let mut expected = Vec::new();
+                let mut seen = vec![false; count];
+                for root in (0..count).filter(|&i| parents[i].is_none()).chain(0..count) {
+                    visit(root, 0, &parents, &mut expected, &mut seen);
+                }
+                assert_eq!(
+                    comments.thread_rows(),
+                    expected,
+                    "{count} comments, seed {seed}"
+                );
+                assert_eq!(expected.len(), count);
+            }
+        }
     }
 
     #[test]
