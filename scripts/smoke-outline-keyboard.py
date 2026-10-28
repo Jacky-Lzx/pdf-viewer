@@ -221,9 +221,31 @@ def run(binary):
                 time.sleep(0.3)
                 keyboard.key(" ")
                 expect(24, "shrinking retains a later virtual page button for Space activation")
+                keyboard.key(ESCAPE)
+                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                keyboard.key("b")
+                keyboard.key("g"); keyboard.key("g")
+                keyboard.key("b")
+                expect_sidebar([0, 24], True, "prepare two bookmarks for focus retention")
+                burst([("c", {}), ("a", {"ctrl": True})]
+                      + [(letter, {}) for letter in "001 chapter"])
+                # Filter -> chapter -> delete 0 -> jump 0 -> delete 24 -> jump 24.
+                for _ in range(5):
+                    keyboard.key(0xFF09)
+                keyboard.key("b")
+                expect_sidebar([24], True, "remove an earlier bookmark while a later button is focused")
+                keyboard.key(" ")
+                expect(24, "Space retains the focused bookmark after an earlier row is removed")
+                keyboard.key("g"); keyboard.key("g")
+                keyboard.key("b")
+                expect_sidebar([0, 24], True, "insert an earlier bookmark while retaining focus")
+                keyboard.key(" ")
+                expect(24, "Space retains the focused bookmark after an earlier row is inserted")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion, Escape back to reading and later virtual page focus after resizing")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling, sidebar Tab/Shift+Tab, chapter/bookmark activation, keyboard deletion, Escape back to reading, later virtual page focus after resizing and bookmark focus after earlier edits")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

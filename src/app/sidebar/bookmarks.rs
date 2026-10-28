@@ -23,27 +23,32 @@ impl Pagewing {
         let mut target = None;
         let mut remove = None;
         let mut focus = ListFocus::new(ui, "bookmarks", row_height, height);
+        focus.remap(|page| self.bookmark_pages.binary_search(&page).ok());
         let scroll = focus.scroll(ui, scroll);
         scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
             for row in range {
                 let page = self.bookmark_pages[row];
-                ui.push_id(("bookmark", page), |ui| {
-                    let response = removable_row(
-                        ui,
-                        page == self.nav.page,
-                        self.labels.sidebar_caption(page),
-                        "Delete bookmark",
-                        |ui| {
-                            ui.label(self.labels.sidebar_tooltip(page));
-                        },
-                    );
-                    focus.observe_id(response.focused, row);
-                    match response.action {
-                        Some(RowAction::Jump) => target = Some(page),
-                        Some(RowAction::Remove) => remove = Some(page),
-                        None => {}
-                    }
-                });
+                // A global scope keeps button IDs independent of row position.
+                ui.scope_builder(
+                    egui::UiBuilder::new().id(("sidebar-bookmark", self.id, page)),
+                    |ui| {
+                        let response = removable_row(
+                            ui,
+                            page == self.nav.page,
+                            self.labels.sidebar_caption(page),
+                            "Delete bookmark",
+                            |ui| {
+                                ui.label(self.labels.sidebar_tooltip(page));
+                            },
+                        );
+                        focus.observe_id(response.focused, row, page);
+                        match response.action {
+                            Some(RowAction::Jump) => target = Some(page),
+                            Some(RowAction::Remove) => remove = Some(page),
+                            None => {}
+                        }
+                    },
+                );
             }
         });
         focus.finish(ui);
@@ -312,6 +317,20 @@ mod tests {
             }
         }
         let bookmark = bookmark.expect("Tab must reach the bookmark jump button");
+        app.remove_bookmark(0);
+        settle_sidebar(&mut app, &context, size);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            Some(bookmark),
+            "removing an earlier bookmark must retain the focused target"
+        );
+        app.restore_deleted();
+        settle_sidebar(&mut app, &context, size);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            Some(bookmark),
+            "restoring an earlier bookmark must retain the focused target"
+        );
         app.jump(0);
         settle_sidebar(&mut app, &context, size);
         assert_eq!(context.memory(|memory| memory.focused()), Some(bookmark));
@@ -406,6 +425,73 @@ mod tests {
             assert!(app.reading.bookmarks.is_empty());
             assert!(app.bookmark_pages.is_empty());
         }
+    }
+
+    #[test]
+    fn editing_earlier_bookmarks_keeps_a_virtual_boundary_target_focused() {
+        let (_directory, context, mut app) = app();
+        app.jump(40);
+        settle(&mut app, &context);
+        let key = |key| {
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into()
+        };
+        let mut focused = None;
+        for _ in 0..30 {
+            frame(&mut app, &context, key(egui::Key::Tab));
+            let output = settle(&mut app, &context);
+            if let Some(id) = context.memory(|memory| memory.focused())
+                && context.read_response(id).is_some_and(|response| {
+                    row(&output, 40).is_some_and(|label| {
+                        response.rect.contains_rect(label)
+                            && response.rect.height() < 2.0 * label.height()
+                    })
+                })
+            {
+                focused = Some(id);
+                break;
+            }
+        }
+        let focused = focused.expect("Tab must reach the distant bookmark jump button");
+        // Place the target at the top of the inner viewport. Removing enough
+        // predecessors moves it beyond show_rows' overscan without remapping.
+        let _ = context.run(egui::RawInput::default(), |context| {
+            egui::CentralPanel::default().show(context, |ui| {
+                let id = ui.make_persistent_id(egui::Id::new("bookmarks"));
+                let mut state = egui::scroll_area::State::load(context, id).unwrap();
+                state.offset.y =
+                    40.0 * (Pagewing::sidebar_row_height(ui) + ui.spacing().item_spacing.y);
+                state.store(context, id);
+                app.bookmark_list(ui);
+            });
+        });
+        assert!(row(&settle(&mut app, &context), 40).is_some());
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        for page in 0..12 {
+            app.remove_bookmark(page);
+        }
+        assert!(row(&settle(&mut app, &context), 40).is_some());
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        app.restore_deleted();
+        assert!(row(&settle(&mut app, &context), 40).is_some());
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        app.nav.jump(0);
+        frame(&mut app, &context, key(egui::Key::Space));
+        assert_eq!(app.nav.page, 40, "Space follows the same logical bookmark");
+        app.remove_bookmark(40);
+        settle(&mut app, &context);
+        assert_ne!(
+            context.memory(|memory| memory.focused()),
+            Some(focused),
+            "deleting the focused target must not focus its replacement row"
+        );
     }
 
     #[test]

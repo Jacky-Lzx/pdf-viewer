@@ -12,19 +12,27 @@ pub(super) fn row_focus(response: &Response) -> Option<Id> {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+struct FocusedRow {
+    id: Id,
+    row: usize,
+    key: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 struct Viewport {
     size: Vec2,
     height: f32,
     stride: f32,
     row_height: f32,
-    focused: Option<(Id, usize)>,
+    focused: Option<FocusedRow>,
 }
 
-/// Keep a focused virtual row alive before a resized list chooses its range.
+/// Keep a focused virtual row alive before a resized or edited list chooses its range.
 pub(super) struct ListFocus {
     id: Id,
     previous: Option<Viewport>,
     current: Viewport,
+    tracked: Option<FocusedRow>,
     reveal: Option<usize>,
 }
 
@@ -40,22 +48,36 @@ impl ListFocus {
             focused: None,
         };
         let focused = ui.memory(|memory| memory.focused());
+        let tracked = previous
+            .and_then(|previous| previous.focused)
+            .filter(|row| focused == Some(row.id));
         let reveal = previous.and_then(|previous| {
-            previous.focused.and_then(|(id, row)| {
-                (focused == Some(id)
-                    // A chapter list's height also changes when its outer
-                    // sidebar is wheel-scrolled; that must not pull focus back.
-                    && (previous.size != current.size
-                        || previous.stride != current.stride
-                        || previous.row_height != row_height))
-                    .then_some(row)
+            tracked.and_then(|row| {
+                // A chapter list's height also changes when its outer
+                // sidebar is wheel-scrolled; that must not pull focus back.
+                (previous.size != current.size
+                    || previous.stride != current.stride
+                    || previous.row_height != row_height)
+                    .then_some(row.row)
             })
         });
         Self {
             id,
             previous,
             current,
+            tracked,
             reveal,
+        }
+    }
+
+    /// Resolve a logical target before virtualizing a list that can be edited.
+    pub fn remap(&mut self, row_for: impl FnOnce(usize) -> Option<usize>) {
+        if let Some(tracked) = self.tracked {
+            self.reveal = match row_for(tracked.key) {
+                Some(row) if row != tracked.row => Some(row),
+                Some(_) => self.reveal,
+                None => None,
+            };
         }
     }
 
@@ -77,12 +99,12 @@ impl ListFocus {
     }
 
     pub fn observe(&mut self, response: &Response, row: usize) {
-        self.observe_id(row_focus(response), row);
+        self.observe_id(row_focus(response), row, row);
     }
 
-    pub fn observe_id(&mut self, id: Option<Id>, row: usize) {
+    pub fn observe_id(&mut self, id: Option<Id>, row: usize, key: usize) {
         if let Some(id) = id {
-            self.current.focused = Some((id, row));
+            self.current.focused = Some(FocusedRow { id, row, key });
         }
     }
 
@@ -93,17 +115,17 @@ impl ListFocus {
         self.current.focused = self
             .current
             .focused
-            .filter(|&(id, _)| ui.memory(|memory| memory.has_focus(id)));
+            .filter(|row| ui.memory(|memory| memory.has_focus(row.id)));
         if self.previous == Some(self.current) {
             return;
         }
-        if let Some((id, _)) = self.current.focused
+        if let Some(row) = self.current.focused
             && (self.reveal.is_some()
                 || self.previous.and_then(|previous| previous.focused) != self.current.focused)
         {
             let response = {
                 let _focus = crate::app::shortcuts::preserve_pointer_focus(ui.ctx());
-                ui.ctx().read_response(id)
+                ui.ctx().read_response(row.id)
             };
             // The inner list has finished; reveal the actual row in the outer
             // sidebar too, including when only fonts or card heights changed.

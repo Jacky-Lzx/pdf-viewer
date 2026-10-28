@@ -9,8 +9,10 @@ impl Pagewing {
         let mut target = None;
         let mut remove = None;
         for (&name, mark) in &self.reading.marks {
-            ui.push_id(("mark", name), |ui| {
-                match removable_row(
+            // Names keep their button IDs when earlier marks are edited.
+            ui.scope_builder(
+                egui::UiBuilder::new().id(("sidebar-mark", self.id, name)),
+                |ui| match removable_row(
                     ui,
                     mark.page == self.nav.page,
                     format!("'{name}   {}", self.labels.sidebar_caption(mark.page)),
@@ -25,8 +27,8 @@ impl Pagewing {
                     Some(RowAction::Jump) => target = Some(name),
                     Some(RowAction::Remove) => remove = Some(name),
                     None => {}
-                }
-            });
+                },
+            );
         }
         if let Some(name) = target {
             self.mark(name, MarkAction::Jump);
@@ -108,6 +110,81 @@ mod tests {
                 ],
             );
         }
+    }
+
+    #[test]
+    fn editing_other_marks_retains_focus_and_activates_the_saved_view() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.nav = Navigation::new(80, 0);
+        app.dimensions = vec![[600.0, 800.0]; 80];
+        app.library.sidebar = true;
+        let mark = ReadingMark {
+            page: 40,
+            fit: Fit::Custom(1.75),
+            rotation: 1,
+            continuous: true,
+            facing: false,
+            offset: [0.4, 0.6],
+        };
+        app.reading.marks.insert('a', ReadingMark::default());
+        app.reading.marks.insert('m', mark.clone());
+        app.outline.set_entries(vec![crate::outline::OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(crate::destination::Destination::page(0)),
+            depth: 0,
+        }]);
+        app.focus_contents();
+        let size = egui::vec2(1180.0, 820.0);
+        settle(&mut app, &context, size);
+        let key = |key| {
+            [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into()
+        };
+        let mut focused = None;
+        for _ in 0..16 {
+            frame(&mut app, &context, size, key(egui::Key::Tab));
+            let output = settle(&mut app, &context, size);
+            let (label, _) = text_bounds(&output, "'m");
+            if let Some(id) = context.memory(|memory| memory.focused())
+                && context.read_response(id).is_some_and(|response| {
+                    response.rect.contains_rect(label)
+                        && response.rect.height() < 2.0 * label.height()
+                })
+            {
+                focused = Some(id);
+                break;
+            }
+        }
+        let focused = focused.expect("Tab must reach the named position jump button");
+        app.remove_mark('a');
+        settle(&mut app, &context, size);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        app.restore_deleted();
+        settle(&mut app, &context, size);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        app.mark('b', MarkAction::Set);
+        settle(&mut app, &context, size);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+        frame(&mut app, &context, size, key(egui::Key::Space));
+        assert_eq!(app.nav.page, mark.page);
+        assert_eq!(app.reading.fit, mark.fit);
+        assert_eq!(app.reading.rotation, mark.rotation);
+        assert_eq!(app.reading.continuous, mark.continuous);
+        assert_eq!(app.reading.facing, mark.facing);
+        assert_eq!(app.pending_offset, Some(mark.offset));
+        app.remove_mark('m');
+        settle(&mut app, &context, size);
+        assert_ne!(context.memory(|memory| memory.focused()), Some(focused));
     }
 
     #[test]
