@@ -2,6 +2,8 @@ use super::{MarkAction, Pagewing, appearance};
 use crate::navigation::Fit;
 use eframe::egui::{self, Color32, RichText, Vec2};
 
+mod results;
+
 impl Pagewing {
     pub(super) fn focus_contents(&mut self) {
         if self.outline.is_empty() {
@@ -401,7 +403,7 @@ impl Pagewing {
                 let chapter_focus = self.outline.focus
                     || context
                         .memory(|memory| memory.has_focus(egui::Id::new("pagewing-outline-input")));
-                let mut sidebar_scroll = egui::ScrollArea::vertical();
+                let mut sidebar_scroll = egui::ScrollArea::vertical().animated(false);
                 if self.outline.focus || (resized && chapter_focus) {
                     sidebar_scroll = sidebar_scroll.vertical_scroll_offset(0.0);
                     self.outline.reveal = true;
@@ -462,67 +464,7 @@ impl Pagewing {
                             self.dirty = true;
                         }
                     }
-                    if !self.hits.is_empty() {
-                        ui.add_space(20.0);
-                        ui.label(
-                            RichText::new("SEARCH RESULTS")
-                                .small()
-                                .strong()
-                                .color(appearance::accent(ui)),
-                        );
-                        let mut selected = None;
-                        let row_height = Self::sidebar_row_height(ui);
-                        let font = egui::FontSelection::Default
-                            .resolve_with_fallback(ui.style(), egui::TextStyle::Button.into());
-                        let highlight = if ui.visuals().dark_mode {
-                            Color32::from_rgb(100, 80, 25)
-                        } else {
-                            Color32::from_rgb(250, 220, 125)
-                        };
-                        self.result_text.set_style(font.clone(), highlight);
-                        let mut results = egui::ScrollArea::vertical()
-                            .id_salt("search-results")
-                            .max_height(
-                                (ui.clip_rect().bottom() - ui.cursor().top()).clamp(120.0, 280.0),
-                            );
-                        if let Some(index) = self.reveal_hit.take() {
-                            results = results.vertical_scroll_offset(
-                                index as f32 * (row_height + ui.spacing().item_spacing.y),
-                            );
-                        }
-                        results.show_rows(ui, row_height, self.hits.len(), |ui, range| {
-                            for index in range {
-                                let hit = &self.hits[index];
-                                let labels = &self.labels;
-                                let label = self.result_text.get_or_insert_with(index, || {
-                                    crate::search_result_text::result_label(
-                                        labels.display_name(hit.page),
-                                        &hit.snippet,
-                                        hit.snippet_match.clone(),
-                                        font.clone(),
-                                        highlight,
-                                    )
-                                });
-                                if ui
-                                    .add_sized(
-                                        Vec2::new(ui.available_width(), row_height),
-                                        egui::Button::selectable(
-                                            self.hit_index == Some(index),
-                                            label,
-                                        )
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(&hit.snippet)
-                                    .clicked()
-                                {
-                                    selected = Some(index);
-                                }
-                            }
-                        });
-                        if let Some(index) = selected {
-                            self.select_hit(index);
-                        }
-                    }
+                    self.search_results(ui, viewport, chapter_focus);
                     ui.add_space(20.0);
                     ui.horizontal_wrapped(|ui| {
                         appearance::section(ui, "PAGES");

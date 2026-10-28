@@ -21,6 +21,7 @@ impl Pagewing {
             SearchButton::Next => self.next_hit(false),
             SearchButton::Results => {
                 self.library.sidebar = true;
+                self.reveal_hit = Some(self.hit_index.unwrap_or(0));
                 self.dirty = true;
             }
             SearchButton::Close => {
