@@ -143,3 +143,7 @@ harness = false
 [[bench]]
 name = "status_text"
 harness = false
+
+[[bench]]
+name = "help_filter"
+harness = false

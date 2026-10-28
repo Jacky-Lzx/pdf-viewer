@@ -146,7 +146,21 @@ def run(binary):
                 keyboard.key(ESCAPE)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: same-frame help filter, case-insensitive multi-token matching, copied visible/all shortcuts, empty matches, F1/reset, search/toolbar focus, count/mark cleanup, compact and minimum-size copy/close actions and welcome screen")
+                (config_path.parent / "config.toml").write_text("[shortcuts]\nnext_page = ['x']\n")
+                application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
+                wait_for(keyboard.focus, "reader with remapped page command")
+                expect(0)
+                burst("?next page")
+                copy_matches(["X\tNext page"], ["J / K"])
+                keyboard.key(ESCAPE)
+                keyboard.key("x")
+                expect(1)
+                burst("?next page")
+                copy_matches(["X\tNext page"], ["J / K"])
+                keyboard.key(ESCAPE)
+                keyboard.key("q", ctrl=True)
+                assert application.wait(timeout=8) == 0
+                print("PASS: same-frame help filter, case-insensitive multi-token matching, copied visible/all shortcuts, empty matches, F1/reset, search/toolbar focus, count/mark cleanup, compact and minimum-size copy/close actions, welcome screen and reopened help with a functioning remapped page command")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

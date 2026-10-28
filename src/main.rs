@@ -15,6 +15,7 @@ mod fifo_cache;
 mod file_watch;
 mod fonts;
 mod geometry;
+mod help_catalog;
 mod history;
 mod link_cache;
 mod link_hints;
