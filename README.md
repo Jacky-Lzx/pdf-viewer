@@ -471,60 +471,61 @@ cargo bench --locked --bench text_cache -- 9
 # 页面与预览纹理缓存，包含 egui 对象释放和可见纹理保护
 cargo bench --locked --bench texture_cache -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
-# 显式指定虚拟桌面分辨率，确保窗口与测试坐标一致。
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-install-linux.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-desktop.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-cli.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline-keyboard.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-long-title.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-bookmarks.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-marks.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-page-size.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-tiles.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-fit-height.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-zoom.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-dialog-focus.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-destinations.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-thumbnails.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-preview-layout.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-hints.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-menu.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-link-copy.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection-scroll.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-load.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-options.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-history.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-view-menu.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-phrases.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-results.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-persistence.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-paths.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-recent-remove.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-welcome.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-close.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-load-cancel.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-properties.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-file-watch.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-help.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comments.py target/release/pagewing
+# 启动器使用 Xvfb 原子分配独立的 1280×1024 显示，等待就绪并在结束或取消时清理。
+python3 scripts/test-with-xvfb.py
+python3 scripts/with-xvfb.py python3 scripts/smoke-install-linux.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-desktop.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-cli.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-outline.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-outline-keyboard.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-long-title.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-bookmarks.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-marks.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-page-size.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-tiles.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-continuous.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-fit-height.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-zoom.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-dialog-focus.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-destinations.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-thumbnails.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-preview-layout.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-link-hints.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-link-menu.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-link-copy.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-selection.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-selection-scroll.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-load.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-options.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-history.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-view-menu.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-phrases.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-results.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-search-dense.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-persistence.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-paths.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-recent.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-recent-remove.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-welcome.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-close.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-load-cancel.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-properties.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-file-watch.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-help.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-comments.py target/release/pagewing
 # 顶部和底部控件焦点在宽/窄布局与动态状态间保留，激活按钮不同时滚动页面
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-focus.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-toolbar-history.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-navigation.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-comment-menus.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-input-burst.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-input.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-mouse-history.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-password.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-errors.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-vim-view.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-percentage.py target/release/pagewing
-xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-relative.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-focus.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-toolbar-history.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-comment-navigation.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-comment-menus.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-input-burst.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-mouse-input.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-mouse-history.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-password.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-errors.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-vim-view.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-percentage.py target/release/pagewing
+python3 scripts/with-xvfb.py python3 scripts/smoke-relative.py target/release/pagewing
 ```
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。

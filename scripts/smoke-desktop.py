@@ -45,7 +45,7 @@ class Keyboard:
         self.x11.XOpenDisplay.restype = ctypes.c_void_p
         self.display = self.x11.XOpenDisplay(None)
         if not self.display:
-            raise RuntimeError("No X11 display. Run with xvfb-run -a.")
+            raise RuntimeError("No X11 display. Run with python3 scripts/with-xvfb.py COMMAND.")
         self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
         self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
         self.x11.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]

@@ -70,11 +70,36 @@ def run(binary):
                 except AssertionError as error:
                     raise AssertionError(f"{description}: expected {expected!r}, got {actual!r}") from error
 
-            def filter_comments():
+            def filter_comments(compact=False):
                 keyboard.key("m", ctrl=True, shift=True)
-                keyboard.click((1000, 114))
+                if compact:
+                    # A restored narrow sidebar uses a shorter title row even
+                    # in a wide window. Exercise that layout explicitly.
+                    background = keyboard.pixel((1170, 400))
+                    left = next(x for x in range(800, 1080)
+                                if keyboard.pixel((x, 400)) == background)
+                    keyboard.drag((left, 400), (960, 400))
+
+                def input_position():
+                    # The input is the first filled band below the header.
+                    # Probe its empty right end, away from placeholder glyphs.
+                    # Clicking y=114 hits the bottom border in compact layouts.
+                    background = keyboard.pixel((1170, 100))
+                    top = None
+                    for y in range(90, 145):
+                        if keyboard.pixel((1150, y)) != background:
+                            if top is None:
+                                top = y
+                        elif top is not None:
+                            if 14 <= y - top <= 24:
+                                return 1150, (top + y - 1) // 2
+                            top = None
+                    return None
+
+                keyboard.click(wait_for(input_position, "comment filter input bounds"))
                 for char in "Row":
                     keyboard.key(char.lower(), shift=char.isupper())
+                assert copied() == "Row", "the comment filter must own the actual query before navigation"
 
             def burst(keys):
                 application.send_signal(signal.SIGSTOP)
@@ -149,7 +174,7 @@ def run(binary):
                                                stdout=log, stderr=log)
                 window = wait_for(keyboard.focus, "reopened comment Tab navigation window")
                 resize((1180, 820))
-                filter_comments()
+                filter_comments(compact=True)
                 for _ in range(10):
                     keyboard.key(0xFF09)
                     if selected_card((1180, 820)):
