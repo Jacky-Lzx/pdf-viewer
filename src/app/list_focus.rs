@@ -31,6 +31,10 @@ struct Viewport {
     focused: Option<FocusedRow>,
 }
 
+fn focused_source(context: &egui::Context) -> Option<Id> {
+    super::copy_menu::control_source(context).or_else(|| context.memory(|memory| memory.focused()))
+}
+
 /// Keep a focused virtual row alive before a resized or edited list chooses its range.
 pub(super) struct ListFocus {
     id: Id,
@@ -51,7 +55,7 @@ impl ListFocus {
             row_height,
             focused: None,
         };
-        let focused = ui.memory(|memory| memory.focused());
+        let focused = focused_source(ui.ctx());
         let tracked = previous
             .and_then(|previous| previous.focused)
             .filter(|row| focused == Some(row.id));
@@ -107,7 +111,10 @@ impl ListFocus {
     }
 
     pub fn observe(&mut self, response: &Response, row: usize) {
-        self.observe_id(row_focus(response), row, row);
+        let id = row_focus(response).or_else(|| {
+            super::copy_menu::control_source(&response.ctx).filter(|id| *id == response.id)
+        });
+        self.observe_id(id, row, row);
     }
 
     pub fn observe_id(&mut self, id: Option<Id>, row: usize, key: usize) {
@@ -125,11 +132,14 @@ impl ListFocus {
         self.current.focused = self
             .current
             .focused
-            .filter(|row| ui.memory(|memory| memory.has_focus(row.id)));
+            .filter(|row| focused_source(ui.ctx()) == Some(row.id));
         if self.previous == Some(self.current) {
             return;
         }
         if let Some(row) = self.current.focused
+            // A popup keeps its virtual source alive in the inner list. Only
+            // actual row focus should move the outer sidebar to that row.
+            && ui.memory(|memory| memory.has_focus(row.id))
             && (self.reveal.is_some()
                 || self.previous.and_then(|previous| previous.focused) != self.current.focused)
         {

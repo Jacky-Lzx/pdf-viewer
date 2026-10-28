@@ -39,6 +39,9 @@ impl Pagewing {
             }
             Some(shortcuts::InputButton::Search(action)) => {
                 self.search_button(action);
+                if action == shortcuts::SearchButton::Results {
+                    self.focus_search_results(context);
+                }
                 if matches!(
                     action,
                     shortcuts::SearchButton::Copy

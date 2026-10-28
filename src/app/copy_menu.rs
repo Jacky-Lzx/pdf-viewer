@@ -8,17 +8,32 @@ pub(super) enum Target {
 }
 
 pub(super) fn control_menu_open(context: &egui::Context) -> bool {
+    control_source(context).is_some()
+}
+
+/// Keep the popup's source in a virtual list while its item owns keyboard focus.
+pub(super) fn control_source(context: &egui::Context) -> Option<Id> {
+    open_menu(context)
+        .filter(|menu| menu.target == Target::Control)
+        .map(|menu| menu.owner.widget)
+}
+
+fn open_menu(context: &egui::Context) -> Option<OpenMenu> {
     context
-        .data(|data| data.get_temp::<(Id, Target)>(Id::new("pagewing-open-copy-menu")))
-        .is_some_and(|(id, target)| {
-            target == Target::Control && egui::Popup::is_id_open(context, id)
-        })
+        .data(|data| data.get_temp::<OpenMenu>(Id::new("pagewing-open-copy-menu")))
+        .filter(|menu| egui::Popup::is_id_open(context, menu.owner.menu))
 }
 
 #[derive(Clone, Copy)]
 struct Owner {
     widget: Id,
     menu: Id,
+}
+
+#[derive(Clone, Copy)]
+struct OpenMenu {
+    owner: Owner,
+    target: Target,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -29,12 +44,14 @@ struct State {
     copy_requested: bool,
 }
 
-fn owner_id() -> Id {
-    Id::new("pagewing-focused-copy-menu")
+fn owner_id(widget: Id) -> Id {
+    widget.with("pagewing-copy-menu-owner")
 }
 
 fn focused_owner(context: &egui::Context) -> Option<Owner> {
-    let owner = context.data(|data| data.get_temp::<Owner>(owner_id()))?;
+    let widget = context.memory(|memory| memory.focused())?;
+    let menu = context.data(|data| data.get_temp::<Id>(owner_id(widget)))?;
+    let owner = Owner { widget, menu };
     let _focus = super::shortcuts::preserve_pointer_focus(context);
     context
         .read_response(owner.widget)
@@ -77,9 +94,7 @@ pub(super) fn input_split(
     events: &VecDeque<Event>,
     limit: usize,
 ) -> Option<usize> {
-    let menu_open = context
-        .data(|data| data.get_temp::<(Id, Target)>(Id::new("pagewing-open-copy-menu")))
-        .is_some_and(|(id, _)| egui::Popup::is_id_open(context, id));
+    let menu_open = open_menu(context).is_some();
     let opener = events.iter().take(limit).position(|event| match event {
         Event::PointerButton {
             button: egui::PointerButton::Secondary,
@@ -117,15 +132,11 @@ pub(super) fn input_split(
 /// Focus owns keyboard copying; popup IDs scope requests to the current source.
 /// Only an actual copy allocates text. Keyboard menus follow their owner on resize.
 pub(super) fn show(response: &Response, id: Id, label: &str, text: &str, target: Target) -> bool {
-    if response.has_focus() && response.enabled() {
+    if response.enabled() {
+        // Shift+Tab can take effect at the start of a frame, before this row
+        // is drawn. Register every eligible source so the next key can use it.
         response.ctx.data_mut(|data| {
-            data.insert_temp(
-                owner_id(),
-                Owner {
-                    widget: response.id,
-                    menu: id,
-                },
-            );
+            data.insert_temp(owner_id(response.id), id);
         });
     }
     let mut state = response
@@ -182,9 +193,18 @@ pub(super) fn show(response: &Response, id: Id, label: &str, text: &str, target:
     });
     let open = egui::Popup::is_id_open(&response.ctx, id);
     if open {
-        response
-            .ctx
-            .data_mut(|data| data.insert_temp(Id::new("pagewing-open-copy-menu"), (id, target)));
+        response.ctx.data_mut(|data| {
+            data.insert_temp(
+                Id::new("pagewing-open-copy-menu"),
+                OpenMenu {
+                    owner: Owner {
+                        widget: response.id,
+                        menu: id,
+                    },
+                    target,
+                },
+            );
+        });
     }
     if state.keyboard && state.was_open && !open {
         // A mouse dismissal can focus another control before this row is

@@ -200,40 +200,35 @@ impl InputButtons {
         events: &std::collections::VecDeque<Event>,
         limit: usize,
     ) -> Option<usize> {
-        let focused = context.memory(|memory| memory.focused());
         let opener = events.iter().take(limit).position(|event| {
-            let keyboard = matches!(event, Event::Key {
-                key: Key::Enter | Key::Space,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.is_none());
-            let pointer = match event {
-                Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    ..
-                } => Some(*pos),
-                _ => None,
-            };
-            if !keyboard && pointer.is_none() {
-                return false;
-            }
             self.menus().any(|id| {
-                !egui::Popup::is_id_open(context, id.with("popup"))
-                    && context.read_response(id).is_some_and(|response| {
-                        response.enabled()
-                            && ((keyboard && focused == Some(id))
-                                || pointer.is_some_and(|pos| {
-                                    response.interact_rect.contains(pos)
-                                        && context
-                                            .layer_id_at(pos)
-                                            .is_none_or(|layer| layer == response.layer_id)
-                                }))
-                    })
+                button_activated(context, event, id)
+                    && !egui::Popup::is_id_open(context, id.with("popup"))
             })
         })?;
+        events
+            .iter()
+            .take(limit)
+            .enumerate()
+            .skip(opener + 1)
+            .find_map(|(index, event)| super::focus_input::changes_input(event).then_some(index))
+    }
+
+    /// Results transfers focus into a different, possibly newly visible panel.
+    pub fn results_input_split(
+        &self,
+        context: &egui::Context,
+        events: &std::collections::VecDeque<Event>,
+        limit: usize,
+    ) -> Option<usize> {
+        if egui::Popup::is_any_open(context) {
+            return None;
+        }
+        let id = self.search_results?;
+        let opener = events
+            .iter()
+            .take(limit)
+            .position(|event| button_activated(context, event, id))?;
         events
             .iter()
             .take(limit)
@@ -355,6 +350,40 @@ impl InputButtons {
         }
         None
     }
+}
+
+fn button_activated(context: &egui::Context, event: &Event, id: Id) -> bool {
+    let keyboard = matches!(event, Event::Key {
+        key: Key::Enter | Key::Space,
+        pressed: true,
+        modifiers,
+        ..
+    } if modifiers.is_none());
+    let pointer = match event {
+        Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            ..
+        } => Some(*pos),
+        _ => None,
+    };
+    if !keyboard && pointer.is_none() {
+        return false;
+    }
+    if keyboard && !context.memory(|memory| memory.has_focus(id)) {
+        return false;
+    }
+    context.read_response(id).is_some_and(|response| {
+        response.enabled()
+            && (keyboard
+                || pointer.is_some_and(|pos| {
+                    response.interact_rect.contains(pos)
+                        && context
+                            .layer_id_at(pos)
+                            .is_none_or(|layer| layer == response.layer_id)
+                }))
+    })
 }
 
 /// `keys` already toggled the menu; drawing must not toggle it again after

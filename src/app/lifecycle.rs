@@ -87,6 +87,7 @@ impl Pagewing {
         self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
+        self.result_focus_origin = None;
         self.search_navigation.clear();
         self.query = String::new();
         self.search_due = None;

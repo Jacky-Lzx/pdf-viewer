@@ -129,44 +129,44 @@ def run(binary):
                 assert keyboard.clipboard() == snippet, "cancelling the menu changes the clipboard"
                 expect(79, "cancelling the snippet menu preserves navigation")
 
-                # Enter the results using real Tab traversal from a known
-                # input. The long outline and bookmark lists precede them;
-                # mouse selection and keyboard focus are independent.
+                # Results focuses the selected match without traversing the
+                # long outline and bookmarks or changing the reading page.
+                keyboard.key("k", shift=True)
+                expect(78, "read a different page while retaining the selected match")
                 keyboard.key("f", ctrl=True)
                 keyboard.key("a", ctrl=True)
                 keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "Needle"
-                for _ in range(256):
+                for _ in range(5):
                     keyboard.key(TAB)
-                    keyboard.key("c", ctrl=True)
-                    if keyboard.clipboard() == snippet:
-                        break
-                else:
-                    raise AssertionError("Tab traversal did not reach the selected search result")
+                burst([(ENTER, {}), ("c", {"ctrl": True})])
+                assert keyboard.clipboard() == snippet, "Results must focus the selected row before queued copying"
+                expect(78, "focusing a result preserves the reading page")
                 # Copying belongs to focus, not the selected search match.
                 keyboard.key(TAB, shift=True)
                 keyboard.key("c", ctrl=True)
                 previous_snippet = keyboard.clipboard()
                 assert "Needle 079" in previous_snippet and "Needle 080" not in previous_snippet, previous_snippet
-                expect(79, "copying a focused neighboring snippet preserves navigation")
+                expect(78, "copying a focused neighboring snippet preserves navigation")
                 assert selected_result(540), "copying changes the selected search match"
                 keyboard.key(TAB)
                 burst([(F10, {"shift": True}), (ENTER, {})])
                 assert keyboard.clipboard() == snippet, "fast keyboard menu activation must copy the focused result"
-                expect(79, "keyboard menu activation preserves navigation")
+                expect(78, "keyboard menu activation preserves navigation")
 
-                keyboard.key(TAB, shift=True)
-                keyboard.key(F10, shift=True)
+                burst([(TAB, {"shift": True}), (F10, {"shift": True})])
                 for width, height in ((860, 240), (1180, 820), (860, 540)):
                     resize(width, height)
                 keyboard.key(ENTER)
                 assert keyboard.clipboard() == previous_snippet, "resizing must retain the keyboard snippet menu"
-                expect(79, "resized keyboard menu preserves navigation")
+                expect(78, "resized keyboard menu preserves navigation")
                 keyboard.key(TAB)
                 keyboard.key(F10, shift=True)
                 burst([(ESCAPE, {}), ("c", {"ctrl": True})])
                 assert keyboard.clipboard() == snippet, "Escape must restore row focus before a queued copy"
-                expect(79, "menu cancellation and restored-focus copying preserve navigation")
+                expect(78, "menu cancellation and restored-focus copying preserve navigation")
+                keyboard.key(ENTER)
+                expect(79, "Enter follows the focused result after Results and copying")
                 keyboard.key(ESCAPE)
                 position = wait_for(lambda: selected_result(540), "keyboard copying preserves the selected match")
                 keyboard.wheel(position, steps=12)

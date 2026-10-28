@@ -151,7 +151,12 @@ def run(binary):
                 expect(3, "Tab+Enter on Next selects exactly one later match")
                 keyboard.key(0xFF09); keyboard.key(" ")
                 wait_for(lambda: json.loads(config_path.read_text())["sidebar"], "keyboard Results button opens sidebar")
-                keyboard.key(0xFF09); keyboard.key(" ")
+                # Results now transfers focus into its list. Return to Find
+                # to continue checking the remaining search-bar controls.
+                keyboard.key("f", ctrl=True)
+                for _ in range(6):
+                    keyboard.key(0xFF09)
+                keyboard.key(" ")
                 assert keyboard.clipboard().startswith("Pagewing search snippets\n"), "keyboard Copy results exports the current matches"
                 keyboard.key(0xFF09)  # History menu.
                 keyboard.key(0xFF09); keyboard.key(" ")

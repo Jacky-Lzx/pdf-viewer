@@ -60,29 +60,26 @@ impl Pagewing {
         for event in std::mem::take(&mut self.deferred_input).into_iter().rev() {
             events.push_front(event);
         }
-        let tab = tab_split(&events);
-        let menu =
-            self.input_buttons
-                .menu_input_split(context, &events, tab.unwrap_or(events.len()));
-        let context_menu =
-            super::copy_menu::input_split(context, &events, menu.or(tab).unwrap_or(events.len()));
+        // Each detector can shorten the current prefix. Later detectors never
+        // inspect input already held behind an earlier focus transition.
+        let mut split = tab_split(&events);
+        split = self
+            .input_buttons
+            .menu_input_split(context, &events, split.unwrap_or(events.len()))
+            .or(split);
+        split = super::copy_menu::input_split(context, &events, split.unwrap_or(events.len()))
+            .or(split);
+        split = self
+            .input_buttons
+            .results_input_split(context, &events, split.unwrap_or(events.len()))
+            .or(split);
         // A bar can disappear before a later activation in the same native
         // batch. Establish its new focus before reading old button responses.
-        let controls = self.reading_controls_input_split(
-            context,
-            &events,
-            context_menu.or(menu).or(tab).unwrap_or(events.len()),
-        );
-        let comment = self.comment_input_split(
-            context,
-            &events,
-            controls
-                .or(context_menu)
-                .or(menu)
-                .or(tab)
-                .unwrap_or(events.len()),
-        );
-        if let Some(split) = comment.or(controls).or(context_menu).or(menu).or(tab) {
+        split = self
+            .reading_controls_input_split(context, &events, split.unwrap_or(events.len()))
+            .or(split);
+        let comment = self.comment_input_split(context, &events, split.unwrap_or(events.len()));
+        if let Some(split) = comment.or(split) {
             input.events.extend(events.drain(..split));
             if comment.is_some() {
                 self.comments.filter_input = events;

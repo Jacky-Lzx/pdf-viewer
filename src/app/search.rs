@@ -53,11 +53,33 @@ impl Pagewing {
         self.result_text.clear();
         self.hit_index = None;
         self.reveal_hit = None;
+        self.result_focus_origin = None;
         self.scanned = 0;
         self.scan_total = self.nav.count;
         self.search_complete = self.query.trim().is_empty();
         self.search_limited = false;
         self.search_due = (!self.search_complete).then_some(Instant::now());
+    }
+
+    pub(super) fn focus_search_results(&mut self, context: &egui::Context) {
+        self.search_focus = false;
+        self.outline.cancel_input();
+        self.nav.clear_prefix();
+        self.hints.cancel();
+        self.mark_action = None;
+        self.result_focus_origin = self.input_buttons.search_results;
+        if let Some(origin) = self.result_focus_origin {
+            // Pointer activation must establish the same owner as Enter/Space.
+            // If results arrive later, a changed focus cancels the handoff.
+            context.memory_mut(|memory| memory.request_focus(origin));
+        }
+    }
+
+    pub(super) fn result_focus_pending(&mut self, context: &egui::Context) -> bool {
+        self.result_focus_origin = self.result_focus_origin.filter(|origin| {
+            self.search_open && context.memory(|memory| memory.has_focus(*origin))
+        });
+        self.result_focus_origin.is_some()
     }
 
     pub(super) fn change_search(&mut self) {
@@ -160,6 +182,7 @@ impl Pagewing {
             self.search_region = None;
             self.copy_search_requested = false;
             self.search_run_requested = None;
+            self.result_focus_origin = None;
             return;
         }
         // Apply after TextEdit so a same-frame edit followed by Stop stops the
@@ -211,7 +234,9 @@ impl Pagewing {
                             ui.weak(format!("{} / {} pages", self.scanned, self.scan_total));
                         }
                     }
-                    self.input_buttons.search_results = Some(appearance::action_button(ui, "search-results", egui::Button::new("Results")).id);
+                    self.input_buttons.search_results = Some(appearance::action_button(ui, "search-results", egui::Button::new("Results"))
+                        .on_hover_text("Focus the current search result without leaving the reading page; Enter to follow, Ctrl/Cmd+C to copy")
+                        .id);
                     self.input_buttons.search_copy = Some(
                         ui.add_enabled_ui(!self.hits.is_empty(), |ui| appearance::action_button(ui, "search-copy", egui::Button::new("Copy results"))).inner
                             .on_hover_text("Copy the available search snippets, including results outside the viewport")
@@ -249,6 +274,9 @@ impl Pagewing {
                 });
             });
         self.search_region = Some((panel.response.layer_id, panel.response.rect));
+        // Validate even with no hits: leaving and later returning to this
+        // button must not revive a pending focus transfer.
+        self.result_focus_pending(context);
     }
 
     fn copy_search_results(&mut self, context: &egui::Context) {
