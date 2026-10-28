@@ -1994,28 +1994,6 @@ impl Pagewing {
         self.reload_if_changed(context);
     }
 
-    fn file_change_notice(&mut self, context: &egui::Context, canvas: egui::Rect) {
-        egui::Area::new(egui::Id::new("file-change-notice"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(canvas.center_top() + Vec2::new(0.0, 12.0))
-            .pivot(egui::Align2::CENTER_TOP)
-            .show(context, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("PDF changed on disk.");
-                        let reload = ui
-                            .add_enabled(!self.loading, egui::Button::new("Reload"))
-                            .on_hover_text(format!(
-                                "{} — keep current reading position",
-                                self.library.shortcuts.label("reload")
-                            ));
-                        self.input_buttons.reload_changed = Some(reload.id);
-                        self.input_buttons.dismiss_change = Some(ui.button("Dismiss").id);
-                    });
-                });
-            });
-    }
-
     fn highlights(
         &self,
         painter: &egui::Painter,

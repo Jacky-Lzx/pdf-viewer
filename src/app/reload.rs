@@ -2,6 +2,40 @@ use super::Pagewing;
 use eframe::egui;
 
 impl Pagewing {
+    pub(super) fn file_change_notice(&mut self, context: &egui::Context, canvas: egui::Rect) {
+        // A narrow canvas may share the reader with a sidebar. Let the notice
+        // use the window width while keeping it between the reader bars.
+        let screen = context.content_rect();
+        let bounds = egui::Rect::from_min_max(
+            egui::pos2(screen.left() + 8.0, canvas.top() + 4.0),
+            egui::pos2(screen.right() - 8.0, canvas.bottom() - 4.0),
+        );
+        egui::Area::new(egui::Id::new("file-change-notice"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(canvas.center_top() + egui::vec2(0.0, 12.0))
+            .pivot(egui::Align2::CENTER_TOP)
+            .constrain_to(bounds)
+            .show(context, |ui| {
+                ui.set_max_width(bounds.width());
+                let frame = egui::Frame::popup(ui.style());
+                let width = (bounds.width() - frame.total_margin().sum().x).max(1.0);
+                frame.show(ui, |ui| {
+                    ui.set_max_width(width);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("PDF changed on disk.");
+                        let reload = ui
+                            .add_enabled(!self.loading, egui::Button::new("Reload"))
+                            .on_hover_text(format!(
+                                "{} — keep current reading position",
+                                self.library.shortcuts.label("reload")
+                            ));
+                        self.input_buttons.reload_changed = Some(reload.id);
+                        self.input_buttons.dismiss_change = Some(ui.button("Dismiss").id);
+                    });
+                });
+            });
+    }
+
     /// The worker debounces disk writes. Consume each change once, and defer
     /// while an editor or gesture still owns the current document snapshot.
     pub(super) fn reload_if_changed(&mut self, context: &egui::Context) {
@@ -41,6 +75,96 @@ mod tests {
         let mut bytes = Vec::new();
         document.save_to(&mut bytes).unwrap();
         bytes
+    }
+
+    #[test]
+    fn file_change_notice_keeps_its_actions_visible_in_narrow_windows() {
+        let root = tempfile::tempdir().unwrap();
+        let context = Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, root.path().join("library.json"));
+        for size in super::super::dialog::TEST_SIZES {
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, size);
+            for (sidebar, top) in [(false, 64.0), (true, 64.0), (false, 108.0), (true, 108.0)] {
+                let canvas = Rect::from_min_max(
+                    egui::pos2(if sidebar { size.x * 0.5 } else { 0.0 }, top),
+                    egui::pos2(size.x, size.y - 36.0),
+                );
+                let mut output = egui::FullOutput::default();
+                for _ in 0..4 {
+                    output = context.run(
+                        RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |context| app.file_change_notice(context, canvas),
+                    );
+                }
+                for label in ["Reload", "Dismiss"] {
+                    let (clip, rect) = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == label => Some((
+                                shape.clip_rect,
+                                Rect::from_min_size(text.pos, text.galley.size()),
+                            )),
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert!(
+                        screen.contains_rect(rect) && clip.contains_rect(rect),
+                        "{label} at {size:?} (sidebar: {sidebar}): {rect:?} clipped by {clip:?}"
+                    );
+                }
+                for id in [
+                    app.input_buttons.reload_changed.unwrap(),
+                    app.input_buttons.dismiss_change.unwrap(),
+                ] {
+                    let response = context.read_response(id).unwrap();
+                    assert!(screen.contains_rect(response.rect));
+                    assert!(response.interact_rect.contains_rect(response.rect));
+                }
+                let notice = context
+                    .memory(|memory| memory.area_rect(egui::Id::new("file-change-notice")))
+                    .unwrap();
+                let reader = Rect::from_min_max(egui::pos2(0.0, top), canvas.max);
+                assert!(
+                    reader.contains_rect(notice),
+                    "{notice:?} outside {reader:?}"
+                );
+
+                let position = context
+                    .read_response(app.input_buttons.dismiss_change.unwrap())
+                    .unwrap()
+                    .rect
+                    .center();
+                app.file_changed = true;
+                app.auto_reload_pending = true;
+                for pressed in [true, false] {
+                    let _ = context.run(
+                        RawInput {
+                            screen_rect: Some(screen),
+                            events: vec![
+                                egui::Event::PointerMoved(position),
+                                egui::Event::PointerButton {
+                                    pos: position,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        |context| {
+                            app.keys(context);
+                            app.file_change_notice(context, canvas);
+                        },
+                    );
+                }
+                assert!(!app.file_changed && !app.auto_reload_pending);
+            }
+        }
     }
 
     fn frame(app: &mut Pagewing, context: &Context) -> egui::FullOutput {
