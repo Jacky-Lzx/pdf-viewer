@@ -28,6 +28,31 @@ pub(super) fn filter_step(key: Key, modifiers: Modifiers) -> Option<isize> {
     }
 }
 
+pub(super) fn filter_motion(
+    key: Key,
+    modifiers: Modifiers,
+) -> Option<crate::list_navigation::Motion> {
+    use crate::list_navigation::Motion;
+    if let Some(delta) = filter_step(key, modifiers) {
+        return Some(Motion::Step(delta));
+    }
+    if modifiers.is_none() {
+        match key {
+            Key::PageUp => Some(Motion::Page(-1)),
+            Key::PageDown => Some(Motion::Page(1)),
+            _ => None,
+        }
+    } else if modifiers.command && !modifiers.alt && !modifiers.shift {
+        match key {
+            Key::Home => Some(Motion::First),
+            Key::End => Some(Motion::Last),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// Reveal focus transitions and viewport changes without undoing manual scroll.
 pub(super) fn reveal_focused_control(ui: &mut Ui, viewport: Vec2) {
     if ui.is_sizing_pass() {

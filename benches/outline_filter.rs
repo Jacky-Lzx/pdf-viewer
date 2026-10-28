@@ -4,6 +4,9 @@ mod destination;
 #[allow(dead_code, unused_imports)]
 #[path = "../src/geometry.rs"]
 mod geometry;
+#[allow(dead_code)]
+#[path = "../src/list_navigation.rs"]
+mod list_navigation;
 #[allow(dead_code, unused_imports)]
 #[path = "../src/navigation.rs"]
 mod navigation;

@@ -411,7 +411,6 @@ impl Pagewing {
                 continue;
             }
             if let Some(picker) = &mut self.recent_picker {
-                use crate::recent::Motion;
                 let filter_focused = picker.focus
                     || context
                         .memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")));
@@ -420,32 +419,13 @@ impl Pagewing {
                 if key == Key::Enter && filter_focused {
                     picker.confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if filter_focused && let Some(delta) = shortcuts::filter_step(key, modifiers)
+                } else if filter_focused
+                    && let Some(motion) = shortcuts::filter_motion(key, modifiers)
                 {
-                    picker.motions.push(Motion::Step(delta));
+                    picker.motions.push(motion);
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                     });
-                } else if filter_focused
-                    && modifiers.is_none()
-                    && matches!(key, Key::PageUp | Key::PageDown)
-                {
-                    picker
-                        .motions
-                        .push(Motion::Page(if key == Key::PageUp { -1 } else { 1 }));
-                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if filter_focused
-                    && modifiers.command
-                    && !modifiers.alt
-                    && !modifiers.shift
-                    && matches!(key, Key::Home | Key::End)
-                {
-                    picker.motions.push(if key == Key::Home {
-                        Motion::First
-                    } else {
-                        Motion::Last
-                    });
-                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 }
                 continue;
             }
@@ -473,8 +453,8 @@ impl Pagewing {
                 if key == Key::Enter {
                     self.outline.confirm = true;
                     context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
-                } else if let Some(delta) = shortcuts::filter_step(key, modifiers) {
-                    self.outline.motions.push(delta);
+                } else if let Some(motion) = shortcuts::filter_motion(key, modifiers) {
+                    self.outline.motions.push(motion);
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                     });

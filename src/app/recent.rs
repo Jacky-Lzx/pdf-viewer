@@ -89,9 +89,9 @@ impl Pagewing {
                     .show_viewport(ui, |ui, viewport| {
                         if !ui.is_sizing_pass() {
                             let spacing = ui.spacing().item_spacing.y;
-                            let page_rows =
-                                ((viewport.height() + spacing) / (row_height + spacing)).floor()
-                                    as usize;
+                            let page_rows = crate::list_navigation::page_rows(
+                                viewport.height(), row_height, spacing,
+                            );
                             picker.apply_motions(page_rows);
                             if std::mem::take(&mut picker.confirm) {
                                 chosen = picker.selected_path().map(ToOwned::to_owned);

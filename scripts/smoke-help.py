@@ -87,7 +87,7 @@ def run(binary):
                 assert len(copied.splitlines()) == 4, copied
                 query("")
                 # The scroll content and vertical scroll bar precede the copy button.
-                copy_matches(["Zoom in / out", "Toggle bookmark", "Copy page text", "Go to page dialog"], tabs=3)
+                copy_matches(["Zoom in / out", "Toggle bookmark", "Copy page text", "Go to page dialog", "PageUp/PageDown", "chapter or recent filter"], tabs=3)
                 query("jkgdi missing")
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
                 assert keyboard.clipboard() == "jkgdi missing"
@@ -148,7 +148,7 @@ def run(binary):
                 assert application.wait(timeout=8) == 0
                 (config_path.parent / "config.toml").write_text("[shortcuts]\nnext_page = ['x']\n")
                 application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
-                wait_for(keyboard.focus, "reader with remapped page command")
+                window = wait_for(keyboard.focus, "reader with remapped page command")
                 expect(0)
                 burst("?next page")
                 copy_matches(["X\tNext page"], ["J / K"])
@@ -157,6 +157,12 @@ def run(binary):
                 expect(1)
                 burst("?next page")
                 copy_matches(["X\tNext page"], ["J / K"])
+                keyboard.key(ESCAPE)
+                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                burst("?pageup")
+                copy_matches(["PageUp/PageDown", "chapter or recent filter"])
                 keyboard.key(ESCAPE)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0

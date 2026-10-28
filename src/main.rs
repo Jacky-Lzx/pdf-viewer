@@ -21,6 +21,7 @@ mod link_cache;
 mod link_hints;
 mod link_visibility;
 mod links;
+mod list_navigation;
 #[cfg(target_os = "macos")]
 mod macos_open;
 mod navigation;

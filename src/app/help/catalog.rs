@@ -1,3 +1,8 @@
+const FILTER_NAVIGATION: (&str, &str) = (
+    "PageUp/PageDown · Ctrl/Cmd+Home/End",
+    "Move by visible rows / to first or last result (chapter or recent filter)",
+);
+
 pub(super) const SHORTCUTS: &[(&str, &str)] = &[
     ("j / k / h / l", "Scroll down / up / left / right"),
     ("J / K   or   ] / [", "Next / previous page"),
@@ -72,6 +77,7 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
         "c",
         "Find chapter by keywords · ↑/↓ or Ctrl+j/k · Enter to follow",
     ),
+    FILTER_NAVIGATION,
     (
         "v, drag, then y",
         "Select and copy text (Ctrl/Cmd+C also works)",
@@ -121,6 +127,7 @@ pub(super) const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub(super) const FIXED_SHORTCUTS: &[(&str, &str)] = &[
+    FILTER_NAVIGATION,
     ("gg / 42gg / 42 Enter", "First page / counted page"),
     ("Backspace", "Edit count and cancel unfinished g/z command"),
     (

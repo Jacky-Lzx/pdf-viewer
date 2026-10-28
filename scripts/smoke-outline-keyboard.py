@@ -68,6 +68,14 @@ def run(binary):
                     keyboard.key("c", ctrl=True)
                     assert keyboard.clipboard() == "chapter", "Shift+arrows select chapter filter text"
                 keyboard.key(ESCAPE)
+                burst([("c", {}), (0xFF50, {"ctrl": True}), (0xFF56, {}), (ENTER, {})])
+                expect(7, "PageDown selects seven visible chapter rows before confirming")
+                burst([("c", {}), (0xFF57, {"ctrl": True}), (0xFF56, {}), (0xFF52, {}), (ENTER, {})])
+                expect(78, "Ctrl+End then PageDown then Up clamps each event in order")
+                burst([("c", {}), (0xFF50, {"ctrl": True}), (0xFF55, {}), (0xFF54, {}), (ENTER, {})])
+                expect(1, "Ctrl+Home then PageUp then Down clamps each event in order")
+                burst([("c", {}), (0xFF50, {"ctrl": True}), (ENTER, {})])
+                expect(0, "Ctrl+Home restores the first chapter")
                 burst([("c", {}), ("k", {"ctrl": True}), ("j", {"ctrl": True})])
                 keyboard.key(ENTER)
                 expect(1, "same-frame up at the first chapter then down keeps event order")
@@ -134,9 +142,11 @@ def run(binary):
                          "first chapter remains visible at minimum size")
                 keyboard.key(ENTER)
                 expect(0, "minimum-size navigation reaches the first chapter")
+                burst([("c", {}), (0xFF50, {"ctrl": True}), (0xFF56, {}), (ENTER, {})])
+                expect(2, "minimum-size PageDown moves by two visible chapter rows")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 chapter rows, Shift+arrow text selection, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
+                print("PASS: 80 chapter rows, Shift+arrow text selection, viewport-sized PageUp/PageDown and Ctrl+Home/End, ordered boundary actions, reordered multiword filters, first/last keyboard navigation, actual selection visibility, compact/short/minimum layouts, selection retained across resizing, exact destination text, filtering after scrolling and outer sidebar focus")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

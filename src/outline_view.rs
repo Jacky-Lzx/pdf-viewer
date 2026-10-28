@@ -1,4 +1,4 @@
-use crate::outline::OutlineEntry;
+use crate::{list_navigation::Motion, outline::OutlineEntry};
 use std::collections::HashSet;
 
 /// Cached preorder tree: only rebuild visible rows when its filter or folds change.
@@ -13,7 +13,7 @@ pub struct OutlineView {
     selected: Option<usize>,
     pub query: String,
     pub focus: bool,
-    pub motions: Vec<isize>,
+    pub motions: Vec<Motion>,
     pub confirm: bool,
     pub reveal: bool,
 }
@@ -84,11 +84,11 @@ impl OutlineView {
         self.confirm = false;
     }
 
-    pub fn apply_motions(&mut self) {
+    pub fn apply_motions(&mut self, page_rows: usize) {
         // Reuse the input buffer while preserving each boundary clamp.
         let mut motions = std::mem::take(&mut self.motions);
-        for delta in motions.drain(..) {
-            self.step(delta);
+        for motion in motions.drain(..) {
+            self.step(motion.delta(page_rows));
         }
         self.motions = motions;
     }
@@ -354,7 +354,7 @@ mod tests {
         tree.select(2);
         assert_eq!(tree.selected(), Some(0), "hidden rows cannot be selected");
         tree.focus = true;
-        tree.motions.push(5);
+        tree.motions.push(Motion::Step(5));
         tree.confirm = true;
         tree.cancel_input();
         assert!(!tree.focus && !tree.confirm);

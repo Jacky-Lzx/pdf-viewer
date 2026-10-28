@@ -1,3 +1,4 @@
+use crate::list_navigation::Motion;
 use std::path::{Path, PathBuf};
 
 struct Entry {
@@ -5,13 +6,6 @@ struct Entry {
     folded: String,
     label: String,
     display: String,
-}
-
-pub enum Motion {
-    Step(isize),
-    Page(isize),
-    First,
-    Last,
 }
 
 pub struct RecentPicker {
@@ -91,14 +85,8 @@ impl RecentPicker {
     pub fn apply_motions(&mut self, page_rows: usize) {
         // Clamp each event in order. Summing up/down first loses movement at edges.
         let mut motions = std::mem::take(&mut self.motions);
-        let page_rows = page_rows.clamp(1, isize::MAX as usize) as isize;
         for motion in motions.drain(..) {
-            self.step(match motion {
-                Motion::Step(delta) => delta,
-                Motion::Page(direction) => direction.saturating_mul(page_rows),
-                Motion::First => isize::MIN,
-                Motion::Last => isize::MAX,
-            });
+            self.step(motion.delta(page_rows));
         }
         self.motions = motions;
     }
