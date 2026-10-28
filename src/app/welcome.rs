@@ -194,6 +194,9 @@ mod tests {
                 .path()
                 .join(format!("Recent document {index}.pdf"));
             std::fs::write(&path, include_bytes!("../../assets/pagewing-guide.pdf")).unwrap();
+            // Opening a document canonicalizes its path, including macOS's
+            // /var -> /private/var temporary-directory symlink.
+            let path = std::fs::canonicalize(path).unwrap();
             app.library.recent.push(ReadingState {
                 path,
                 page: index,
