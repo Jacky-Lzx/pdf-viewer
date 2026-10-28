@@ -22,23 +22,48 @@ pub struct OutlineView {
 
 impl OutlineView {
     pub fn set_entries(&mut self, entries: Vec<OutlineEntry>) {
-        *self = Self::default();
-        self.subtree_end = vec![entries.len(); entries.len()];
+        *self = Self::prepare(entries, || false).unwrap();
+    }
+
+    /// Prepare searchable titles and tree indexes before handing a loaded
+    /// document to the UI. A superseded load can stop between bounded batches.
+    pub fn prepare(
+        entries: Vec<OutlineEntry>,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> Option<Self> {
+        if cancelled() {
+            return None;
+        }
+        let mut prepared = Self {
+            subtree_end: vec![entries.len(); entries.len()],
+            parents: Vec::with_capacity(entries.len()),
+            folded_titles: Vec::with_capacity(entries.len()),
+            visible: Vec::with_capacity(entries.len()),
+            ..Default::default()
+        };
         let mut ancestors: Vec<usize> = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
+            if index != 0 && index % 64 == 0 && cancelled() {
+                return None;
+            }
             while ancestors
                 .last()
                 .is_some_and(|&parent| entries[parent].depth >= entry.depth)
             {
-                self.subtree_end[ancestors.pop().unwrap()] = index;
+                prepared.subtree_end[ancestors.pop().unwrap()] = index;
             }
-            self.parents.push(ancestors.last().copied());
+            prepared.parents.push(ancestors.last().copied());
             ancestors.push(index);
-            self.folded_titles
+            prepared
+                .folded_titles
                 .push(caseless::default_case_fold_str(&entry.title));
         }
-        self.entries = entries;
-        self.refilter();
+        if cancelled() {
+            return None;
+        }
+        prepared.entries = entries;
+        prepared.refilter();
+        (!cancelled()).then_some(prepared)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -209,6 +234,59 @@ mod tests {
             .collect(),
         );
         tree
+    }
+
+    #[test]
+    fn prepared_outline_is_ready_for_unicode_filters_folds_and_navigation() {
+        let mut prepared = OutlineView::prepare(tree().entries, || false).unwrap();
+        assert_eq!(prepared.visible(), [0, 1, 2, 3, 4, 5]);
+        assert_eq!(prepared.selected(), Some(0));
+        assert!(prepared.query.is_empty() && prepared.motions.is_empty());
+        assert!(!prepared.focus && !prepared.confirm);
+        assert!(prepared.reveal);
+        prepared.toggle(1);
+        prepared.query = "STRASSE".into();
+        prepared.refilter();
+        assert_eq!(prepared.visible(), [0, 1, 2]);
+        assert_eq!(prepared.selected(), Some(2));
+        prepared.query.clear();
+        prepared.refilter();
+        assert_eq!(prepared.visible(), [0, 1, 3, 4, 5]);
+        assert_eq!(prepared.selected(), Some(1));
+        prepared.step(1);
+        assert_eq!(prepared.selected(), Some(3));
+    }
+
+    #[test]
+    fn outline_preparation_stops_before_start_during_titles_and_before_publication() {
+        assert!(OutlineView::prepare(Vec::new(), || true).is_none());
+        assert!(OutlineView::prepare(tree().entries, || true).is_none());
+        let entries: Vec<_> = (0..10_000)
+            .map(|index| OutlineEntry {
+                title: format!("Chapter {index} — Straße 中文"),
+                destination: None,
+                depth: index % 8,
+            })
+            .collect();
+        let mut checks = 0;
+        assert!(
+            OutlineView::prepare(entries, || {
+                checks += 1;
+                checks == 3
+            })
+            .is_none()
+        );
+        assert_eq!(checks, 3);
+        // Even empty outlines check again before their ready model is returned.
+        let mut checks = 0;
+        assert!(
+            OutlineView::prepare(Vec::new(), || {
+                checks += 1;
+                checks == 3
+            })
+            .is_none()
+        );
+        assert_eq!(checks, 3);
     }
 
     #[test]

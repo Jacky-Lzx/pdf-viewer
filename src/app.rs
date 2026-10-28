@@ -849,7 +849,7 @@ impl Pagewing {
                     self.worker.comments();
                     self.reveal_page = Some(self.nav.page);
                     self.reveal_page_section = self.library.thumbnails;
-                    self.outline.set_entries(outline);
+                    self.outline = *outline;
                     self.labels = labels;
                     if reloaded {
                         self.restart_search();

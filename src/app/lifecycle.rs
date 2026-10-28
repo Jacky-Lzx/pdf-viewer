@@ -354,7 +354,7 @@ mod tests {
                 dimensions: vec![[600.0, 800.0]; 2],
                 sync_geometry: Vec::new(),
                 info: Default::default(),
-                outline: Vec::new(),
+                outline: Box::default(),
                 labels: Default::default(),
             })
             .unwrap();

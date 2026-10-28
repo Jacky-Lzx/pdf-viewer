@@ -40,7 +40,9 @@ pub enum Event {
         dimensions: Vec<[f32; 2]>,
         sync_geometry: Vec<crate::synctex::PageGeometry>,
         info: crate::document_info::DocumentInfo,
-        outline: Vec<crate::outline::OutlineEntry>,
+        // Titles and tree indexes are ready for display and filtering. Boxing
+        // keeps this large model out of every bounded-queue event slot.
+        outline: Box<crate::outline_view::OutlineView>,
         labels: crate::page_labels::PageLabels,
     },
     Rendered {
@@ -337,9 +339,12 @@ impl Worker {
                             return Ok(None);
                         }
                         let outline = crate::outline::read(&pdf);
-                        if cancelled() {
+                        let Some(outline) =
+                            crate::outline_view::OutlineView::prepare(outline, &cancelled)
+                        else {
                             return Ok(None);
-                        }
+                        };
+                        let outline = Box::new(outline);
                         let labels = crate::page_labels::PageLabels::read(&pdf);
                         if cancelled() {
                             return Ok(None);
@@ -1745,12 +1750,18 @@ mod tests {
             Event::Opened {
                 id,
                 dimensions,
-                outline,
+                mut outline,
                 ..
             } => {
                 assert_eq!(id, 2);
                 assert_eq!(dimensions.len(), 6);
-                assert_eq!(outline.len(), 6);
+                assert_eq!(outline.visible(), [0, 1, 2, 3, 4, 5]);
+                assert_eq!(outline.selected(), Some(0));
+                // Filtering is immediately usable without any UI preparation.
+                outline.query = outline.entry(1).title.to_uppercase();
+                outline.refilter();
+                assert!(outline.visible().contains(&1));
+                assert_eq!(outline.selected(), Some(1));
             }
             _ => panic!("Expected the second document to open"),
         }

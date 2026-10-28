@@ -38,6 +38,10 @@ fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(9);
     assert!((1..=1000).contains(&passes));
+    if std::env::args().nth(2).as_deref() == Some("prepare") {
+        benchmark_preparation(passes);
+        return;
+    }
     println!(
         "{passes} alternating passes; median ms/100 complete refilters, query folding, matching, ancestor retention, selection, visible rows and checksum reads. Exact d900810 baseline versus reused filter markers; prepared titles, no PDF parsing, widgets or GPU. Allocation counts cover one warm refilter."
     );
@@ -129,6 +133,43 @@ fn main() {
                 medians[0],
                 medians[1],
                 view.visible().len()
+            );
+        }
+    }
+}
+
+fn benchmark_preparation(passes: usize) {
+    println!(
+        "Outline preparation: {passes} passes; median ms/construction, including Unicode folding, tree indexes, initial visible rows and selection. Prepared titles; input cloning, PDF parsing, widgets and output release excluded. This measures work moved off the UI thread, not overall document load time."
+    );
+    for count in [80, 10_000] {
+        for long in [false, true] {
+            let entries: Vec<_> = (0..count)
+                .map(|index| OutlineEntry {
+                    title: if long {
+                        "Straße ΟΣ 中文阅读器 ".repeat(128)
+                    } else {
+                        format!("Chapter {index} — Straße 中文")
+                    },
+                    destination: Some(destination::Destination::page(index)),
+                    depth: index % 8,
+                })
+                .collect();
+            let mut times = Vec::with_capacity(passes);
+            for _ in 0..passes {
+                let input = entries.clone();
+                let mut view = OutlineView::default();
+                let start = Instant::now();
+                view.set_entries(black_box(input));
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(black_box(view.visible()).len(), count);
+                assert_eq!(view.selected(), (count > 0).then_some(0));
+            }
+            times.sort_by(f64::total_cmp);
+            println!(
+                "  {count} {} titles: {:.3} ms/construction",
+                if long { "long Unicode" } else { "short mixed" },
+                times[passes / 2]
             );
         }
     }

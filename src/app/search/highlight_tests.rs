@@ -204,7 +204,7 @@ fn check_snapshot_changes(page: usize) {
             dimensions: app.dimensions.clone(),
             sync_geometry: Vec::new(),
             info: Default::default(),
-            outline: Vec::new(),
+            outline: Box::default(),
             labels: Default::default(),
         })
         .unwrap();
