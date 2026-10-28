@@ -1,5 +1,5 @@
 use eframe::egui::{self, Event, Id, Key, Modifiers, Response};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Target {
@@ -44,13 +44,71 @@ struct State {
     copy_requested: bool,
 }
 
-fn owner_id(widget: Id) -> Id {
-    widget.with("pagewing-copy-menu-owner")
+#[derive(Clone)]
+struct Entry {
+    menu: Id,
+    seen: u64,
+    enabled: bool,
+    state: State,
+}
+
+#[derive(Clone, Default)]
+struct Registry {
+    frame: Option<u64>,
+    owners: HashMap<Id, Entry>,
+}
+
+impl Registry {
+    fn register(&mut self, widget: Id, menu: Id, frame: u64, enabled: bool) -> &mut Entry {
+        if self.frame != Some(frame) {
+            // Input uses the preceding frame before widgets are drawn. Keep
+            // that generation, including any discarded sizing passes.
+            self.owners
+                .retain(|_, entry| entry.seen >= frame.saturating_sub(1));
+            self.frame = Some(frame);
+        }
+        let entry = self.owners.entry(widget).or_insert(Entry {
+            menu,
+            seen: frame,
+            enabled,
+            state: State::default(),
+        });
+        if entry.menu != menu {
+            // Query revisions can reuse a widget ID, but not its menu action.
+            entry.menu = menu;
+            entry.state = State::default();
+        }
+        entry.seen = frame;
+        entry.enabled = enabled;
+        entry
+    }
+}
+
+fn registry_id() -> Id {
+    Id::new("pagewing-copy-menu-registry")
+}
+
+fn with_registry<R>(context: &egui::Context, use_registry: impl FnOnce(&mut Registry) -> R) -> R {
+    context.data_mut(|data| use_registry(data.get_temp_mut_or_default::<Registry>(registry_id())))
+}
+
+pub(super) fn clear(context: &egui::Context) {
+    context.data_mut(|data| {
+        data.remove::<Registry>(registry_id());
+        data.remove::<OpenMenu>(Id::new("pagewing-open-copy-menu"));
+    });
 }
 
 fn focused_owner(context: &egui::Context) -> Option<Owner> {
     let widget = context.memory(|memory| memory.focused())?;
-    let menu = context.data(|data| data.get_temp::<Id>(owner_id(widget)))?;
+    let frame = context.cumulative_frame_nr();
+    let menu = with_registry(context, |registry| {
+        registry
+            .owners
+            .get(&widget)
+            .filter(|entry| entry.enabled && entry.seen >= frame.saturating_sub(1))
+            .map(|entry| entry.menu)
+    })?;
     let owner = Owner { widget, menu };
     let _focus = super::shortcuts::preserve_pointer_focus(context);
     context
@@ -63,8 +121,12 @@ pub(super) fn request_copy(context: &egui::Context) -> bool {
     let Some(owner) = focused_owner(context) else {
         return false;
     };
-    context.data_mut(|data| {
-        data.get_temp_mut_or_default::<State>(owner.menu)
+    with_registry(context, |registry| {
+        registry
+            .owners
+            .get_mut(&owner.widget)
+            .unwrap()
+            .state
             .copy_requested = true;
     });
     context.input_mut(|input| input.events.retain(|event| !matches!(event, Event::Copy)));
@@ -78,8 +140,8 @@ pub(super) fn open(context: &egui::Context, key: Key, modifiers: Modifiers) -> b
     let Some(owner) = focused_owner(context) else {
         return false;
     };
-    context.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<State>(owner.menu);
+    with_registry(context, |registry| {
+        let state = &mut registry.owners.get_mut(&owner.widget).unwrap().state;
         state.keyboard = true;
         state.opening = true;
         state.was_open = true;
@@ -132,16 +194,16 @@ pub(super) fn input_split(
 /// Focus owns keyboard copying; popup IDs scope requests to the current source.
 /// Only an actual copy allocates text. Keyboard menus follow their owner on resize.
 pub(super) fn show(response: &Response, id: Id, label: &str, text: &str, target: Target) -> bool {
-    if response.enabled() {
-        // Shift+Tab can take effect at the start of a frame, before this row
-        // is drawn. Register every eligible source so the next key can use it.
-        response.ctx.data_mut(|data| {
-            data.insert_temp(owner_id(response.id), id);
-        });
-    }
-    let mut state = response
-        .ctx
-        .data_mut(|data| data.remove_temp::<State>(id).unwrap_or_default());
+    let frame = response.ctx.cumulative_frame_nr();
+    // Shift+Tab can take effect before this row is drawn. Register all visible
+    // sources, rather than only the focused one, for the next input pass.
+    let mut state = with_registry(&response.ctx, |registry| {
+        std::mem::take(
+            &mut registry
+                .register(response.id, id, frame, response.enabled())
+                .state,
+        )
+    });
     let mut copied =
         std::mem::take(&mut state.copy_requested) && response.has_focus() && response.enabled();
     if copied {
@@ -216,9 +278,13 @@ pub(super) fn show(response: &Response, id: Id, label: &str, text: &str, target:
         state.keyboard = false;
     }
     state.was_open = open;
-    if state != State::default() {
-        response.ctx.data_mut(|data| data.insert_temp(id, state));
-    }
+    with_registry(&response.ctx, |registry| {
+        if let Some(entry) = registry.owners.get_mut(&response.id)
+            && entry.menu == id
+        {
+            entry.state = state;
+        }
+    });
     copied
 }
 

@@ -51,6 +51,7 @@ impl Pagewing {
     pub(super) fn clear_document(&mut self, context: &egui::Context) {
         self.synctex.clear_document();
         egui::Popup::close_all(context);
+        super::copy_menu::clear(context);
         self.id += 1;
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();

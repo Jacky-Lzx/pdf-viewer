@@ -12,6 +12,7 @@ struct Harness {
     owner: Id,
     draft: String,
     clicks: usize,
+    enabled: bool,
     size: egui::Vec2,
 }
 
@@ -30,6 +31,7 @@ impl Harness {
             owner: Id::NULL,
             draft: "query 草稿".into(),
             clicks: 0,
+            enabled: true,
             size: egui::vec2(860.0, 540.0),
         };
         harness.frame(Vec::new());
@@ -49,7 +51,7 @@ impl Harness {
             self.app.keys(context);
             egui::CentralPanel::default().show(context, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.draft).id(Id::new(EDITOR)));
-                let response = ui.button("Search result");
+                let response = ui.add_enabled(self.enabled, egui::Button::new("Search result"));
                 self.owner = response.id;
                 self.clicks += usize::from(response.clicked());
                 show(
@@ -91,6 +93,165 @@ fn copied(output: &egui::FullOutput) -> Vec<&str> {
             _ => None,
         })
         .collect()
+}
+
+fn source_rows(ui: &mut egui::Ui, generation: usize, revision: usize) -> Id {
+    let mut first = Id::NULL;
+    for row in 0..8 {
+        ui.scope_builder(
+            egui::UiBuilder::new().id(("copy-source", generation, row)),
+            |ui| {
+                let response = ui.button("Visible source");
+                if row == 0 {
+                    first = response.id;
+                }
+                show(
+                    &response,
+                    response.id.with(revision),
+                    "Copy snippet",
+                    SNIPPET,
+                    Target::Control,
+                );
+            },
+        );
+    }
+    first
+}
+
+fn sources(context: &egui::Context, generation: usize, revision: usize) -> Id {
+    let mut first = Id::NULL;
+    let _ = context.run(egui::RawInput::default(), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            first = source_rows(ui, generation, revision);
+        });
+    });
+    first
+}
+
+#[test]
+fn browsing_new_sources_does_not_retain_all_previously_visible_rows() {
+    let context = egui::Context::default();
+    sources(&context, 0, 0);
+    let before = context.data(|data| data.len());
+    for generation in 1..=256 {
+        sources(&context, generation, 0);
+    }
+    let after = context.data(|data| data.len());
+    let (owners, capacity) = with_registry(&context, |registry| {
+        (registry.owners.len(), registry.owners.capacity())
+    });
+    eprintln!(
+        "8 visible sources, 256 replacements: egui data entries {before} -> {after}; {owners} source entries, capacity {capacity}"
+    );
+    assert!(
+        after <= before + 32,
+        "copy source metadata grew with browsing: {before} -> {after}"
+    );
+    assert!(owners <= 16, "expired source entries retained: {owners}");
+    assert!(
+        capacity <= 128,
+        "source table capacity grew with browsing: {capacity}"
+    );
+}
+
+#[test]
+fn replacing_queries_does_not_retain_abandoned_keyboard_menu_states() {
+    let context = egui::Context::default();
+    for revision in 0..128 {
+        let owner = sources(&context, 0, revision);
+        context.memory_mut(|memory| memory.request_focus(owner));
+        assert!(open(&context, Key::F10, Modifiers::SHIFT));
+        sources(&context, 0, revision);
+        egui::Popup::close_all(&context);
+    }
+    // egui separately remembers a MenuState per popup. This assertion covers
+    // the application's source and pending-action data, not toolkit internals.
+    let application_data =
+        context.data(|data| data.len() - data.count::<egui::containers::menu::MenuState>());
+    let states = context.data(|data| data.count::<State>());
+    let (owners, pending) = with_registry(&context, |registry| {
+        (
+            registry.owners.len(),
+            registry
+                .owners
+                .values()
+                .filter(|entry| entry.state != State::default())
+                .count(),
+        )
+    });
+    eprintln!(
+        "128 query replacements: application data entries {application_data}, detached menu states {states}, {owners} sources, {pending} pending state"
+    );
+    assert!(
+        application_data <= 32,
+        "abandoned menu state accumulated: {application_data}"
+    );
+    assert_eq!(owners, 8);
+    assert_eq!(
+        pending, 1,
+        "only the last menu may still await its closing pass"
+    );
+}
+
+#[test]
+fn closing_the_document_releases_source_capacity_and_pending_menu_state() {
+    let mut harness = Harness::new();
+    harness.focus(harness.owner);
+    harness.frame(key(Key::F10, Modifiers::SHIFT));
+    assert!(control_menu_open(&harness.context));
+    assert!(with_registry(&harness.context, |registry| registry.owners.capacity()) > 0);
+    harness.app.clear_document(&harness.context);
+    assert!(
+        harness
+            .context
+            .data(|data| data.get_temp::<Registry>(registry_id()).is_none())
+    );
+    assert!(!egui::Popup::is_any_open(&harness.context));
+    assert!(open_menu(&harness.context).is_none());
+    assert!(!request_copy(&harness.context));
+    assert!(!open(&harness.context, Key::F10, Modifiers::SHIFT));
+}
+
+#[test]
+fn disabled_copy_sources_cannot_claim_keyboard_copy_or_menu_actions() {
+    let mut harness = Harness::new();
+    harness.focus(harness.owner);
+    harness.enabled = false;
+    harness.frame(Vec::new());
+    harness
+        .context
+        .memory_mut(|memory| memory.request_focus(harness.owner));
+    assert!(!request_copy(&harness.context));
+    assert!(!open(&harness.context, Key::F10, Modifiers::SHIFT));
+    harness.enabled = true;
+    harness.frame(Vec::new());
+    harness.focus(harness.owner);
+    let output = harness.frame(vec![Event::Copy]);
+    assert_eq!(copied(&output), [SNIPPET]);
+    assert_eq!(harness.clicks, 0);
+}
+
+#[test]
+fn a_discarded_sizing_pass_cannot_expire_copying_from_a_restored_source() {
+    let context = egui::Context::default();
+    let owner = sources(&context, 0, 0);
+    context.memory_mut(|memory| memory.request_focus(owner));
+    assert!(request_copy(&context));
+    let output = context.run(egui::RawInput::default(), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            source_rows(ui, 1, 0);
+            if context.current_pass_index() == 0 {
+                // A provisional layout omits the source; the final layout
+                // restores its focus and consumes the already requested copy.
+                context.request_discard("provisional copy-source layout");
+            } else {
+                context.memory_mut(|memory| memory.request_focus(owner));
+                assert_eq!(source_rows(ui, 0, 0), owner);
+            }
+        });
+    });
+    assert!(output.platform_output.num_completed_passes >= 2);
+    assert_eq!(copied(&output), [SNIPPET]);
 }
 
 #[test]
