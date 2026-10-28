@@ -317,13 +317,28 @@ impl PageText {
         // Case folding can expand one source glyph into several searchable characters.
         let index = (!query.options.match_case)
             .then(|| self.index.get_or_init(|| SearchIndex::new(&self.text)));
-        let boundaries = query.options.whole_word.then(|| {
-            self.word_boundaries
-                .get_or_init(|| WordBoundaries::new(&self.text))
-        });
         let haystack = index.map_or(self.text.as_str(), |index| &index.folded);
         let bytes = haystack.as_bytes();
         let mut base = cursor.offset;
+        // Most pages miss a query's literal anchor. Avoid Unicode segmentation
+        // and a word bitset until there is a candidate to validate. Only cold
+        // whole-word hit pages rescan their first candidate; warm batches keep
+        // the existing iterator loop without per-candidate initialization.
+        if query.options.whole_word
+            && limit > 0
+            && self.word_boundaries.get().is_none()
+            && matches_for(bytes, base).next().is_none()
+        {
+            cursor.offset = haystack.len();
+            return SearchBatch {
+                hits: Vec::new(),
+                complete: true,
+            };
+        }
+        let boundaries = (query.options.whole_word && limit > 0).then(|| {
+            self.word_boundaries
+                .get_or_init(|| WordBoundaries::new(&self.text))
+        });
         // The same prepared UTF-8 needle serves every page, batch and rejected
         // whole-word restart. Nonempty valid UTF-8 matches stay on boundaries.
         let matched_len = query.matcher.needle().len();
@@ -574,6 +589,104 @@ mod tests {
                 page.word_range(offset),
                 boundaries::word_range(&page.text, offset)
             );
+        }
+    }
+
+    #[test]
+    fn whole_word_misses_defer_boundaries_until_a_candidate_needs_them() {
+        for match_case in [false, true] {
+            for (value, missing, found) in [
+                ("rusting Rust", "missing", "Rust"),
+                ("中文阅读器", "不存在", "中"),
+                ("ß ﬃ", "missingexpansion", "ß"),
+                ("Straße\nreader", "unavailable reader", "Straße reader"),
+            ] {
+                let page = PageText {
+                    text: value.into(),
+                    ..Default::default()
+                };
+                let options = SearchOptions {
+                    match_case,
+                    whole_word: true,
+                };
+                let mut cursor = SearchCursor::default();
+                let batch = page.search_batch(
+                    0,
+                    &SearchQuery::new(missing.into(), options),
+                    &mut cursor,
+                    1,
+                );
+                assert!(batch.complete && batch.hits.is_empty());
+                let length = page
+                    .index
+                    .get()
+                    .map_or(value.len(), |index| index.folded.len());
+                assert_eq!(cursor.offset, length);
+                assert!(
+                    page.word_boundaries.get().is_none(),
+                    "{value}, {match_case}"
+                );
+                let query = SearchQuery::new(found.into(), options);
+                assert_eq!(page.search_with(0, &query).len(), 1);
+                let boundaries = page.word_boundaries.get().unwrap();
+                assert_eq!(page.search_with(0, &query).len(), 1);
+                assert!(std::ptr::eq(
+                    page.word_boundaries.get().unwrap(),
+                    boundaries
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn whole_word_misses_only_scan_the_remaining_cursor_suffix() {
+        let page = PageText {
+            text: "ß rust missing tail".into(),
+            ..Default::default()
+        };
+        let query = SearchQuery::new(
+            "rust".into(),
+            SearchOptions {
+                whole_word: true,
+                ..Default::default()
+            },
+        );
+        let mut cursor = SearchCursor {
+            offset: "ss rust".len(),
+            ..Default::default()
+        };
+        let batch = page.search_batch(0, &query, &mut cursor, 1);
+        assert!(batch.complete && batch.hits.is_empty());
+        assert_eq!(cursor.offset, "ss rust missing tail".len());
+        assert!(page.word_boundaries.get().is_none());
+    }
+
+    #[test]
+    fn zero_limit_whole_word_batches_do_not_prepare_boundaries_or_advance() {
+        for match_case in [false, true] {
+            for value in ["", "ß Rust", "Straße\nreader"] {
+                let page = PageText {
+                    text: value.into(),
+                    ..Default::default()
+                };
+                for needle in ["Rust", "Straße reader", "missing"] {
+                    let query = SearchQuery::new(
+                        needle.into(),
+                        SearchOptions {
+                            match_case,
+                            whole_word: true,
+                        },
+                    );
+                    let mut cursor = SearchCursor::default();
+                    let batch = page.search_batch(0, &query, &mut cursor, 0);
+                    assert!(batch.hits.is_empty());
+                    assert_eq!(batch.complete, value.is_empty());
+                    assert_eq!(cursor.offset, 0);
+                    assert_eq!(cursor.accepted_end, 0);
+                    assert_eq!(cursor.previous, None);
+                    assert!(page.word_boundaries.get().is_none());
+                }
+            }
         }
     }
 

@@ -44,6 +44,15 @@ fn main() {
             50,
         ),
         (
+            "Whole-word ASCII hit",
+            "Rust PDF reader, built for long documents.\n",
+            50,
+            "documents",
+            true,
+            200,
+            50,
+        ),
+        (
             "ASCII miss",
             "Rust PDF reader, built for long documents.\n",
             50,
