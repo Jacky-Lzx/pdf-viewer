@@ -163,3 +163,7 @@ harness = false
 [[bench]]
 name = "library_snapshots"
 harness = false
+
+[[bench]]
+name = "annotation_geometry"
+harness = false

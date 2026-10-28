@@ -1,4 +1,7 @@
 //! Standard PDF markup annotations. Geometry is kept in renderer coordinates.
+#[path = "annotations/geometry.rs"]
+mod geometry;
+
 use hayro::{
     hayro_interpret::util::TransformExt,
     hayro_syntax::{
@@ -7,7 +10,7 @@ use hayro::{
             Array, Dict, MaybeRef, Name, ObjRef, Object, Rect as PdfRect, String as PdfString,
         },
     },
-    kurbo::{Point, Rect},
+    kurbo::Rect,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -255,29 +258,7 @@ pub fn read(pdf: &Pdf, cancelled: impl Fn() -> bool) -> Comments {
                 .unwrap_or_default();
             let mut rects = Vec::new();
             if let Some(quads) = dict.get::<Array<'_>>(b"QuadPoints") {
-                let numbers: Vec<_> = quads.iter::<f32>().take(8192).collect();
-                for quad in numbers.as_chunks::<8>().0 {
-                    let points: Vec<_> = quad
-                        .as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|p| transform * Point::new(p[0] as f64, p[1] as f64))
-                        .collect();
-                    let rect = points.iter().fold(
-                        Rect::new(
-                            f64::INFINITY,
-                            f64::INFINITY,
-                            f64::NEG_INFINITY,
-                            f64::NEG_INFINITY,
-                        ),
-                        |r, p| {
-                            Rect::new(r.x0.min(p.x), r.y0.min(p.y), r.x1.max(p.x), r.y1.max(p.y))
-                        },
-                    );
-                    if rect.is_finite() && rect.width() > 0.0 && rect.height() > 0.0 {
-                        rects.push(rect);
-                    }
-                }
+                rects = geometry::quad_rects(quads.iter::<f32>(), transform);
             }
             if rects.is_empty()
                 && let Some(r) = dict.get::<PdfRect>(b"Rect")
@@ -818,6 +799,60 @@ mod tests {
         std::fs::write(&path, include_bytes!("../assets/pagewing-guide.pdf")).unwrap();
         let pdf = crate::document::load(&path, "").unwrap();
         (path, pdf)
+    }
+
+    #[test]
+    fn quad_points_preserve_cropped_rotated_geometry_and_rect_fallbacks() {
+        for rotation in [0, 90, 180, 270] {
+            for complete in [true, false] {
+                let mut document =
+                    lopdf::Document::load_mem(include_bytes!("../assets/pagewing-guide.pdf"))
+                        .unwrap();
+                let page_id = document.get_pages()[&1];
+                let mut numbers: Vec<O> = if complete {
+                    [
+                        50, 600, 150, 600, 50, 620, 150, 620, 70, 570, 180, 570, 70, 590, 180, 590,
+                    ]
+                    .into_iter()
+                    .map(O::Integer)
+                    .collect()
+                } else {
+                    vec![O::Integer(0); 16]
+                };
+                // Seven trailing coordinates must not create a partial region.
+                numbers.extend([10, 20, 30, 40, 50, 60, 70].into_iter().map(O::Integer));
+                let annotation = dictionary! { "Subtype" => "Highlight", "Contents" => "Multiple lines", "Rect" => vec![40.into(), 500.into(), 200.into(), 650.into()], "QuadPoints" => numbers };
+                let page = document.get_dictionary_mut(page_id).unwrap();
+                page.set(
+                    "CropBox",
+                    vec![20.into(), 30.into(), 550.into(), 730.into()],
+                );
+                page.set("Rotate", rotation);
+                page.set("Annots", vec![O::Dictionary(annotation)]);
+                let mut bytes = Vec::new();
+                document.save_to(&mut bytes).unwrap();
+                let pdf = Pdf::new(bytes).unwrap();
+                let transform = pdf.pages()[0].initial_transform(true).to_kurbo();
+                let expected = if complete {
+                    vec![
+                        Rect::new(50.0, 600.0, 150.0, 620.0),
+                        Rect::new(70.0, 570.0, 180.0, 590.0),
+                    ]
+                } else {
+                    vec![Rect::new(40.0, 500.0, 200.0, 650.0)]
+                };
+                let comments = read(&pdf, || false);
+                assert_eq!(comments.items.len(), 1);
+                assert_eq!(
+                    comments.items[0].rects,
+                    expected
+                        .into_iter()
+                        .map(|rect| transform.transform_rect_bbox(rect))
+                        .collect::<Vec<_>>(),
+                    "rotation {rotation}, complete {complete}"
+                );
+            }
+        }
     }
 
     #[test]
