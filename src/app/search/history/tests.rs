@@ -50,6 +50,41 @@ fn fixture() -> (tempfile::TempDir, egui::Context, Pagewing) {
     (root, context, app)
 }
 
+#[test]
+fn native_history_open_navigation_and_confirmation_recall_without_following_a_result() {
+    for size in [egui::vec2(240.0, 240.0), egui::vec2(1180.0, 820.0)] {
+        let (_root, context, mut app) = fixture();
+        app.query_history.remember("older Straße");
+        app.query_history.remember("newer");
+        app.query = "retained draft".into();
+        let options = app.library.search_options;
+        settle(&mut app, &context, size);
+        context
+            .memory_mut(|memory| memory.request_focus(app.input_buttons.search_history.unwrap()));
+        settle(&mut app, &context, size);
+        let mut events = [egui::Key::Enter, egui::Key::ArrowDown, egui::Key::Enter]
+            .into_iter()
+            .flat_map(key)
+            .collect();
+        for _ in 0..12 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events: std::mem::take(&mut events),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut app, &context, &mut input);
+            let _ = context.run(input, |context| {
+                eframe::App::update(&mut app, context, &mut eframe::Frame::_new_kittest());
+            });
+        }
+        assert_eq!(app.query, "older Straße");
+        assert_eq!(app.library.search_options, options);
+        assert_eq!(app.nav.page, 2);
+        assert!(!egui::Popup::is_any_open(&context));
+        assert!(context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
+    }
+}
+
 fn click(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2, label: &str) {
     let output = settle(app, context, size);
     let pos = output

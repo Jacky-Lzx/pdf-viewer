@@ -32,6 +32,7 @@ def run(binary):
         keyboard = Keyboard()
         keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                               ctypes.c_uint, ctypes.c_uint]
+        keyboard.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -53,18 +54,26 @@ def run(binary):
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
 
-            def open_view(activation=ENTER, burst=False):
+            def open_view(activation=ENTER, burst=False, selection=None):
                 keyboard.key("f", ctrl=True)
                 # Copy/History are disabled for this unconfirmed, absent query.
                 # Aa, Word, Prev, Next, Results, Close, the compact search
                 # scrollbar and bottom drag viewport, then Page, +, Zoom, -, View.
                 for _ in range(13):
                     keyboard.key(TAB)
-                if burst:
+                if burst or selection is not None:
                     application.send_signal(signal.SIGSTOP)
                     try:
+                        _, status = os.waitpid(application.pid, os.WUNTRACED)
+                        assert os.WIFSTOPPED(status)
                         keyboard.key(activation, delay=0)
-                        keyboard.key("j", shift=True, delay=0)
+                        if selection is None:
+                            keyboard.key("j", shift=True, delay=0)
+                        else:
+                            for _ in range(selection):
+                                keyboard.key(DOWN, delay=0)
+                            keyboard.key(ENTER, delay=0)
+                        keyboard.x11.XSync(keyboard.display, False)
                     finally:
                         application.send_signal(signal.SIGCONT)
                 else:
@@ -108,6 +117,10 @@ def run(binary):
                 expect(lambda value: value["fit"] == "Page", "keyboard Fit page")
                 open_view(); choose(0)
                 expect(lambda value: not value["facing"] and not value["continuous"], "keyboard Single page")
+                open_view(selection=2)
+                expect(lambda value: value["facing"] and not value["continuous"], "same-batch menu opening, arrows and confirmation")
+                open_view(activation=" ", selection=0)
+                expect(lambda value: not value["facing"] and not value["continuous"], "same-batch Space opening and Enter confirmation")
                 open_view(); keyboard.key(ESCAPE)
                 keyboard.key("f", ctrl=True)
                 keyboard.key("a", ctrl=True); keyboard.key("c", ctrl=True)
@@ -116,7 +129,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert document.read_bytes() == original
-                print("PASS: all seven View choices via keyboard, first-item focus, 240x240 scrolling, Arrow/Tab wrap, live resize focus, same-frame opening/reader-key ownership, Escape, preserved draft/page/sidebar and unchanged PDF")
+                print("PASS: all seven View choices via keyboard, first-item focus, 240x240 scrolling, Arrow/Tab wrap, live resize focus, same-batch opening/arrows/confirmation, opening/reader-key ownership, Escape, preserved draft/page/sidebar and unchanged PDF")
             except Exception:
                 print(f"Process status: {application.poll()!r}", file=sys.stderr)
                 log.flush(); log.seek(0)

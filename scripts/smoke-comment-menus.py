@@ -30,6 +30,7 @@ def run(binary):
         keyboard = Keyboard()
         keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                               ctypes.c_uint, ctypes.c_uint]
+        keyboard.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -66,11 +67,17 @@ def run(binary):
                 if burst:
                     application.send_signal(signal.SIGSTOP)
                     try:
+                        _, status = os.waitpid(application.pid, os.WUNTRACED)
+                        assert os.WIFSTOPPED(status)
                         keyboard.key(activation, delay=0)
                         keyboard.key("j", shift=True, delay=0)
-                        keyboard.key(DOWN, delay=0)
+                        for _ in range(5):
+                            keyboard.key(DOWN, delay=0)
+                        keyboard.key(ENTER, delay=0)
+                        keyboard.x11.XSync(keyboard.display, False)
                     finally:
                         application.send_signal(signal.SIGCONT)
+                    time.sleep(0.2)
                 else:
                     keyboard.key(activation)
 
@@ -86,9 +93,6 @@ def run(binary):
                 resize((1180, 820))
                 keyboard.key("m", ctrl=True, shift=True)
                 filter_menu(burst=True)
-                for _ in range(4):
-                    keyboard.key(DOWN)
-                keyboard.key(ENTER)
                 exported = report()
                 assert "Nested needle jkg" in exported and "[Thread context]" in exported
                 assert "Elsewhere comment" not in exported, "Completed filter selects the resolved thread"
@@ -129,7 +133,7 @@ def run(binary):
                 assert state().get("sidebar") is False, "menu Tab must not toggle the sidebar"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: native review filter and editor menus, same-frame reader-key isolation, Arrow/Tab wrap, 240x240 scrolling and live resize, exact filtered exports, explicit status save and PDF reload")
+                print("PASS: native review filter and editor menus, same-batch opening/arrows/confirmation with reader-key isolation, Arrow/Tab wrap, 240x240 scrolling and live resize, exact filtered exports, explicit status save and PDF reload")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

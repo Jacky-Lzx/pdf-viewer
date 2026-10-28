@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ def run(binary):
         keyboard = Keyboard()
         keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                                               ctypes.c_uint, ctypes.c_uint]
+        keyboard.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -50,11 +52,25 @@ def run(binary):
                 text(value)
                 keyboard.key(0xFF0D)
 
-            def history(has_results):
+            def history(has_results, selection=None):
                 keyboard.key("f", ctrl=True)
                 for _ in range(7 if has_results else 6):
                     keyboard.key(0xFF09)  # Aa, Word, Prev, Next, Results, optional Copy, History.
-                keyboard.key(0xFF0D)
+                if selection is None:
+                    keyboard.key(0xFF0D)
+                else:
+                    application.send_signal(signal.SIGSTOP)
+                    try:
+                        _, status = os.waitpid(application.pid, os.WUNTRACED)
+                        assert os.WIFSTOPPED(status)
+                        keyboard.key(0xFF0D, delay=0)
+                        for _ in range(selection):
+                            keyboard.key(0xFF54, delay=0)
+                        keyboard.key(0xFF0D, delay=0)
+                        keyboard.x11.XSync(keyboard.display, False)
+                    finally:
+                        application.send_signal(signal.SIGCONT)
+                    time.sleep(0.2)
 
             def choose(index):
                 for _ in range(index):
@@ -74,8 +90,7 @@ def run(binary):
                 expect(0, "first explicit query")
                 search("Make")
                 expect(2, "second explicit query")
-                history(True)
-                choose(1)  # Older Rust query, behind Make.
+                history(True, selection=1)  # Older Rust query, behind Make.
                 assert copied_query() == "Rust", "recall returns focus with the entire query selected"
                 assert book()["page"] == 2, "selecting history must not follow a match"
                 keyboard.key(0xFF0D)
@@ -93,8 +108,7 @@ def run(binary):
                 keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
                 keyboard.x11.XFlush(keyboard.display)
                 time.sleep(0.3)
-                history(False)
-                choose(2)  # Make survives the document boundary, behind missing and Rust.
+                history(False, selection=2)  # Make survives the document boundary, behind missing and Rust.
                 assert copied_query() == "Make", "minimum-size keyboard recall preserves the exact query"
                 assert book()["page"] == 3
                 keyboard.key(0xFF0D)
@@ -113,7 +127,7 @@ def run(binary):
                 assert application.wait(timeout=8) == 0
                 assert document.read_bytes() == original
                 assert "query_history" not in json.loads(config_path.read_text())
-                print("PASS: recent explicit searches, keyboard menu recall, whole-query selection, fresh result navigation, no recall jump, same-window document reopen, 240x240 menu, clear retains query, disabled empty history, unchanged PDF and no persisted search history")
+                print("PASS: recent explicit searches, same-batch menu opening/navigation/recall, whole-query selection, fresh result navigation, no recall jump, same-window document reopen, 240x240 menu, clear retains query, disabled empty history, unchanged PDF and no persisted search history")
             except Exception:
                 print(f"Process status: {application.poll()!r}", file=sys.stderr)
                 log.flush(); log.seek(0)
@@ -123,6 +137,7 @@ def run(binary):
                 raise
             finally:
                 if application.poll() is None:
+                    application.send_signal(signal.SIGCONT)
                     application.terminate(); application.wait(timeout=5)
                 keyboard.x11.XCloseDisplay(keyboard.display)
 

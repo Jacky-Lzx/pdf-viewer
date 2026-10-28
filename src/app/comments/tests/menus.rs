@@ -25,6 +25,60 @@ fn settle(app: &mut Pagewing, context: &Context, size: Vec2) -> egui::FullOutput
 }
 
 #[test]
+fn native_opening_navigation_and_confirmation_apply_filter_or_draft_status() {
+    for size in [Vec2::splat(240.0), Vec2::new(1180.0, 820.0)] {
+        for editing in [false, true] {
+            let (_root, context, mut app) = saved_comment_editor();
+            let original = std::fs::read(&app.reading.path).unwrap();
+            if !editing {
+                app.comments.editor = None;
+                app.comments.focus = false;
+            }
+            settle(&mut app, &context, size);
+            let id = if editing {
+                app.input_buttons.comment_status_menu
+            } else {
+                app.input_buttons.comment_filter_menu
+            }
+            .unwrap();
+            context.memory_mut(|memory| memory.request_focus(id));
+            settle(&mut app, &context, size);
+            let mut events = key(Key::Space, Modifiers::NONE);
+            for _ in 0..if editing { 1 } else { 2 } {
+                events.extend(key(Key::ArrowDown, Modifiers::NONE));
+            }
+            events.extend(key(Key::Enter, Modifiers::NONE));
+            for _ in 0..12 {
+                let mut input = RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events: std::mem::take(&mut events),
+                    ..Default::default()
+                };
+                eframe::App::raw_input_hook(&mut app, &context, &mut input);
+                let _ = context.run(input, |context| {
+                    eframe::App::update(&mut app, context, &mut eframe::Frame::_new_kittest());
+                });
+            }
+            if editing {
+                let editor = app.comments.editor.as_ref().unwrap();
+                assert_eq!(editor.review, ReviewStatus::Accepted);
+                assert_eq!(editor.contents, "Original comment");
+                assert!(app.comments.unsaved());
+            } else {
+                assert_eq!(
+                    app.comments.view.filter.review,
+                    Some(ReviewStatus::Accepted)
+                );
+                assert!(app.comments.editor.is_none());
+            }
+            assert!(!egui::Popup::is_any_open(&context));
+            assert!(!app.comments.busy());
+            assert_eq!(std::fs::read(&app.reading.path).unwrap(), original);
+        }
+    }
+}
+
+#[test]
 fn opening_review_filter_owns_reader_keys_in_the_same_click_batch() {
     let (_root, context, mut app) = many_comments();
     let size = Vec2::new(1180.0, 820.0);

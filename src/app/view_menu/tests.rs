@@ -48,6 +48,123 @@ fn fixture(size: egui::Vec2) -> (tempfile::TempDir, egui::Context, Pagewing) {
     (root, context, app)
 }
 
+fn native_batch(
+    app: &mut Pagewing,
+    context: &egui::Context,
+    size: egui::Vec2,
+    events: Vec<egui::Event>,
+) {
+    let mut input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        events,
+        ..Default::default()
+    };
+    for _ in 0..12 {
+        eframe::App::raw_input_hook(app, context, &mut input);
+        let _ = context.run(input, |context| {
+            eframe::App::update(app, context, &mut eframe::Frame::_new_kittest());
+        });
+        input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+    }
+    assert!(app.focus_input.is_empty() && app.deferred_input.is_empty());
+}
+
+#[test]
+fn opening_navigation_and_confirmation_in_one_native_batch_choose_the_target() {
+    for size in [egui::vec2(240.0, 240.0), egui::vec2(1180.0, 820.0)] {
+        for opener in [egui::Key::Enter, egui::Key::Space] {
+            let (_root, context, mut app) = fixture(size);
+            context.memory_mut(|memory| memory.request_focus(app.input_buttons.view_menu.unwrap()));
+            settle(&mut app, &context, size);
+            let events = [
+                opener,
+                egui::Key::ArrowDown,
+                egui::Key::ArrowDown,
+                egui::Key::Enter,
+            ]
+            .into_iter()
+            .flat_map(key)
+            .collect();
+            native_batch(&mut app, &context, size, events);
+            assert!(app.reading.facing, "{size:?}, opened with {opener:?}");
+            assert!(!app.reading.continuous);
+            assert_eq!(app.nav.page, 2);
+            assert_eq!(app.reading.fit, Fit::Custom(2.0));
+            assert!(!egui::Popup::is_any_open(&context));
+        }
+    }
+}
+
+#[test]
+fn mouse_opening_and_keyboard_selection_share_the_native_batch_without_losing_the_click() {
+    let size = egui::vec2(1180.0, 820.0);
+    for cancel in [false, true] {
+        let (_root, context, mut app) = fixture(size);
+        app.find();
+        app.query = "retained query".into();
+        settle(&mut app, &context, size);
+        let pos = context
+            .read_response(app.input_buttons.view_menu.unwrap())
+            .unwrap()
+            .rect
+            .center();
+        let mut events = vec![egui::Event::PointerMoved(pos)];
+        events.extend([true, false].map(|pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }));
+        if cancel {
+            events.extend(key(egui::Key::Escape));
+        } else {
+            // Mouse opening has no initial item focus: the first Down selects row 0.
+            events.extend(
+                [
+                    egui::Key::ArrowDown,
+                    egui::Key::ArrowDown,
+                    egui::Key::ArrowDown,
+                    egui::Key::Enter,
+                ]
+                .into_iter()
+                .flat_map(key),
+            );
+        }
+        native_batch(&mut app, &context, size, events);
+        assert_eq!(app.reading.facing, !cancel);
+        assert!(!app.reading.continuous);
+        assert_eq!(app.nav.page, 2);
+        assert_eq!(app.query, "retained query");
+        assert!(app.search_open);
+        assert!(!egui::Popup::is_any_open(&context));
+    }
+}
+
+#[test]
+fn native_menu_opening_before_tab_and_reverse_wrap_keeps_the_activation_target() {
+    for size in [egui::vec2(240.0, 240.0), egui::vec2(1180.0, 820.0)] {
+        let (_root, context, mut app) = fixture(size);
+        context.memory_mut(|memory| memory.request_focus(app.input_buttons.view_menu.unwrap()));
+        settle(&mut app, &context, size);
+        let mut events = key(egui::Key::Enter);
+        let mut reverse = key(egui::Key::Tab);
+        for event in &mut reverse {
+            if let egui::Event::Key { modifiers, .. } = event {
+                *modifiers = egui::Modifiers::SHIFT;
+            }
+        }
+        events.extend(reverse);
+        events.extend(key(egui::Key::Space));
+        native_batch(&mut app, &context, size, events);
+        assert_eq!(app.reading.fit, Fit::Custom(1.0));
+        assert_eq!(app.nav.page, 2);
+        assert!(!egui::Popup::is_any_open(&context));
+    }
+}
+
 #[test]
 fn compact_search_tab_reaches_the_view_menu_without_reader_shortcuts() {
     let size = egui::vec2(240.0, 240.0);

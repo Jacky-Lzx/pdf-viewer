@@ -1,9 +1,9 @@
-//! Give egui each Tab movement its own native frame before later input activates it.
+//! Preserve native input order across focus movement and popup opening.
 use super::Pagewing;
 use eframe::egui::{self, Event, Key};
 use std::collections::VecDeque;
 
-fn changes_input(event: &Event) -> bool {
+pub(super) fn changes_input(event: &Event) -> bool {
     !matches!(
         event,
         Event::Key { pressed: false, .. } | Event::PointerMoved(_) | Event::MouseMoved(_)
@@ -61,8 +61,12 @@ impl Pagewing {
             events.push_front(event);
         }
         let tab = tab_split(&events);
-        let comment = self.comment_input_split(context, &events, tab.unwrap_or(events.len()));
-        if let Some(split) = comment.or(tab) {
+        let menu =
+            self.input_buttons
+                .menu_input_split(context, &events, tab.unwrap_or(events.len()));
+        let comment =
+            self.comment_input_split(context, &events, menu.or(tab).unwrap_or(events.len()));
+        if let Some(split) = comment.or(menu).or(tab) {
             input.events.extend(events.drain(..split));
             if comment.is_some() {
                 self.comments.filter_input = events;

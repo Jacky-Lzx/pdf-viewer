@@ -185,6 +185,55 @@ pub(super) struct InputButtons {
 }
 
 impl InputButtons {
+    /// Let a new popup establish its item focus before later actions arrive.
+    pub fn menu_input_split(
+        &self,
+        context: &egui::Context,
+        events: &std::collections::VecDeque<Event>,
+        limit: usize,
+    ) -> Option<usize> {
+        let focused = context.memory(|memory| memory.focused());
+        let opener = events.iter().take(limit).position(|event| {
+            let keyboard = matches!(event, Event::Key {
+                key: Key::Enter | Key::Space,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.is_none());
+            let pointer = match event {
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => Some(*pos),
+                _ => None,
+            };
+            if !keyboard && pointer.is_none() {
+                return false;
+            }
+            self.menus().any(|id| {
+                !egui::Popup::is_id_open(context, id.with("popup"))
+                    && context.read_response(id).is_some_and(|response| {
+                        response.enabled()
+                            && ((keyboard && focused == Some(id))
+                                || pointer.is_some_and(|pos| {
+                                    response.interact_rect.contains(pos)
+                                        && context
+                                            .layer_id_at(pos)
+                                            .is_none_or(|layer| layer == response.layer_id)
+                                }))
+                    })
+            })
+        })?;
+        events
+            .iter()
+            .take(limit)
+            .enumerate()
+            .skip(opener + 1)
+            .find_map(|(index, event)| super::focus_input::changes_input(event).then_some(index))
+    }
+
     fn menus(&self) -> impl Iterator<Item = Id> {
         [
             self.search_history,
