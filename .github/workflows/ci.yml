@@ -65,6 +65,7 @@ jobs:
           - shard: 1
             tests: >-
               vim-view fit-height paths close properties cli load-cancel errors search-results
+              marks comment-navigation
           - shard: 2
             tests: >-
               search-options percentage bookmarks link-copy link-hints

@@ -269,6 +269,8 @@ night = []                 # 停用该动作的快捷键
 
 `''` 或连续两次反引号可返回上次跳转前的完整视图，再按一次切回来；支持同页搜索、链接和命名位置的跳转，以及历史返回/前进后的切换。此位置只在当前文档会话内保留，关闭文档后清空；重载删掉目标页时也会清除。输入框中这些按键继续输入普通文字。
 
+侧栏的命名位置同时显示物理页码与 PDF 页码标签，长标签在行内截断，悬停可查看完整标签。窄侧栏为右侧的 × 删除按钮保留空间；点击名称恢复保存的视图，点击 × 只删除该位置。
+
 横向图纸可按 `e` 适合高度，再用 `h/l` 横向阅读；旋转、窗口调整、标记、历史和重新打开都会保留自动适配模式。PDF 的 `FitV` / `FitBV` 目标同样使用该模式，窗口高度变化后继续适配。输入框内的字母 `e` 仍作为文字输入。
 
 大幅面图纸也能适合整页：缩放下限会随页面尺寸降低，低于 5% 后仍可渐进缩放；极端页面会限制最大缩放，保持界面坐标可用。
@@ -409,6 +411,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline.py target/
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-outline-keyboard.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-long-title.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-bookmarks.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-marks.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-page-size.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-tiles.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-continuous.py target/release/pagewing

@@ -1,8 +1,9 @@
-use super::{MarkAction, Pagewing, appearance};
+use super::{Pagewing, appearance};
 use eframe::egui::{self, RichText, Vec2};
 
 mod bookmarks;
 mod contents;
+mod marks;
 mod pages;
 mod results;
 
@@ -86,37 +87,7 @@ impl Pagewing {
                         other_focus |= self.bookmark_list(ui);
                     }
                     if !self.reading.marks.is_empty() {
-                        ui.add_space(20.0);
-                        appearance::section(ui, "MARKS");
-                        let mut target = None;
-                        let mut remove = None;
-                        for (&name, mark) in &self.reading.marks {
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .selectable_label(
-                                        mark.page == self.nav.page,
-                                        format!("'{name}   Page {}", mark.page + 1),
-                                    )
-                                    .on_hover_text(
-                                        "Restore page, zoom, rotation and scroll position",
-                                    )
-                                    .clicked()
-                                {
-                                    target = Some(name);
-                                }
-                                if ui.small_button("×").on_hover_text("Delete mark").clicked() {
-                                    remove = Some(name);
-                                }
-                            });
-                        }
-                        if let Some(name) = target {
-                            self.mark(name, MarkAction::Jump);
-                            other_focus = true;
-                        }
-                        if let Some(name) = remove {
-                            self.reading.marks.remove(&name);
-                            self.dirty = true;
-                        }
+                        other_focus |= self.mark_list(ui);
                     }
                     let reveal_search = self.reveal_hit.is_some() && !self.hits.is_empty();
                     self.search_results(ui, viewport, chapter_focus);
