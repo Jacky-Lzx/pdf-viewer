@@ -1,6 +1,7 @@
 use super::{MarkAction, Pagewing, appearance};
 use eframe::egui::{self, RichText, Vec2};
 
+mod bookmarks;
 mod pages;
 mod results;
 
@@ -215,42 +216,6 @@ impl Pagewing {
         (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y)
             .max(ui.spacing().interact_size.y)
             .max(20.0)
-    }
-
-    fn bookmark_list(&mut self, ui: &mut egui::Ui) -> bool {
-        let row_height = Self::sidebar_row_height(ui);
-        let mut scroll = egui::ScrollArea::vertical()
-            .id_salt("bookmarks")
-            .max_height(140.0);
-        if self.reveal_page.is_some()
-            && let Ok(row) = self.bookmark_pages.binary_search(&self.nav.page)
-        {
-            scroll = scroll
-                .vertical_scroll_offset(row as f32 * (row_height + ui.spacing().item_spacing.y));
-        }
-        let mut target = None;
-        scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
-            for row in range {
-                let page = self.bookmark_pages[row];
-                if ui
-                    .add_sized(
-                        Vec2::new(ui.available_width(), row_height),
-                        egui::Button::selectable(
-                            page == self.nav.page,
-                            format!("Page {}", self.page_name(page)),
-                        )
-                        .truncate(),
-                    )
-                    .clicked()
-                {
-                    target = Some(page);
-                }
-            }
-        });
-        if let Some(page) = target {
-            self.jump(page);
-        }
-        target.is_some()
     }
 
     pub(super) fn sidebar(&mut self, context: &egui::Context) {

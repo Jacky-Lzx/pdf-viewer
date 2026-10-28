@@ -25,7 +25,8 @@ def run(binary):
         def write_document(count):
             fixture["PAGES"][:] = [(f"Page {page + 1}", "BOOKMARKS", ["Large bookmark list."]) for page in range(count)]
             # Keep xref offsets unchanged when removing the outline UI.
-            data = re.sub(rb"/Outlines \d+ 0 R", lambda match: b" " * len(match.group()), bytes(fixture["make_pdf"]()), count=1)
+            data = re.sub(rb"/Outlines \d+ 0 R", lambda match: b" " * len(match.group()), bytes(fixture["make_pdf"](
+                page_label_prefix="Long appendix 中文😀 with the complete label suffix ")), count=1)
             document.write_bytes(data)
 
         write_document(600)
@@ -43,6 +44,11 @@ def run(binary):
             application = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
 
             def expect(page, description, removed=None, count=600):
+                # Move hover cards away from the selection-pixel checks after
+                # mouse actions; a full label can otherwise cover the last row.
+                keyboard.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+                keyboard.xtst.XTestFakeMotionEvent(keyboard.display, -1, 600, 80, 0)
+                keyboard.x11.XFlush(keyboard.display)
                 def saved():
                     try:
                         book = json.loads(config_path.read_text())["recent"][0]
@@ -55,7 +61,9 @@ def run(binary):
 
             def selected_bookmark_y():
                 positions = []
-                for y in range(200, 342, 2):
+                # Include the whole first and last row so the measured center
+                # is not biased by clipping the scan to only part of a row.
+                for y in range(180, 350, 2):
                     colors = [keyboard.pixel((x, y)) for x in (20, 80, 150)]
                     if all(green > red + 8 and green > blue + 6 for red, green, blue in colors):
                         positions.append(y)
@@ -66,7 +74,32 @@ def run(binary):
             try:
                 window = wait_for(keyboard.focus, "bookmark reader window")
                 expect(0, "initial reading state with 600 bookmarks")
-                wait_for(selected_bookmark_y, "first bookmark is visible")
+                first_y = wait_for(selected_bookmark_y, "first bookmark is visible")
+                keyboard.key("j", alt=True)
+                expect(1, "the next visible bookmark is selected")
+                next_y = wait_for(lambda: (y if (y := selected_bookmark_y()) is not None
+                                          and y > first_y + 10 else None),
+                                  "visible bookmark navigation retains the first row")
+                row_step = next_y - first_y
+                keyboard.key("k", alt=True)
+                expect(0, "return to the first visible bookmark")
+                wait_for(lambda: (y := selected_bookmark_y()) is not None and abs(y - first_y) <= 2,
+                         "returning within the viewport keeps row positions")
+                keyboard.key("4"); keyboard.key("1"); keyboard.key("g", shift=True)
+                expect(40, "a distant middle bookmark is selected")
+                middle_y = wait_for(selected_bookmark_y, "distant middle bookmark is visible")
+                keyboard.key("k", alt=True)
+                expect(39, "the preceding middle bookmark is selected")
+                previous_y = wait_for(lambda: (y if (y := selected_bookmark_y()) is not None
+                                              and abs(middle_y - y - row_step) <= 2 else None),
+                                      "adjacent middle bookmarks keep their positions")
+                keyboard.wheel((100, previous_y), steps=8)
+                wait_for(lambda: selected_bookmark_y() is None, "manual scrolling can hide the selected bookmark")
+                time.sleep(0.3)
+                assert selected_bookmark_y() is None, "ordinary frames must retain manual bookmark scrolling"
+                keyboard.key("4"); keyboard.key("0"); keyboard.key("g", shift=True)
+                expect(39, "explicit navigation can reveal the unchanged page")
+                wait_for(selected_bookmark_y, "the current bookmark is revealed again")
                 keyboard.key("g", shift=True)
                 expect(599, "G reaches the final bookmarked page")
                 last_y = wait_for(selected_bookmark_y, "last of 600 bookmarks is actually drawn")
@@ -135,10 +168,14 @@ def run(binary):
                 expect(10, "an empty bookmark list leaves the page unchanged", count=0)
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 600 bookmarks, visible rows, clicks, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
+                print("PASS: 600 long-label bookmarks, nearest scrolling, stable adjacent rows, manual scrolling, visible rows, clicks, add/remove, compact layout, reload/switch, counted keyboard jumps, wrapping, input focus, history and empty lists")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)
+                positions = {name: value for name, value in locals().items()
+                             if name in ("first_y", "next_y", "row_step", "middle_y", "previous_y")}
+                print("Bookmark selection centers:", positions,
+                      "current:", selected_bookmark_y(), file=sys.stderr)
                 if config_path.exists():
                     print(config_path.read_text(), file=sys.stderr)
                 raise
