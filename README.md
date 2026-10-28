@@ -190,6 +190,8 @@ night = []                 # 停用该动作的快捷键
 
 在搜索框中连续按 `Enter` / `Shift+Enter`，或在阅读区连续按 `n` / `N` 时，每次搜索跳转按输入顺序执行；后台结果尚未到齐时保留待处理请求，搜索完成前不提前绕回。修改查询、手动翻页、选择结果或关闭搜索会取消待处理请求，避免稍后突然跳页。
 
+搜索栏的 **History** 可复用当前窗口最近 16 条已执行的查询。按 Enter、Prev / Next、`n` / `N` 或选择搜索结果时加入记录，重复查询移到最前；仅输入而未确认的草稿不加入。选择记录保留当前 Aa / Word 选项，清除旧结果并选中整个查询，按 Enter 才跳到新的匹配项。键盘打开菜单后用方向键选择、Enter 确认，Escape 仅关闭菜单；窄窗口可先用 Tab 聚焦 History，控件会自动显露。**Clear history** 清空记录，保留当前查询和结果。记录可跨同一窗口中的文档切换使用，关闭窗口后释放，不写入磁盘；超过 4096 字节的查询仍可搜索，但不加入记录。
+
 词组搜索按顺序匹配文字，词间的空格可匹配换行、缩进、连续空格或不换行空格。例如 `alpha extraordinary omega` 可以找到分布在三行的词组；不会匹配连在一起或顺序相反的词。选中文字后打开 Find，会将选区中的空白整理为单个空格填入搜索框，支持多行选区；空选区保留原查询。复制原文仍保留换行。词组限于同一页，按 PDF 文本层的提取顺序搜索。
 
 侧栏搜索结果会在摘要中标出当前命中的原文，支持 Unicode 大小写折叠，例如 `STRASSE` 对应 `Straße`。结果行保留少量前文，让命中词靠近行首；悬停可查看较完整的上下文。浅色与深色界面均提供高亮，点击结果跳转到对应页面。
@@ -483,6 +485,7 @@ xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection.py targe
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-selection-scroll.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-load.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-options.py target/release/pagewing
+xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-history.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-phrases.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-results.py target/release/pagewing
 xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/smoke-search-dense.py target/release/pagewing

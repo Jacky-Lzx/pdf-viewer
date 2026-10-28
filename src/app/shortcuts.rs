@@ -126,6 +126,7 @@ pub(super) enum InputButton {
     Find,
     History(bool),
     Search(SearchButton),
+    SearchHistory,
     Comments,
     CloseComments,
     Page,
@@ -163,6 +164,7 @@ pub(super) struct InputButtons {
     pub search_next: Option<Id>,
     pub search_results: Option<Id>,
     pub search_copy: Option<Id>,
+    pub search_history: Option<Id>,
     pub close_search: Option<Id>,
     pub comments: Option<Id>,
     pub close_comments: Option<Id>,
@@ -188,6 +190,7 @@ impl InputButtons {
                 self.search_next,
                 self.search_results,
                 self.search_copy,
+                self.search_history,
                 self.close_search,
             ]
             .into_iter()
@@ -214,6 +217,7 @@ impl InputButtons {
                 InputButton::Search(SearchButton::Results),
             ),
             (self.search_copy, InputButton::Search(SearchButton::Copy)),
+            (self.search_history, InputButton::SearchHistory),
             (self.close_search, InputButton::Search(SearchButton::Close)),
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),
@@ -232,7 +236,9 @@ impl InputButtons {
                 continue;
             };
             if response.clicked() {
-                if !response.clicked_by(eframe::egui::PointerButton::Primary) {
+                if action != InputButton::SearchHistory
+                    && !response.clicked_by(eframe::egui::PointerButton::Primary)
+                {
                     // Activation keys belong to the button, not reader commands
                     // or the newly opened input.
                     context.input_mut(|input| {

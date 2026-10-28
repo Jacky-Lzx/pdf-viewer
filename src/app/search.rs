@@ -3,6 +3,7 @@ use eframe::egui::{self, Key};
 use std::time::{Duration, Instant};
 
 mod export;
+mod history;
 
 #[cfg(test)]
 mod highlight_tests;
@@ -91,6 +92,7 @@ impl Pagewing {
     }
 
     pub(super) fn next_hits(&mut self, reverse: bool, count: usize) {
+        self.query_history.remember(&self.query);
         self.dispatch_search_jump(Some(crate::search_navigation::Jump::new(reverse, count)));
     }
 
@@ -115,16 +117,21 @@ impl Pagewing {
         if let Some(jump) = jump
             && let Some(index) = navigation.request(jump, self.search_state())
         {
-            self.select_hit(index);
+            self.follow_search_hit(index);
         }
         while let Some(index) = navigation.next(self.search_state()) {
-            self.select_hit(index);
+            self.follow_search_hit(index);
         }
         navigation.recycle();
         self.search_navigation = navigation;
     }
 
     pub(super) fn select_hit(&mut self, index: usize) {
+        self.query_history.remember(&self.query);
+        self.follow_search_hit(index);
+    }
+
+    fn follow_search_hit(&mut self, index: usize) {
         let current = self.current_position();
         self.search_navigation.clear();
         self.hit_index = Some(index);
@@ -170,17 +177,6 @@ impl Pagewing {
                     if response.changed() {
                         self.change_search();
                     }
-                    // egui compares focus with the previous frame. Acquiring
-                    // and releasing it with Enter in one frame is not lost_focus.
-                    if response.lost_focus() || focused_now {
-                        ui.input(|input| {
-                            for event in &input.events {
-                                if let egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } = event {
-                                    self.next_hit(modifiers.shift);
-                                }
-                            }
-                        });
-                    }
                     self.input_buttons.search_previous = Some(ui.button("Prev").id);
                     self.input_buttons.search_next = Some(ui.button("Next").id);
                     let index = self.hit_index.map(|i| i + 1).unwrap_or(0);
@@ -202,7 +198,20 @@ impl Pagewing {
                             .on_disabled_hover_text("No search results available yet.")
                             .id,
                     );
+                    let history_action = self.search_history_menu(ui);
                     self.input_buttons.close_search = Some(ui.button("×").id);
+                    // Menu activation belongs to the popup, including Tab and
+                    // Enter batched in the frame that releases text focus.
+                    if !history_action && !egui::Popup::is_any_open(context)
+                        && (response.lost_focus() || focused_now) {
+                        ui.input(|input| {
+                            for event in &input.events {
+                                if let egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } = event {
+                                    self.next_hit(modifiers.shift);
+                                }
+                            }
+                        });
+                    }
                     if !ui.is_sizing_pass() && std::mem::take(&mut self.copy_search_requested) {
                         // TextEdit and change_search run first: a pending edit
                         // must never copy results from the preceding query.

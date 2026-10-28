@@ -34,6 +34,7 @@ mod page_geometry;
 mod page_labels;
 mod pdf_objects;
 mod pdf_string;
+mod query_history;
 mod recent;
 mod render_plan;
 mod search_highlights;

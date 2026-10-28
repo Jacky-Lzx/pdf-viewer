@@ -24,6 +24,15 @@ impl Pagewing {
                 }
             }
             Some(shortcuts::InputButton::Find) => self.find(),
+            Some(shortcuts::InputButton::SearchHistory) => {
+                if let Some(response) = self
+                    .input_buttons
+                    .search_history
+                    .and_then(|id| context.read_response(id))
+                {
+                    egui::Popup::toggle_id(context, egui::Popup::default_response_id(&response));
+                }
+            }
             Some(shortcuts::InputButton::History(forward)) => {
                 self.toolbar_history(context, forward)
             }
@@ -202,7 +211,8 @@ impl Pagewing {
                 && (self.comment_control_focused(context)
                     || self.sidebar_control_focused(context)
                     || self.toolbar_control_focused(context)
-                    || self.status_control_focused(context))
+                    || self.status_control_focused(context)
+                    || self.input_buttons.search_has_focus(context))
             {
                 // Reader bars and sidebars own focus traversal and button
                 // activation, leaving the reading view and shortcuts alone.
