@@ -60,6 +60,20 @@ def run(binary):
                     application.send_signal(signal.SIGCONT)
                 time.sleep(0.4)
 
+            def navigate_and_open(motions, index):
+                # Snapshot the current MRU order because every open changes it.
+                target = json.loads(config_path.read_text())["recent"][index]
+                picker()
+                application.send_signal(signal.SIGSTOP)
+                try:
+                    for key, control in motions:
+                        keyboard.key(key, ctrl=control, delay=0)
+                    keyboard.key(0xFF0D, delay=0)
+                finally:
+                    application.send_signal(signal.SIGCONT)
+                expect(Path(target["path"]), target["page"],
+                       f"ordered page/boundary navigation opens result {index + 1}")
+
             def selected_rows(size=(860, 540)):
                 width, height = size
                 gap = min(80, (width - 64) // 4)
@@ -181,9 +195,22 @@ def run(binary):
                 keyboard.key(0xFF09); keyboard.key(0xFF09); keyboard.key(0xFF0D)
                 expect(paths[0], 0, "Tab and Enter activate Open at minimum size")
                 picker("jkgmissing")
+                keyboard.key(0xFF57, ctrl=True)  # Ctrl+End with no results
+                keyboard.key(0xFF55); keyboard.key(0xFF56)
                 keyboard.key(0xFF09); keyboard.key(0xFF0D)
                 keyboard.key("j", shift=True)
                 expect(paths[0], 1, "empty results leave Cancel accessible with Tab and Enter")
+
+                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                navigate_and_open([(0xFF56, False)], 7)  # PageDown: seven visible rows
+                navigate_and_open([(0xFF57, True), (0xFF56, False), (0xFF52, False)], 22)
+                navigate_and_open([(0xFF57, True), (0xFF50, True), (0xFF55, False), (0xFF54, False)], 1)
+                keyboard.x11.XResizeWindow(keyboard.display, window, 240, 240)
+                keyboard.x11.XFlush(keyboard.display)
+                time.sleep(0.3)
+                navigate_and_open([(0xFF56, False)], 1)  # One visible row at minimum size
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 # Empty history must also remain usable from the welcome screen.
@@ -197,7 +224,7 @@ def run(binary):
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert not json.loads(config_path.read_text())["recent"]
-                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
+                print("PASS: burst/token filtering, ordered same-frame movement at both edges, saved-page restore, arrows and Ctrl+J/K, viewport-sized PageUp/PageDown, Ctrl+Home/End, stable visible neighbors, toggle/Escape, selected row after tall/short/narrow resizing, manual scroll preservation, 24-row compact/minimum-size scrolling, Tab/Enter Open/Cancel, empty matches/history and graceful quit")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

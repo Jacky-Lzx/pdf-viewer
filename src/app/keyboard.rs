@@ -408,6 +408,7 @@ impl Pagewing {
                 continue;
             }
             if let Some(picker) = &mut self.recent_picker {
+                use crate::recent::Motion;
                 let filter_focused = picker.focus
                     || context
                         .memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input")));
@@ -425,10 +426,30 @@ impl Pagewing {
                     } else {
                         1
                     };
-                    picker.motions.push(delta);
+                    picker.motions.push(Motion::Step(delta));
                     context.input_mut(|input| {
                         shortcuts::consume_text_shortcut(input, raw_key, raw_modifiers)
                     });
+                } else if filter_focused
+                    && modifiers.is_none()
+                    && matches!(key, Key::PageUp | Key::PageDown)
+                {
+                    picker
+                        .motions
+                        .push(Motion::Page(if key == Key::PageUp { -1 } else { 1 }));
+                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
+                } else if filter_focused
+                    && modifiers.command
+                    && !modifiers.alt
+                    && !modifiers.shift
+                    && matches!(key, Key::Home | Key::End)
+                {
+                    picker.motions.push(if key == Key::Home {
+                        Motion::First
+                    } else {
+                        Motion::Last
+                    });
+                    context.input_mut(|input| input.consume_key(raw_modifiers, raw_key));
                 }
                 continue;
             }

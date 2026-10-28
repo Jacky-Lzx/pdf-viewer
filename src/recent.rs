@@ -7,6 +7,13 @@ struct Entry {
     display: String,
 }
 
+pub enum Motion {
+    Step(isize),
+    Page(isize),
+    First,
+    Last,
+}
+
 pub struct RecentPicker {
     entries: Vec<Entry>,
     visible: Vec<usize>,
@@ -14,7 +21,7 @@ pub struct RecentPicker {
     pub selected: usize,
     pub focus: bool,
     pub reveal: bool,
-    pub motions: Vec<isize>,
+    pub motions: Vec<Motion>,
     pub confirm: bool,
 }
 
@@ -81,11 +88,17 @@ impl RecentPicker {
         self.reveal = true;
     }
 
-    pub fn apply_motions(&mut self) {
+    pub fn apply_motions(&mut self, page_rows: usize) {
         // Clamp each event in order. Summing up/down first loses movement at edges.
         let mut motions = std::mem::take(&mut self.motions);
-        for delta in motions.drain(..) {
-            self.step(delta);
+        let page_rows = page_rows.clamp(1, isize::MAX as usize) as isize;
+        for motion in motions.drain(..) {
+            self.step(match motion {
+                Motion::Step(delta) => delta,
+                Motion::Page(direction) => direction.saturating_mul(page_rows),
+                Motion::First => isize::MIN,
+                Motion::Last => isize::MAX,
+            });
         }
         self.motions = motions;
     }

@@ -63,25 +63,41 @@ impl Pagewing {
                 if input.changed() {
                     picker.filter();
                 }
-                if !ui.is_sizing_pass() {
-                    picker.apply_motions();
-                }
-                if !ui.is_sizing_pass() && std::mem::take(&mut picker.confirm) {
-                    chosen = picker.selected_path().map(ToOwned::to_owned);
-                }
+                let list_height =
+                    (size.y - if compact { 180.0 } else { 230.0 }).clamp(32.0, 280.0);
+                let row_height = 32.0_f32
+                    .max(ui.spacing().interact_size.y)
+                    .max(ui.text_style_height(&egui::TextStyle::Button)
+                        + ui.spacing().button_padding.y * 2.0);
                 if compact {
                     ui.weak(format!("{} documents", picker.len()));
                 } else {
                     ui.weak(format!(
-                        "{} documents · ↑/↓ or Ctrl+J/K · Enter to open",
+                        "{} documents · ↑/↓ · PgUp/PgDn · Enter to open",
                         picker.len()
                     ));
                 }
-                let reveal = !ui.is_sizing_pass() && std::mem::take(&mut picker.reveal);
+                let input = input.on_hover_text(
+                    "↑/↓ or Ctrl+J/K: select · PageUp/PageDown: move by visible rows · Ctrl/Cmd+Home/End: first/last · Enter: open",
+                );
                 egui::ScrollArea::vertical()
                     .id_salt("pagewing-recent-results")
-                    .max_height((size.y - if compact { 180.0 } else { 230.0 }).clamp(32.0, 280.0))
-                    .show(ui, |ui| {
+                    // A pending offset must not override the next selection
+                    // when key batches and window resizing happen together.
+                    .animated(false)
+                    .max_height(list_height)
+                    .show_viewport(ui, |ui, viewport| {
+                        if !ui.is_sizing_pass() {
+                            let spacing = ui.spacing().item_spacing.y;
+                            let page_rows =
+                                ((viewport.height() + spacing) / (row_height + spacing)).floor()
+                                    as usize;
+                            picker.apply_motions(page_rows);
+                            if std::mem::take(&mut picker.confirm) {
+                                chosen = picker.selected_path().map(ToOwned::to_owned);
+                            }
+                        }
+                        let reveal = !ui.is_sizing_pass() && std::mem::take(&mut picker.reveal);
                         if picker.len() == 0 {
                             ui.label(if self.library.recent.is_empty() {
                                 "No recent documents yet. Open a PDF to get started."
@@ -92,7 +108,7 @@ impl Pagewing {
                         for row in 0..picker.len() {
                             let response = ui
                                 .add_sized(
-                                    [ui.available_width(), 32.0],
+                                    [ui.available_width(), row_height],
                                     egui::Button::selectable(
                                         picker.selected == row,
                                         picker.label(row),
@@ -155,6 +171,10 @@ mod tests {
     use crate::recent::RecentPicker;
 
     fn key(key: egui::Key) -> Vec<egui::Event> {
+        modified_key(key, egui::Modifiers::NONE)
+    }
+
+    fn modified_key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
         [true, false]
             .into_iter()
             .map(|pressed| egui::Event::Key {
@@ -162,7 +182,7 @@ mod tests {
                 physical_key: None,
                 pressed,
                 repeat: false,
-                modifiers: egui::Modifiers::NONE,
+                modifiers,
             })
             .collect()
     }
@@ -250,6 +270,120 @@ mod tests {
                 "keyboard navigation must preserve the position of an already visible result"
             );
         }
+    }
+
+    #[test]
+    fn recent_page_navigation_uses_the_current_viewport_and_preserves_event_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.recent_picker =
+            Some(RecentPicker::new((0..24).map(|index| {
+                directory.path().join(format!("book-{index}.pdf"))
+            })));
+        for (size, page_rows) in [
+            (egui::vec2(1180.0, 820.0), 7),
+            (egui::vec2(240.0, 240.0), 1),
+            (egui::vec2(480.0, 420.0), 4),
+            (egui::vec2(240.0, 820.0), 7),
+        ] {
+            let mut events = modified_key(egui::Key::Home, egui::Modifiers::COMMAND);
+            events.extend(key(egui::Key::PageDown));
+            sized_frame(&mut app, &context, size, events);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = sized_frame(&mut app, &context, size, Vec::new());
+            }
+            assert_eq!(app.recent_picker.as_ref().unwrap().selected, page_rows);
+            assert!(
+                selected_row(&context, &output).is_some(),
+                "selection must be visible at {size:?}"
+            );
+            sized_frame(&mut app, &context, size, key(egui::Key::PageUp));
+            assert_eq!(app.recent_picker.as_ref().unwrap().selected, 0);
+        }
+        let style = context.style();
+        context.style_mut(|style| {
+            style
+                .text_styles
+                .get_mut(&egui::TextStyle::Button)
+                .unwrap()
+                .size = 28.0;
+        });
+        let mut events = modified_key(egui::Key::Home, egui::Modifiers::COMMAND);
+        events.extend(key(egui::Key::PageDown));
+        frame(&mut app, &context, events);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = sized_frame(&mut app, &context, egui::vec2(1180.0, 820.0), Vec::new());
+        }
+        assert!((1..7).contains(&app.recent_picker.as_ref().unwrap().selected));
+        assert!(selected_row(&context, &output).is_some());
+        context.set_style(style);
+        for (boundary, page, arrow, expected) in [
+            (egui::Key::End, egui::Key::PageDown, egui::Key::ArrowUp, 22),
+            (egui::Key::Home, egui::Key::PageUp, egui::Key::ArrowDown, 1),
+        ] {
+            let mut events = modified_key(boundary, egui::Modifiers::COMMAND);
+            events.extend(key(page));
+            events.extend(key(arrow));
+            frame(&mut app, &context, events);
+            assert_eq!(app.recent_picker.as_ref().unwrap().selected, expected);
+        }
+        let mut events = vec![egui::Event::Paste("book-1".into())];
+        events.extend(modified_key(egui::Key::End, egui::Modifiers::COMMAND));
+        events.extend(key(egui::Key::PageUp));
+        events.extend(key(egui::Key::Enter));
+        frame(&mut app, &context, events);
+        assert_eq!(app.reading.path, directory.path().join("book-12.pdf"));
+        assert!(app.recent_picker.is_none());
+    }
+
+    #[test]
+    fn recent_navigation_retains_text_editing_focus_and_handles_empty_results() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = egui::Context::default();
+        let mut app =
+            Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+        app.recent_picker =
+            Some(RecentPicker::new((0..24).map(|index| {
+                directory.path().join(format!("book-{index}.pdf"))
+            })));
+        for _ in 0..4 {
+            frame(&mut app, &context, Vec::new());
+        }
+        let mut events = vec![egui::Event::Paste("book".into())];
+        events.extend(key(egui::Key::Home));
+        events.push(egui::Event::Paste("first-".into()));
+        events.extend(key(egui::Key::End));
+        events.push(egui::Event::Paste("-last".into()));
+        frame(&mut app, &context, events);
+        assert_eq!(app.recent_picker.as_ref().unwrap().query, "first-book-last");
+        for motion in [egui::Key::PageUp, egui::Key::PageDown] {
+            let mut events = modified_key(egui::Key::End, egui::Modifiers::COMMAND);
+            events.extend(key(motion));
+            events.extend(key(egui::Key::Enter));
+            frame(&mut app, &context, events);
+            assert!(
+                app.recent_picker
+                    .as_ref()
+                    .unwrap()
+                    .selected_path()
+                    .is_none()
+            );
+            assert!(!app.loading);
+        }
+        frame(
+            &mut app,
+            &context,
+            modified_key(egui::Key::A, egui::Modifiers::COMMAND),
+        );
+        frame(&mut app, &context, vec![egui::Event::Paste("book".into())]);
+        frame(&mut app, &context, key(egui::Key::Tab));
+        frame(&mut app, &context, key(egui::Key::PageDown));
+        assert_eq!(app.recent_picker.as_ref().unwrap().selected, 0);
+        assert!(!context.memory(|memory| memory.has_focus(egui::Id::new("pagewing-recent-input"))));
     }
 
     #[test]
