@@ -398,6 +398,8 @@ cargo bench --locked --bench link_hints -- 9
 cargo bench --locked --bench link_visibility -- 9
 # 批注覆盖区域，比较固定视图、持续移动和每十帧变化一次的几何准备
 cargo bench --locked --bench link_visibility -- 21 comments
+# 邻页批注几何，比较固定双页和三页交替邻页时的缓冲复用
+cargo bench --locked --bench link_visibility -- 21 comment-neighbors
 # 密集页面拖选定位，分别记录查询、建索引耗时和索引容量
 cargo bench --locked --bench selection -- 9
 # 整词范围查询，比较重复分词与共享边界位图

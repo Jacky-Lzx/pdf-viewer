@@ -503,9 +503,9 @@ impl Pagewing {
         let visible = if page == self.nav.page {
             &mut self.comments.visible
         } else {
-            // As with links, reuse one scratch buffer for neighboring pages.
-            // It must rebuild when a different page uses the same storage.
-            self.comments.other_visible.invalidate();
+            // Keep one neighbor only. A different page or view rebuilds this
+            // storage; consecutive draws of the same neighbor can reuse it.
+            // set_comments releases both buffers when the snapshot changes.
             &mut self.comments.other_visible
         };
         let comments = &self.comments.comments.items;

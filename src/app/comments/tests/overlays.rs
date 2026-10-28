@@ -168,72 +168,139 @@ fn cached_overlay_paint_and_hit_regions_match_while_views_and_selection_change()
 }
 
 #[test]
-fn snapshot_replacement_refreshes_equal_count_geometry_and_clicks_the_correct_part() {
+fn neighboring_overlay_storage_survives_repeated_draws_and_releases_on_mode_changes() {
     let (_root, context, mut app) = many_comments();
-    let original = std::fs::read(&app.reading.path).unwrap();
-    let mut comment = app.comments.comments.items[0].clone();
-    comment.rects = vec![
-        PdfRect::new(0.0, 100.0, 180.0, 120.0),
-        PdfRect::new(220.0, 200.0, 300.0, 220.0),
-    ];
-    comment.contents = "Original geometry".into();
+    let template = app.comments.comments.items[0].clone();
     app.comments.set_comments(Comments {
-        items: vec![comment.clone()],
+        items: (0..3)
+            .map(|page| {
+                let mut comment = template.clone();
+                comment.page = page;
+                comment.slot = Some(page);
+                comment.rects = vec![PdfRect::new(
+                    100.0 + page as f64 * 20.0,
+                    100.0,
+                    200.0,
+                    120.0,
+                )];
+                comment
+            })
+            .collect(),
         limited: false,
     });
     app.scale = 1.0;
     app.reading.rotation = 0;
     let origin = egui::pos2(20.0, 30.0);
     assert_matches_reference(&mut app, &context, 0, origin);
-    let previous = app.comments.visible.rects.clone();
-    for rect in &mut comment.rects {
-        *rect = *rect + hayro::kurbo::Vec2::new(30.0, 50.0);
+    let current = app.comments.visible.rects.clone();
+    for page in [1, 1, 2, 2, 1] {
+        assert_matches_reference(&mut app, &context, page, origin);
+        assert_eq!(app.comments.visible.rects, current);
+        assert_eq!(app.comments.other_visible.indices, [(page, 0)]);
     }
-    comment.contents = "Replacement geometry".into();
-    app.comments.set_comments(Comments {
-        items: vec![comment],
-        limited: false,
-    });
+    let neighbor_allocation = app.comments.other_visible.rects.as_ptr();
+    app.nav.jump(1);
+    for page in [1, 0, 2, 1] {
+        assert_matches_reference(&mut app, &context, page, origin);
+        assert_eq!(
+            app.comments.other_visible.rects.as_ptr(),
+            neighbor_allocation
+        );
+    }
+    let current = app.comments.visible.rects.clone();
+    let single = app.current_position();
+    app.set_display_mode(false, true);
     assert_matches_reference(&mut app, &context, 0, origin);
-    assert_ne!(app.comments.visible.rects, previous);
-    let point = app.comments.visible.rects[1].center();
-    // A page-clipped region may extend outside the UI clip. That hidden
-    // portion must not receive clicks, and selection owns visible clicks.
-    for (active, point, opens) in [
-        (false, egui::pos2(70.0, 190.0), false),
-        (true, point, false),
-        (false, point, true),
-    ] {
-        app.selection.active = active;
-        // Egui hits the preceding frame's widgets. Present the new mode before
-        // sending a click, just as after entering or leaving selection in the UI.
-        draw(&mut app, &context, 0, origin, Vec::new(), false);
-        for pressed in [true, false] {
-            draw(
-                &mut app,
-                &context,
-                0,
-                origin,
-                vec![
-                    Event::PointerMoved(point),
-                    Event::PointerButton {
-                        pos: point,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: Modifiers::NONE,
-                    },
-                ],
-                false,
-            );
-        }
-        assert_eq!(app.comments.editor.is_some(), opens);
-    }
-    assert_eq!(
-        app.comments.editor.as_ref().unwrap().contents,
-        "Replacement geometry"
-    );
-    assert_eq!(std::fs::read(&app.reading.path).unwrap(), original);
-    app.clear_document(&context);
-    assert_eq!(app.comments.visible.rects.capacity(), 0);
+    app.set_display_mode(false, false);
     assert_eq!(app.comments.other_visible.rects.capacity(), 0);
+    assert_eq!(app.comments.other_visible.indices.capacity(), 0);
+    assert_eq!(app.comments.visible.rects, current);
+    app.set_display_mode(true, false);
+    assert_matches_reference(&mut app, &context, 0, origin);
+    app.restore_position(single, false);
+    assert_eq!(app.comments.other_visible.rects.capacity(), 0);
+    assert_eq!(app.comments.other_visible.indices.capacity(), 0);
+}
+
+#[test]
+fn snapshot_replacement_refreshes_equal_count_geometry_and_clicks_the_correct_part() {
+    for page in [0, 1, 2] {
+        let (_root, context, mut app) = many_comments();
+        let original = std::fs::read(&app.reading.path).unwrap();
+        let mut comment = app.comments.comments.items[0].clone();
+        comment.page = page;
+        comment.rects = vec![
+            PdfRect::new(0.0, 100.0, 180.0, 120.0),
+            PdfRect::new(220.0, 200.0, 300.0, 220.0),
+        ];
+        comment.contents = "Original geometry".into();
+        app.comments.set_comments(Comments {
+            items: vec![comment.clone()],
+            limited: false,
+        });
+        app.scale = 1.0;
+        app.reading.rotation = 0;
+        let origin = egui::pos2(20.0, 30.0);
+        assert_matches_reference(&mut app, &context, page, origin);
+        let previous = if page == app.nav.page {
+            app.comments.visible.rects.clone()
+        } else {
+            app.comments.other_visible.rects.clone()
+        };
+        for rect in &mut comment.rects {
+            *rect = *rect + hayro::kurbo::Vec2::new(30.0, 50.0);
+        }
+        comment.contents = "Replacement geometry".into();
+        app.comments.set_comments(Comments {
+            items: vec![comment],
+            limited: false,
+        });
+        assert_matches_reference(&mut app, &context, page, origin);
+        let regions = if page == app.nav.page {
+            &app.comments.visible.rects
+        } else {
+            &app.comments.other_visible.rects
+        };
+        assert_ne!(*regions, previous);
+        let point = regions[1].center();
+        // A page-clipped region may extend outside the UI clip. That hidden
+        // portion must not receive clicks, and selection owns visible clicks.
+        for (active, point, opens) in [
+            (false, egui::pos2(70.0, 190.0), false),
+            (true, point, false),
+            (false, point, true),
+        ] {
+            app.selection.active = active;
+            // Egui hits the preceding frame's widgets. Present the new mode before
+            // sending a click, just as after entering or leaving selection in the UI.
+            draw(&mut app, &context, page, origin, Vec::new(), false);
+            for pressed in [true, false] {
+                draw(
+                    &mut app,
+                    &context,
+                    page,
+                    origin,
+                    vec![
+                        Event::PointerMoved(point),
+                        Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Modifiers::NONE,
+                        },
+                    ],
+                    false,
+                );
+            }
+            assert_eq!(app.comments.editor.is_some(), opens);
+        }
+        assert_eq!(
+            app.comments.editor.as_ref().unwrap().contents,
+            "Replacement geometry"
+        );
+        assert_eq!(std::fs::read(&app.reading.path).unwrap(), original);
+        app.clear_document(&context);
+        assert_eq!(app.comments.visible.rects.capacity(), 0);
+        assert_eq!(app.comments.other_visible.rects.capacity(), 0);
+    }
 }

@@ -1,5 +1,7 @@
 #[path = "link_visibility/comments.rs"]
 mod comments;
+#[path = "link_visibility/neighbors.rs"]
+mod neighbors;
 
 #[allow(dead_code, unused_imports)] // Test imports are unused in this harness-free bench.
 #[path = "../src/geometry.rs"]
@@ -56,6 +58,10 @@ fn main() {
     assert!((1..=1000).contains(&passes));
     if std::env::args().nth(2).as_deref() == Some("comments") {
         comments::run(passes);
+        return;
+    }
+    if std::env::args().nth(2).as_deref() == Some("comment-neighbors") {
+        neighbors::run(passes);
         return;
     }
     println!(
