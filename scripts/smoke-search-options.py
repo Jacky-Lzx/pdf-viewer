@@ -152,6 +152,8 @@ def run(binary):
                 keyboard.key(0xFF09); keyboard.key(" ")
                 wait_for(lambda: json.loads(config_path.read_text())["sidebar"], "keyboard Results button opens sidebar")
                 keyboard.key(0xFF09); keyboard.key(" ")
+                assert keyboard.clipboard().startswith("Pagewing search snippets\n"), "keyboard Copy results exports the current matches"
+                keyboard.key(0xFF09); keyboard.key(" ")
                 keyboard.key("j", shift=True)
                 expect(4, "keyboard close button returns input to the reader")
                 keyboard.key("f", ctrl=True)
@@ -181,7 +183,7 @@ def run(binary):
                             start = None
                     return spans
 
-                for label in ("Aa", "Word", "Prev", "Next", "Results", "Close"):
+                for label in ("Aa", "Word", "Prev", "Next", "Results", "Copy results", "Close"):
                     keyboard.key(0xFF09)
                     spans = focused_span(240)
                     assert len(spans) == 1 and 3 < spans[0][0] < spans[0][1] < 237, (label, spans)

@@ -2,6 +2,8 @@ use super::{Pagewing, appearance, shortcuts, toolbar};
 use eframe::egui::{self, Key};
 use std::time::{Duration, Instant};
 
+mod export;
+
 impl Pagewing {
     pub(super) fn search_button(&mut self, action: shortcuts::SearchButton) {
         use shortcuts::SearchButton;
@@ -24,6 +26,7 @@ impl Pagewing {
                 self.reveal_hit = Some(self.hit_index.unwrap_or(0));
                 self.dirty = true;
             }
+            SearchButton::Copy => self.copy_search_requested = true,
             SearchButton::Close => {
                 self.search_open = false;
                 self.pending_search_jump = None;
@@ -32,6 +35,7 @@ impl Pagewing {
     }
 
     pub(super) fn restart_search(&mut self) {
+        self.copy_search_requested = false;
         self.revision += 1;
         self.hits.clear();
         self.result_text.clear();
@@ -133,6 +137,7 @@ impl Pagewing {
 
     pub(super) fn search_bar(&mut self, context: &egui::Context) {
         if !self.search_open {
+            self.copy_search_requested = false;
             return;
         }
         egui::TopBottomPanel::top("search")
@@ -196,9 +201,52 @@ impl Pagewing {
                         }
                     }
                     self.input_buttons.search_results = Some(ui.button("Results").id);
+                    self.input_buttons.search_copy = Some(
+                        ui.add_enabled(!self.hits.is_empty(), egui::Button::new("Copy results"))
+                            .on_hover_text("Copy the available search snippets, including results outside the viewport")
+                            .on_disabled_hover_text("No search results available yet.")
+                            .id,
+                    );
                     self.input_buttons.close_search = Some(ui.button("×").id);
+                    if !ui.is_sizing_pass() && std::mem::take(&mut self.copy_search_requested) {
+                        // TextEdit and change_search run first: a pending edit
+                        // must never copy results from the preceding query.
+                        self.copy_search_results(context);
+                    }
                 });
             });
+    }
+
+    fn copy_search_results(&mut self, context: &egui::Context) {
+        if self.hits.is_empty() {
+            return;
+        }
+        let report = export::render(
+            export::Snapshot {
+                path: &self.reading.path,
+                query: &self.query,
+                options: self.library.search_options,
+                hits: &self.hits,
+                scanned: self.scanned,
+                pages: self.scan_total,
+                complete: self.search_complete,
+                limited: self.search_limited,
+            },
+            |page| self.labels.label(page),
+        );
+        if report.copied == 0 {
+            self.notify("No search snippets copied (clipboard size limit).");
+            return;
+        }
+        context.copy_text(report.text);
+        self.notify(if report.copied == report.total {
+            format!("Copied {} available search snippets", report.copied)
+        } else {
+            format!(
+                "Copied {} of {} available search snippets (clipboard size limit)",
+                report.copied, report.total
+            )
+        });
     }
 }
 
@@ -225,8 +273,8 @@ mod tests {
         events
     }
 
-    fn frame(app: &mut Pagewing, context: &egui::Context, events: Vec<Event>) {
-        sized_frame(app, context, egui::vec2(1180.0, 820.0), events);
+    fn frame(app: &mut Pagewing, context: &egui::Context, events: Vec<Event>) -> egui::FullOutput {
+        sized_frame(app, context, egui::vec2(1180.0, 820.0), events)
     }
 
     fn sized_frame(
@@ -234,8 +282,8 @@ mod tests {
         context: &egui::Context,
         size: egui::Vec2,
         events: Vec<Event>,
-    ) {
-        let _ = context.run(
+    ) -> egui::FullOutput {
+        context.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 events,
@@ -248,7 +296,7 @@ mod tests {
                 app.status(context);
                 app.canvas(context);
             },
-        );
+        )
     }
 
     fn reader(path: std::path::PathBuf) -> (Pagewing, egui::Context) {
@@ -330,6 +378,12 @@ mod tests {
     fn narrow_search_bar_keeps_each_tabbed_button_visible() {
         let directory = tempfile::tempdir().unwrap();
         let (mut app, context) = reader(directory.path().join("library.json"));
+        app.hits.push(crate::text::SearchHit {
+            page: 2,
+            rects: Vec::new(),
+            snippet: "A result outside the narrow viewport".into(),
+            snippet_match: 2..8,
+        });
         let size = egui::vec2(240.0, 240.0);
         for _ in 0..4 {
             sized_frame(&mut app, &context, size, Vec::new());
@@ -340,6 +394,7 @@ mod tests {
             app.input_buttons.search_previous.unwrap(),
             app.input_buttons.search_next.unwrap(),
             app.input_buttons.search_results.unwrap(),
+            app.input_buttons.search_copy.unwrap(),
             app.input_buttons.close_search.unwrap(),
         ];
         for id in ids {
@@ -364,6 +419,59 @@ mod tests {
             assert!(response.has_focus());
             assert!(response.rect.left() >= 0.0 && response.rect.right() <= width);
         }
+    }
+
+    #[test]
+    fn copy_results_applies_pending_query_edits_and_never_copies_stale_or_empty_hits() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, context) = reader(directory.path().join("library.json"));
+        app.query = "old".into();
+        app.search_complete = true;
+        app.search_due = None;
+        app.hits.push(crate::text::SearchHit {
+            page: 2,
+            rects: Vec::new(),
+            snippet: "stale old result".into(),
+            snippet_match: 6..9,
+        });
+        frame(&mut app, &context, Vec::new());
+        let position = context
+            .read_response(app.input_buttons.search_copy.unwrap())
+            .unwrap()
+            .rect
+            .center();
+        let mut events = vec![Event::Paste("new".into()), Event::PointerMoved(position)];
+        events.extend([true, false].map(|pressed| Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }));
+        let before = app.pan;
+        let output = frame(&mut app, &context, events);
+        assert!(
+            app.query.contains("new"),
+            "pending text must reach the query before copying"
+        );
+        assert!(app.hits.is_empty());
+        assert!(!app.copy_search_requested);
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        let output = frame(&mut app, &context, key(Key::Enter));
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        assert_eq!(app.nav.page, 2);
+        assert_eq!(app.pan, before);
     }
 
     #[test]
@@ -414,6 +522,7 @@ mod tests {
                 SearchButton::Previous,
                 SearchButton::Next,
                 SearchButton::Results,
+                SearchButton::Copy,
                 SearchButton::Close,
             ] {
                 let directory = tempfile::tempdir().unwrap();
@@ -437,6 +546,7 @@ mod tests {
                     SearchButton::Previous => app.input_buttons.search_previous,
                     SearchButton::Next => app.input_buttons.search_next,
                     SearchButton::Results => app.input_buttons.search_results,
+                    SearchButton::Copy => app.input_buttons.search_copy,
                     SearchButton::Close => app.input_buttons.close_search,
                 }
                 .unwrap();
@@ -445,7 +555,7 @@ mod tests {
                 frame(&mut app, &context, Vec::new());
                 let before = app.pan;
                 let revision = app.revision;
-                frame(&mut app, &context, key(activation));
+                let output = frame(&mut app, &context, key(activation));
                 assert_eq!(app.query, "Rust", "{action:?}, {activation:?}");
                 let expected_page = match action {
                     SearchButton::Previous => 1,
@@ -472,6 +582,14 @@ mod tests {
                     SearchButton::Previous => assert_eq!(app.hit_index, Some(0)),
                     SearchButton::Next => assert_eq!(app.hit_index, Some(2)),
                     SearchButton::Results => assert!(app.library.sidebar),
+                    SearchButton::Copy => {
+                        assert!(output.platform_output.commands.iter().any(|command| matches!(command,
+                            egui::OutputCommand::CopyText(text) if text.contains("Available results: 3") && text.contains("Result 3 · Page 4")
+                        )));
+                        assert_eq!(app.hit_index, Some(1));
+                        assert!(!app.library.sidebar);
+                        assert!(context.memory(|memory| memory.has_focus(id)));
+                    }
                     SearchButton::Close => {
                         assert!(!app.search_open);
                         assert!(app.pending_search_jump.is_none());

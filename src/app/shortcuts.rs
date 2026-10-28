@@ -109,6 +109,7 @@ pub(super) enum SearchButton {
     Previous,
     Next,
     Results,
+    Copy,
     Close,
 }
 
@@ -121,6 +122,7 @@ pub(super) struct InputButtons {
     pub search_previous: Option<Id>,
     pub search_next: Option<Id>,
     pub search_results: Option<Id>,
+    pub search_copy: Option<Id>,
     pub close_search: Option<Id>,
     pub comments: Option<Id>,
     pub close_comments: Option<Id>,
@@ -145,6 +147,7 @@ impl InputButtons {
                 self.search_previous,
                 self.search_next,
                 self.search_results,
+                self.search_copy,
                 self.close_search,
             ]
             .into_iter()
@@ -168,6 +171,7 @@ impl InputButtons {
                 self.search_results,
                 InputButton::Search(SearchButton::Results),
             ),
+            (self.search_copy, InputButton::Search(SearchButton::Copy)),
             (self.close_search, InputButton::Search(SearchButton::Close)),
             (self.comments, InputButton::Comments),
             (self.close_comments, InputButton::CloseComments),

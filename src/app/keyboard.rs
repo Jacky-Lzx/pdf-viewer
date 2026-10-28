@@ -8,6 +8,10 @@ mod tests;
 
 impl Pagewing {
     pub(super) fn keys(&mut self, context: &egui::Context) {
+        let search_input_focused = self.search_open
+            && (self.search_focus
+                || context
+                    .memory(|memory| memory.has_focus(egui::Id::new("pagewing-search-input"))));
         // Apply button actions before routing this frame's keyboard input.
         // Otherwise a click that releases search focus can send following text
         // to reader commands before the new input has opened.
@@ -20,7 +24,15 @@ impl Pagewing {
                 }
             }
             Some(shortcuts::InputButton::Find) => self.find(),
-            Some(shortcuts::InputButton::Search(action)) => self.search_button(action),
+            Some(shortcuts::InputButton::Search(action)) => {
+                self.search_button(action);
+                if action == shortcuts::SearchButton::Copy && search_input_focused {
+                    // Reading button responses can release text focus before
+                    // TextEdit consumes queued edits. Apply those edits before
+                    // deciding whether these results still belong to the query.
+                    self.search_focus = true;
+                }
+            }
             Some(shortcuts::InputButton::Comments) => {
                 self.set_comments_open(context, !self.comments.open);
             }

@@ -88,6 +88,17 @@ def run(binary):
                 for width, height in ((1180, 820), (860, 240), (860, 540)):
                     resize(width, height)
                     wait_for(lambda: selected_result(height), "selected result retained after resizing")
+                keyboard.key("f", ctrl=True)
+                for _ in range(6):
+                    keyboard.key(TAB)
+                keyboard.key(ENTER)
+                exported = keyboard.clipboard()
+                for required in ("Pagewing search snippets\n", f"File: {document}\n", "Query: Needle\n",
+                                 "Available results: 80\n", "[Search complete.]", "Result 1 · Page 1",
+                                 "Result 80 · Page 80", "Needle 080"):
+                    assert required in exported, (required, exported)
+                expect(79, "copying all results preserves the selected hit and reading page")
+                keyboard.key(ESCAPE)
                 position = selected_result(540)
                 keyboard.wheel(position, steps=12)
                 time.sleep(0.3)
@@ -113,7 +124,7 @@ def run(binary):
                 expect(78, "Results preserves the current hit while reading another chapter")
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 80 search results below long contents and 60 bookmarks, first/last navigation, resize visibility, manual scrolling, Results restoration, clickable rows and chapter focus")
+                print("PASS: 80 search results below long contents and 60 bookmarks, full search-snippet clipboard export, first/last navigation, resize visibility, manual scrolling, Results restoration, clickable rows and chapter focus")
             except Exception:
                 log.flush()
                 log.seek(0)
