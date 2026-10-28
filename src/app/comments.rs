@@ -4,9 +4,11 @@ use crate::comment_cards::CardTextCache;
 use crate::comment_view::{CommentFilter, CommentView};
 use eframe::egui::{self, Color32, Vec2};
 
+mod body;
 mod editor;
 mod export;
 mod filtering;
+mod input;
 mod list;
 mod menus;
 
@@ -65,6 +67,7 @@ pub(super) struct CommentUi {
     pub filter_motions: Vec<crate::list_navigation::Motion>,
     pub filter_confirm: bool,
     filter_navigation: Option<filtering::FilterNavigation>,
+    filter_input: Vec<egui::Event>,
     region: Option<(egui::LayerId, egui::Rect)>,
 }
 
@@ -72,6 +75,7 @@ impl CommentUi {
     pub fn set_comments(&mut self, comments: Comments) {
         if self.loaded {
             self.clear_filter_navigation();
+            self.filter_input = Vec::new();
         }
         self.view.set_comments(&comments);
         self.cards.clear();
@@ -152,6 +156,7 @@ impl Pagewing {
         self.comments.open = open;
         if !open {
             self.comments.clear_filter_navigation();
+            self.comments.filter_input = Vec::new();
         }
         // Consume final text before hiding the panel, just as for a queued save.
         let pending = self.pending_comment_input(context);
@@ -389,6 +394,7 @@ impl Pagewing {
                 egui::ScrollArea::vertical()
                     .id_salt("pagewing-comments-panel")
                     .min_scrolled_height(0.0)
+                    .animated(false)
                     .max_height(panel_height.max(0.0))
                     .show(ui, |ui| {
                         let content_top = ui.cursor().top();
@@ -456,15 +462,16 @@ impl Pagewing {
                         if confirm && !self.loading && !self.comments.busy() {
                             selected = self.comments.view.selected();
                         }
-                        if self.comment_editor_fields(ui) {
+                        let editor_height = panel_height - (ui.cursor().top() - content_top);
+                        if self.comment_editor_fields(ui, editor_height) {
                             context.request_repaint();
                         }
                         // InputState retains text events after TextEdit handles
                         // them. Later actions must inspect the actual draft.
                         self.comments.input_pass = None;
-                        // TextEdit reveals its caret itself. Revealing its
-                        // whole field here would override the active card's
-                        // resize request in the surrounding scroll area.
+                        // The body coordinates its caret across both scroll
+                        // areas. Revealing the entire text widget here would
+                        // displace the active card after a resize.
                         if !context.memory(|memory| {
                             memory.has_focus(egui::Id::new("pagewing-comment-input"))
                         }) {

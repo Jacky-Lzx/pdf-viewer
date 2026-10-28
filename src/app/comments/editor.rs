@@ -1,16 +1,21 @@
 //! Comment fields and the pinned save/discard/thread actions.
-use super::{CommentActions, Pagewing, shortcuts};
+use super::{CommentActions, Pagewing};
 use crate::annotations::ReviewStatus;
 use eframe::egui;
 
 impl Pagewing {
-    pub(super) fn comment_editor_fields(&mut self, ui: &mut egui::Ui) -> bool {
+    pub(super) fn comment_editor_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        available_height: f32,
+    ) -> bool {
         let mut changed = false;
         let busy = self.comments.busy();
         let saving = self.comments.saving;
         let Some(comment) = &mut self.comments.editor else {
             return false;
         };
+        let top = ui.cursor().top();
         ui.separator();
         ui.label(format!(
             "{} · page {}",
@@ -33,22 +38,41 @@ impl Pagewing {
                 "Comment text is read-only."
             });
         }
+        // Long bodies scroll independently so their caret cannot push the
+        // filter, result cards and status controls out of a regular window.
+        // The outer panel can still scroll when the window is very small.
+        let spacing = ui.spacing().item_spacing.y;
+        let line = ui.text_style_height(&egui::TextStyle::Button);
+        let button = ui
+            .spacing()
+            .interact_size
+            .y
+            .max(line + 2.0 * ui.spacing().button_padding.y);
+        let checkbox = ui
+            .spacing()
+            .interact_size
+            .y
+            .max(ui.spacing().icon_width)
+            .max(line);
+        let controls = button
+            + checkbox
+            + 2.0 * spacing
+            + if comment.states.is_empty() {
+                0.0
+            } else {
+                button + spacing
+            };
+        let height = (available_height - (ui.cursor().top() - top) - controls).clamp(80.0, 280.0);
         // A queued save must still receive this batch's text;
         // other editor actions already stay disabled via busy.
-        ui.add_enabled_ui(!saving && !read_only, |ui| {
-            changed |= shortcuts::text_input(
-                ui,
-                egui::Id::new("pagewing-comment-input"),
-                &mut self.comments.focus,
-                &mut self.deferred_input,
-                egui::TextEdit::multiline(&mut comment.contents)
-                    .desired_rows(5)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("Write a comment…"),
-            )
-            .0
-            .changed();
-        });
+        changed |= super::body::show(
+            ui,
+            &mut comment.contents,
+            &mut self.comments.focus,
+            &mut self.deferred_input,
+            height,
+            !saving && !read_only,
+        );
         ui.add_enabled_ui(!busy && !comment.locked, |ui| {
             let status = format!("Status: {}", comment.review.label());
             let response = super::menus::button(ui, "comment-status", &status, 220.0);

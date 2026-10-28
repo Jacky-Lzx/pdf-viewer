@@ -38,11 +38,7 @@ def run(binary):
                 keyboard.key("c", ctrl=True)
                 return keyboard.clipboard()
 
-            def query(value, confirm=True):
-                # Selecting a long editor body scrolls the outer panel to its
-                # caret. Reveal the filter before clicking its actual bounds.
-                keyboard.wheel((1100, 200), down=False, steps=2000)
-
+            def query(value, confirm=True, pending_text=""):
                 def input_position():
                     background = keyboard.pixel((1170, 100))
                     top = None
@@ -56,9 +52,25 @@ def run(binary):
                             top = None
                     return None
 
-                keyboard.click(wait_for(input_position, "visible comment filter bounds"))
+                position = wait_for(input_position, "visible comment filter bounds")
+                if not pending_text:
+                    keyboard.click(position)
+
+                    def focused():
+                        # The accent border confirms the click was processed,
+                        # even when a busy desktop takes longer than click().
+                        for y in range(position[1] - 12, position[1] + 13):
+                            r, g, b = keyboard.pixel((position[0], y))
+                            if g > r + 8 and g > b + 6:
+                                return True
+                        return False
+
+                    wait_for(focused, "comment filter focus before query/Enter batch")
                 application.send_signal(signal.SIGSTOP)
                 try:
+                    if pending_text:
+                        text(pending_text, delay=0)
+                        keyboard.click(position)
                     keyboard.key("a", ctrl=True, delay=0)
                     keyboard.key(0xFF08, delay=0)
                     text(value, delay=0)
@@ -105,6 +117,21 @@ def run(binary):
                 keyboard.key("m", ctrl=True, shift=True)
                 query("terminalneedle")
                 expect_body(body, "Enter waits for complete Unicode filtering and opens the first direct match")
+                keyboard.key(0xFF57, ctrl=True)
+                text(" draft")
+                expect_body(body + " draft", "long-body editing reaches the final character")
+                keyboard.key("z", ctrl=True)
+                expect_body(body, "undo restores the complete long body without truncation")
+                keyboard.key(0xFF50, ctrl=True)
+                keyboard.key(0xFF53, shift=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "S", "Ctrl+Home reaches the first character"
+                keyboard.key(0xFF57, ctrl=True)
+                keyboard.key(0xFF51, shift=True)
+                keyboard.key("c", ctrl=True)
+                assert keyboard.clipboard() == "e", "Ctrl+End reaches the last character"
+                # No outer-panel scrolling: the filter remains visible while
+                # the editor owns a caret at the end of its long body.
                 query("absentmarker", confirm=False)
                 assert copied() == "absentmarker", "the replacement query reaches its field before opening help"
                 started = time.monotonic()
@@ -117,8 +144,7 @@ def run(binary):
                 query("Alice")
                 expect_body("Root question", "a replacement query cancels stale work and opens its own result")
                 keyboard.key(0xFF57, ctrl=True)
-                text(" draft")
-                query("terminalneedle")
+                query("terminalneedle", pending_text=" draft")
                 assert copied() == "terminalneedle", "the new query owns input while the draft is protected"
                 wait_for(result_ready, "complete filter publishes its selected card before deferred activation")
                 keyboard.click(wait_for(editor_position, "retained draft editor bounds"))
@@ -129,7 +155,7 @@ def run(binary):
                 assert document.read_bytes() == original, "filtering and deferred activation never write the PDF"
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
-                print("PASS: 2000 long Unicode comments, same-frame query/Enter, full body, help during filtering, query cancellation, replacement selection and deferred confirmation protecting an unsaved draft")
+                print("PASS: 2000 long Unicode comments, same-frame query/Enter, full body, long-body editing/undo and first/last-character navigation with reachable filters, help during filtering, query cancellation, replacement selection and deferred confirmation protecting an unsaved draft")
             except Exception:
                 log.flush()
                 log.seek(0)

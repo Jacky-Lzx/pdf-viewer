@@ -1,4 +1,5 @@
 mod actions;
+mod editor;
 mod filtering;
 mod menus;
 mod overlays;

@@ -455,11 +455,22 @@ pub(super) fn text_input(
     deferred: &mut Vec<Event>,
     field: eframe::egui::TextEdit<'_>,
 ) -> (eframe::egui::Response, bool) {
+    let (output, focused_now) = text_input_output(ui, id, requested, deferred, field);
+    (output.response, focused_now)
+}
+
+pub(super) fn text_input_output(
+    ui: &mut Ui,
+    id: Id,
+    requested: &mut bool,
+    deferred: &mut Vec<Event>,
+    field: eframe::egui::TextEdit<'_>,
+) -> (eframe::egui::text_edit::TextEditOutput, bool) {
     let focused_now = focus_text_input(ui, id, requested, deferred);
     // Opening a field with a button must not let that outside click undo
     // the explicit focus request before this frame's text is processed.
     let _focus = focused_now.then(|| preserve_pointer_focus(ui.ctx()));
-    (ui.add(field.id(id)), focused_now)
+    (field.id(id).show(ui), focused_now)
 }
 
 pub(super) fn focus_clicked_input(context: &eframe::egui::Context, id: Id) -> bool {

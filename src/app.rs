@@ -1432,6 +1432,10 @@ impl Pagewing {
 }
 
 impl eframe::App for Pagewing {
+    fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
+        self.prepare_comment_input(context, input);
+    }
+
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
         let popup_view = (
             self.id,
