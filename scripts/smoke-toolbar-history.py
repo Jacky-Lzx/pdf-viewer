@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Exercise toolbar history, full-view restoration and focus across resizing."""
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -8,7 +7,6 @@ import runpy
 import subprocess
 import sys
 import tempfile
-import time
 
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
@@ -25,8 +23,6 @@ def run(binary):
         environment = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         keyboard = Keyboard()
-        keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
-                                              ctypes.c_uint, ctypes.c_uint]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -48,9 +44,7 @@ def run(binary):
                     keyboard.key(char.lower(), shift=char.isupper() or char == "+", delay=0.025)
 
             def resize(width, height):
-                keyboard.x11.XResizeWindow(keyboard.display, window, width, height)
-                keyboard.x11.XFlush(keyboard.display)
-                time.sleep(0.3)
+                keyboard.resize_reader(window, width, height)
 
             def history(activation, narrow=False):
                 keyboard.key("f", ctrl=True)

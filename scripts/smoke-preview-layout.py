@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Check responsive PDF previews, long sidebars and actual pixels in X11."""
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -8,11 +7,11 @@ import runpy
 import subprocess
 import sys
 import tempfile
-import time
 
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
+assert_stays = desktop["assert_stays"]
 
 
 def run(binary):
@@ -36,8 +35,6 @@ def run(binary):
                            XDG_DATA_HOME=str(root / "data"), LIBGL_ALWAYS_SOFTWARE="1")
         keyboard = Keyboard()
         current_width = 860
-        keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
-                                              ctypes.c_uint, ctypes.c_uint]
         with open(root / "application.log", "w+") as log:
             application = subprocess.Popen([str(binary), str(document)], env=environment,
                                            stdout=log, stderr=log)
@@ -54,9 +51,7 @@ def run(binary):
             def resize(width, height):
                 nonlocal current_width
                 current_width = width
-                keyboard.x11.XResizeWindow(keyboard.display, window, width, height)
-                keyboard.x11.XFlush(keyboard.display)
-                time.sleep(0.3)
+                keyboard.resize_reader(window, width, height)
 
             def image_point(height, selected=True, night=False):
                 # The fixture's paper color differs from egui placeholders.
@@ -64,13 +59,14 @@ def run(binary):
                 # its center even when the sidebar itself remains wide.
                 paper = (4, 5, 9) if night else (251, 250, 246)
                 right = min(242, max(100, current_width - 120) - 8)
-                for y in range(112, height - 42, 2):
-                    red, green, blue = keyboard.pixel((16, y))
-                    if selected and not (green > red + 8 and green > blue + 6):
-                        continue
-                    for x in range(20, right, 3):
-                        if keyboard.pixel((x, y)) == paper:
-                            return x, y
+                with keyboard.frame((16, 112, right - 15, height - 154)) as frame:
+                    for y in range(112, height - 42, 2):
+                        red, green, blue = frame.pixel((16, y))
+                        if selected and not (green > red + 8 and green > blue + 6):
+                            continue
+                        for x in range(20, right, 3):
+                            if frame.pixel((x, y)) == paper:
+                                return x, y
                 return None
 
             try:
@@ -94,11 +90,11 @@ def run(binary):
                 keyboard.key("r", shift=True)
                 position = wait_for(lambda: image_point(400), "upright preview restored")
                 keyboard.wheel(position, steps=8)
-                time.sleep(0.3)
-                assert not image_point(400), "ordinary frames must retain manual preview scrolling"
+                wait_for(lambda: not image_point(400), "manual scrolling hides the selected preview")
+                assert_stays(lambda: not image_point(400), "ordinary frames must retain manual preview scrolling")
                 resize(240, 240)
-                assert not image_point(240), "resizing must retain the manually chosen pages"
                 position = wait_for(lambda: image_point(240, selected=False), "a scrolled preview image is visible")
+                assert_stays(lambda: not image_point(240), "resizing must retain the manually chosen pages")
                 keyboard.click(position)
                 wait_for(lambda: 60 < saved().get("page", 0) < 79,
                          "clicking a compact preview follows the visible page")

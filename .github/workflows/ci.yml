@@ -89,6 +89,9 @@ jobs:
       - name: Xvfb display isolation and cleanup
         if: matrix.shard == 1
         run: python3 scripts/test-with-xvfb.py
+      - name: Desktop locator and synchronization checks
+        if: matrix.shard == 1
+        run: python3 scripts/with-xvfb.py python3 scripts/test-desktop.py
       - name: Native desktop smoke tests
         env:
           SMOKE_TESTS: ${{ matrix.tests }}

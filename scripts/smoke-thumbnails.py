@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Exercise virtualized PDF previews in a real desktop. Run with xvfb-run -a."""
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -9,7 +8,6 @@ import runpy
 import subprocess
 import sys
 import tempfile
-import time
 
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
@@ -29,10 +27,12 @@ def run(binary):
         config_path = root / "config/pagewing/library.json"
         keyboard = Keyboard()
         application = None
+        window = None
         with open(root / "application.log", "w+") as log:
             def launch():
+                nonlocal window
                 process = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
-                wait_for(keyboard.focus, "thumbnail reader window")
+                window = wait_for(keyboard.focus, "thumbnail reader window")
                 return process
 
             def saved(predicate):
@@ -46,30 +46,101 @@ def run(binary):
                 wait_for(lambda: saved(lambda _, book: book["page"] == page), description)
 
             def preview_ready():
-                # The vector accent is thinner than two pixels at preview scale.
-                for x in range(25, 85, 3):
-                    for y in range(293, 310):
-                        red, green, blue = keyboard.pixel((x, y))
-                        if green > red * 1.4 and green > blue * 1.1:
-                            return True
+                # Require actual PDF ink, rather than a loading placeholder or
+                # the selection fill. All probes belong to the same frame.
+                height = keyboard.size(window)[1]
+                with keyboard.frame((14, 64, 230, height - 100)) as frame:
+                    bands = selection(frame)
+                    if bands:
+                        top, bottom = bands[-1]
+                        for y in range(top + 8, bottom - 8):
+                            for x in range(25, 225, 3):
+                                red, green, blue = frame.pixel((x, y))
+                                if green > red * 1.4 and green > blue * 1.1:
+                                    return True
                 return False
 
-            def selected_bottom(height):
-                # The outer sidebar may scroll when a clicked card gains focus.
-                # Locate its actual accent fill instead of assuming a row y.
-                rows = []
-                for y in range(64, height - 36, 2):
-                    red, green, blue = keyboard.pixel((16, y))
-                    if green > red + 8 and green > blue + 6:
-                        rows.append(y)
-                return rows[-1] if rows else None
+            def selection(frame):
+                return frame.bands([16], lambda color: color[1] > color[0] + 8
+                                   and color[1] > color[2] + 6, min_height=12)
 
-            def following_preview():
-                bottom = selected_bottom(540)
-                if bottom is not None:
-                    for y in range(bottom + 4, 504, 2):
-                        if keyboard.pixel((90, y)) == (251, 250, 246):
-                            return 90, y
+            def selected_bottom(height):
+                with keyboard.frame((14, 64, 230, height - 100)) as frame:
+                    bands = selection(frame)
+                    return bands[-1][1] - 1 if bands else None
+
+            def preview_point(relation="selected", night=False):
+                height = keyboard.size(window)[1]
+                with keyboard.frame((14, 64, 230, height - 100)) as frame:
+                    first, end = 64, height - 36
+                    if relation != "any":
+                        bands = selection(frame)
+                        if not bands:
+                            return None
+                        top, bottom = bands[-1]
+                        if relation == "previous":
+                            end = top
+                        elif relation == "next":
+                            first = bottom
+                        else:
+                            first, end = top, bottom
+                    paper = (4, 5, 9) if night else (251, 250, 246)
+                    for y in sorted(range(first, end, 2), key=lambda y: abs(y - (first + end) / 2)):
+                        for x in sorted(range(40, 220, 3), key=lambda x: abs(x - 128)):
+                            if frame.pixel((x, y)) == paper:
+                                return x, y
+                return None
+
+            def paper_height(night=False):
+                height = keyboard.size(window)[1]
+                with keyboard.frame((14, 64, 230, height - 100)) as frame:
+                    bands = selection(frame)
+                    if bands:
+                        top, bottom = bands[-1]
+                        paper = (4, 5, 9) if night else (251, 250, 246)
+                        rows = [y for y in range(top, bottom) if frame.pixel((128, y)) == paper]
+                        if rows:
+                            return rows[-1] - rows[0] + 1
+                return None
+
+            def compact_rows():
+                # Read caption baselines and identify the selected row by its
+                # fill. Positions follow actual font metrics and scrolling.
+                with keyboard.frame((14, 64, 230, 720)) as frame:
+                    bands = selection(frame)
+                    if not bands:
+                        return None
+                    top, bottom = bands[-1]
+                    rows, start = [], None
+                    for y in range(64, 785):
+                        ink = y < 784 and any(
+                            max(color) < 160
+                            for color in (frame.pixel((x, y)) for x in range(50, 220, 3)))
+                        if ink and start is None:
+                            start = y
+                        elif not ink and start is not None:
+                            if y - start >= 5:
+                                rows.append((90, (start + y - 1) // 2))
+                            start = None
+                    selected = [index for index, (_, y) in enumerate(rows) if top <= y < bottom]
+                    if len(selected) == 1:
+                        return rows, selected[0]
+                return None
+
+            def next_compact_row():
+                layout = compact_rows()
+                if layout:
+                    rows, index = layout
+                    if index + 1 < len(rows):
+                        return rows[index + 1]
+                return None
+
+            def final_compact_rows():
+                layout = compact_rows()
+                if layout:
+                    rows, index = layout
+                    if index >= 8:
+                        return rows[index - 8:index + 1]
                 return None
 
             try:
@@ -80,47 +151,42 @@ def run(binary):
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: state["thumbnails"]), "preview preference")
                 wait_for(preview_ready, "actual PDF pixels in first preview")
-                keyboard.click((90, 540))
+                keyboard.click(wait_for(lambda: preview_point("next"), "rendered second preview"))
                 expect(1, "click second preview")
                 keyboard.key("g", shift=True)
                 expect(79, "Vim G reaches final page")
-                time.sleep(0.3)
-                keyboard.click((90, 310))
+                keyboard.click(wait_for(lambda: preview_point("previous"), "preceding preview after G"))
                 expect(78, "preview list follows G to the final two pages")
                 keyboard.key("g"); keyboard.key("g")
                 expect(0, "Vim gg returns to first page")
                 wait_for(preview_ready, "preview list follows gg")
                 keyboard.wheel((90, 390), down=True, steps=9)
-                time.sleep(0.4)
-                keyboard.click((90, 340))
+                wait_for(lambda: selected_bottom(820) is None, "manual scrolling hides the first preview")
+                keyboard.click(wait_for(lambda: preview_point("any"), "rendered preview after scrolling"))
                 wait_for(lambda: saved(lambda _, book: 1 < book["page"] < 20), "scroll and click a later preview")
                 keyboard.key("g"); keyboard.key("g")
                 wait_for(preview_ready, "return to cached first preview")
+                upright = wait_for(paper_height, "upright PDF image bounds")
                 keyboard.key("i")
-                wait_for(lambda: sum(keyboard.pixel((90, 370))) < 100, "inverted preview pixels")
+                wait_for(lambda: preview_point(night=True), "inverted preview pixels")
                 keyboard.key("r")
                 wait_for(lambda: saved(lambda _, book: book["rotation"] == 1), "rotated reading view")
-                # Rotated landscape preview leaves empty space above its image.
-                wait_for(lambda: sum(keyboard.pixel((90, 285))) > 400, "rotated preview aspect ratio")
+                wait_for(lambda: (paper_height(night=True) or upright) < upright,
+                         "rotated preview has a shorter landscape image")
                 keyboard.key("r", shift=True); keyboard.key("i")
                 wait_for(preview_ready, "restore upright preview colors")
-                keyboard.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
-                window = keyboard.focus()
-                keyboard.x11.XResizeWindow(keyboard.display, window, 860, 540)
-                keyboard.x11.XFlush(keyboard.display)
-                time.sleep(0.4)
+                keyboard.resize_reader(window, 860, 540)
                 keyboard.key("g", shift=True)
                 expect(79, "last page in minimum window")
                 # The padded header leaves room for one full preview here.
                 # Scroll slightly to expose the preceding page before clicking it.
                 keyboard.wheel((90, 350), steps=2)
-                time.sleep(0.4)
-                keyboard.click((90, 300))
+                keyboard.click(wait_for(lambda: preview_point("previous"), "preceding preview in minimum window"))
                 expect(78, "preceding preview remains clickable in minimum window")
                 # Expose the next card after focus has revealed the preceding
                 # one, then click rendered paper below the selected card.
                 keyboard.wheel((90, 350), down=True, steps=2)
-                keyboard.click(wait_for(following_preview, "visible last preview below the selected card"))
+                keyboard.click(wait_for(lambda: preview_point("next"), "visible last preview below the selected card"))
                 expect(79, "last preview remains clickable in minimum window")
                 application.terminate(); application.wait(timeout=5)
                 assert preferences_path.read_text() == preferences, "temporary appearance changes must not rewrite TOML"
@@ -137,21 +203,21 @@ def run(binary):
                 wait_for(preview_ready, "restored preview mode renders PDF images")
                 keyboard.key("t")
                 wait_for(lambda: saved(lambda state, _: not state["thumbnails"]), "switch back to compact page list")
-                window = keyboard.focus()
-                keyboard.x11.XResizeWindow(keyboard.display, window, 1180, 820)
-                keyboard.x11.XFlush(keyboard.display)
-                time.sleep(0.3)
+                keyboard.resize_reader(window, 1180, 820)
+                wait_for(lambda: selected_bottom(820), "selected compact row after resizing")
                 keyboard.wheel((90, 390), down=True, steps=9)
-                time.sleep(0.4)
+                wait_for(lambda: selected_bottom(820) is None, "manual scrolling hides the first compact row")
+                keyboard.park_pointer()
                 keyboard.key("g"); keyboard.key("g")
-                bottom = wait_for(lambda: selected_bottom(820), "gg reveals the selected first compact row")
-                keyboard.click((90, bottom + 10))
+                keyboard.click(wait_for(next_compact_row, "gg reveals the first two compact page captions"))
                 expect(1, "gg reveals current page after manually scrolling the compact list")
+                keyboard.park_pointer()
                 keyboard.key("g", shift=True)
                 expect(79, "last page in compact list mode")
-                keyboard.click((90, 290))
+                rows = wait_for(final_compact_rows, "final nine compact page captions are drawn")
+                keyboard.click(rows[0])
                 expect(71, "compact list follows keyboard navigation to final pages")
-                keyboard.click((90, 320))
+                keyboard.click(rows[1])
                 expect(72, "clicking a list row preserves its neighboring rows")
                 keyboard.key(0xFF09)
                 wait_for(lambda: saved(lambda state, _: not state["sidebar"]), "close sidebar")

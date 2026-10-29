@@ -39,33 +39,12 @@ def run(binary):
                 return keyboard.clipboard()
 
             def query(value, confirm=True, pending_text=""):
-                def input_position():
-                    background = keyboard.pixel((1170, 100))
-                    top = None
-                    for y in range(90, 145):
-                        if keyboard.pixel((1150, y)) != background:
-                            if top is None:
-                                top = y
-                        elif top is not None:
-                            if 14 <= y - top <= 24:
-                                return 1150, (top + y - 1) // 2
-                            top = None
-                    return None
-
-                position = wait_for(input_position, "visible comment filter bounds")
+                bounds = (1100, 90, 70, 55)
                 if not pending_text:
-                    keyboard.click(position)
-
-                    def focused():
-                        # The accent border confirms the click was processed,
-                        # even when a busy desktop takes longer than click().
-                        for y in range(position[1] - 12, position[1] + 13):
-                            r, g, b = keyboard.pixel((position[0], y))
-                            if g > r + 8 and g > b + 6:
-                                return True
-                        return False
-
-                    wait_for(focused, "comment filter focus before query/Enter batch")
+                    position = keyboard.focus_input(bounds, "visible comment filter bounds")
+                else:
+                    # The click stays in the stopped native batch after draft text.
+                    position = wait_for(lambda: keyboard.input_position(bounds), "visible comment filter bounds")
                 application.send_signal(signal.SIGSTOP)
                 try:
                     if pending_text:
@@ -94,22 +73,19 @@ def run(binary):
 
             def result_ready():
                 rows = 0
-                for y in range(220, 440, 2):
-                    colors = [keyboard.pixel((x, y)) for x in (1060, 1100, 1140)]
-                    rows += all(g > r + 8 and g > b + 6 for r, g, b in colors)
+                with keyboard.frame((1060, 220, 81, 220)) as frame:
+                    for y in range(220, 440, 2):
+                        colors = [frame.pixel((x, y)) for x in (1060, 1100, 1140)]
+                        rows += all(g > r + 8 and g > b + 6 for r, g, b in colors)
                 return rows >= 23
 
             def editor_position():
-                background = keyboard.pixel((1170, 400))
-                top = None
-                for y in range(320, 690):
-                    if keyboard.pixel((1150, y)) != background:
-                        if top is None:
-                            top = y
-                    elif top is not None:
-                        if y - top >= 65:
-                            return 1150, (top + y - 1) // 2
-                        top = None
+                with keyboard.frame((1150, 320, 21, 370)) as frame:
+                    background = frame.pixel((1170, 400))
+                    bands = frame.bands([1150], lambda color: color != background, min_height=65)
+                    if bands:
+                        top, end = bands[0]
+                        return 1150, (top + end - 1) // 2
                 return None
 
             try:

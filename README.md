@@ -513,8 +513,9 @@ cargo bench --locked --bench text_cache -- 9
 # 页面与预览纹理缓存，包含 egui 对象释放和可见纹理保护
 cargo bench --locked --bench texture_cache -- 9
 # Linux 原生窗口回归测试（需要 Xvfb、libXtst、GIO、desktop-file-utils 和 Python 3）
-# 启动器使用 Xvfb 原子分配独立的 1280×1024 显示，等待就绪并在结束或取消时清理。
+# 启动器原子分配独立的 1280×1024 显示，等待就绪，支持客户端断开后重连，并在结束或取消时清理。
 python3 scripts/test-with-xvfb.py
+python3 scripts/with-xvfb.py python3 scripts/test-desktop.py
 python3 scripts/with-xvfb.py python3 scripts/smoke-install-linux.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-desktop.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-cli.py target/release/pagewing
@@ -574,6 +575,8 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-vim-view.py target/release/pa
 python3 scripts/with-xvfb.py python3 scripts/smoke-percentage.py target/release/pagewing
 python3 scripts/with-xvfb.py python3 scripts/smoke-relative.py target/release/pagewing
 ```
+
+原生脚本共用 `scripts/smoke-desktop.py`。区域定位应在 `with keyboard.frame(bounds)` 中读取同一帧，再通过 `wait_for` 等待实际控件、焦点或保存状态。`keyboard.resize` 只确认 X11 尺寸；控件可见的阅读窗口使用 `resize_reader` 等待底部状态标签重绘，再检查所需内容。验证手动滚动等状态持续不变时，使用 `assert_stays` 在观察区间反复检查；键盘事件节奏、拖动和明确的时间行为仍可保留延时。
 
 `--render` 的页码从 1 开始，宽度单位是像素；`--benchmark` 会渲染全部页面，输出平均数、中位数和 P95。示例 PDF 由 `python3 scripts/make-sample.py` 确定性生成，也是回归测试夹具。GitHub Actions 在 Linux 和 macOS 上执行格式检查、Clippy、测试、release 构建及命令行渲染；Linux 还执行真实桌面键盘回归测试。测量环境与结果见 [性能记录](docs/performance.md)。
 

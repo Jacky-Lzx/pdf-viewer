@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real Linux desktop app. Run under xvfb-run, with libXtst installed."""
 import ctypes
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,56 @@ def wait_for(predicate, description, timeout=12):
             return value
         time.sleep(0.05)
     raise AssertionError(f"Timed out: {description}")
+
+
+def assert_stays(predicate, description, duration=0.3):
+    """Observe an invariant throughout an interval, including transient failures."""
+    deadline = time.monotonic() + duration
+    while True:
+        assert predicate(), description
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.05, remaining))
+
+
+class ScreenFrame:
+    """One immutable X11 image; all locator probes read the same frame."""
+    def __init__(self, x11, image, bounds):
+        self.x11, self.image, self.bounds = x11, image, bounds
+
+    def pixel(self, position):
+        if self.image is None:
+            raise RuntimeError("Screen frame has been released")
+        left, top, width, height = self.bounds
+        x, y = position
+        if not (left <= x < left + width and top <= y < top + height):
+            raise ValueError(f"Pixel {position} is outside captured bounds {self.bounds}")
+        color = self.x11.XGetPixel(self.image, x - left, y - top)
+        return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+
+    def bands(self, xs, predicate, min_height=1, max_height=None):
+        """Find contiguous vertical bands shared by the supplied probe columns."""
+        xs = tuple(xs)
+        if not xs:
+            raise ValueError("A band locator needs at least one probe column")
+        _, top, _, height = self.bounds
+        start = None
+        bands = []
+        for y in range(top, top + height + 1):
+            matches = y < top + height and all(predicate(self.pixel((x, y))) for x in xs)
+            if matches and start is None:
+                start = y
+            elif not matches and start is not None:
+                if y - start >= min_height and (max_height is None or y - start <= max_height):
+                    bands.append((start, y))
+                start = None
+        return bands
+
+    def colors(self):
+        left, top, width, height = self.bounds
+        return tuple(self.pixel((x, y)) for y in range(top, top + height)
+                     for x in range(left, left + width))
 
 
 class WindowAttributes(ctypes.Structure):
@@ -55,6 +106,21 @@ class Keyboard:
         self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         self.x11.XKeysymToKeycode.restype = ctypes.c_uint
         self.x11.XFlush.argtypes = [ctypes.c_void_p]
+        self.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.x11.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
+        self.x11.XGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_int]
+        self.x11.XGetImage.restype = ctypes.c_void_p
+        self.x11.XGetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        self.x11.XGetPixel.restype = ctypes.c_ulong
+        self.x11.XDestroyImage.argtypes = [ctypes.c_void_p]
+        self.x11.XCreateGC.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+        self.x11.XCreateGC.restype = ctypes.c_void_p
+        self.x11.XFreeGC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self.x11.XSetForeground.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
+        self.x11.XFillRectangle.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+                                          ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
+        self.x11.XClearArea.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                      ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
         self.x11.XFree.argtypes = [ctypes.c_void_p]
         self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         self.xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
@@ -114,6 +180,16 @@ class Keyboard:
         self.x11.XFlush(self.display)
         time.sleep(0.15)
 
+    def park_pointer(self):
+        """Keep hover tooltips out of visual locators on the isolated display."""
+        attributes = WindowAttributes()
+        root = self.x11.XDefaultRootWindow(self.display)
+        if not self.x11.XGetWindowAttributes(self.display, root, ctypes.byref(attributes)):
+            raise RuntimeError("Cannot read the test display's geometry")
+        self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeMotionEvent(self.display, -1, attributes.width - 1, attributes.height - 1, 0)
+        self.x11.XFlush(self.display)
+
     def drag(self, start, end):
         self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
@@ -152,19 +228,90 @@ class Keyboard:
         time.sleep(0.2)
 
     def pixel(self, position):
-        self.x11.XGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_int]
-        self.x11.XGetImage.restype = ctypes.c_void_p
-        self.x11.XGetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-        self.x11.XGetPixel.restype = ctypes.c_ulong
-        self.x11.XDestroyImage.argtypes = [ctypes.c_void_p]
-        image = self.x11.XGetImage(self.display, self.x11.XDefaultRootWindow(self.display), *position, 1, 1, ctypes.c_ulong(-1).value, 2)
+        with self.frame((*position, 1, 1)) as frame:
+            return frame.pixel(position)
+
+    @contextmanager
+    def frame(self, bounds):
+        """Capture a root-relative (left, top, width, height) region once."""
+        if bounds[2] <= 0 or bounds[3] <= 0:
+            raise ValueError(f"Empty capture bounds: {bounds}")
+        image = self.x11.XGetImage(self.display, self.x11.XDefaultRootWindow(self.display), *bounds, ctypes.c_ulong(-1).value, 2)
         if not image:
-            raise RuntimeError("Cannot read desktop pixels")
+            raise RuntimeError(f"Cannot read desktop pixels in {bounds}")
+        frame = ScreenFrame(self.x11, image, bounds)
         try:
-            color = self.x11.XGetPixel(image, 0, 0)
-            return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+            yield frame
         finally:
+            frame.image = None
             self.x11.XDestroyImage(image)
+
+    def resize(self, window, width, height):
+        """Wait for X11 geometry; callers still wait for the relevant UI state."""
+        self.x11.XResizeWindow(self.display, window, width, height)
+        self.x11.XSync(self.display, False)
+
+        wait_for(lambda: self.size(window) == (width, height), f"window resized to {width}x{height}")
+
+    def size(self, window):
+        attributes = WindowAttributes()
+        if not self.x11.XGetWindowAttributes(self.display, window, ctypes.byref(attributes)):
+            raise RuntimeError("Cannot read the test window's geometry")
+        return attributes.width, attributes.height
+
+    def resize_reader(self, window, width, height):
+        """Resize a reader with visible controls and wait for its footer to repaint.
+
+        Invalidate the unchanged NORMAL label and request an Expose event after
+        ConfigureNotify. Its restoration acknowledges client paint, including
+        width-only resizes where the label would otherwise stay in place.
+        """
+        def footer(at_height):
+            with self.frame((8, at_height - 28, 48, 20)) as frame:
+                colors = frame.colors()
+                return colors if len(set(colors)) > 1 else None
+
+        previous = wait_for(lambda: footer(self.size(window)[1]), "visible reader status label")
+        self.resize(window, width, height)
+        gc = self.x11.XCreateGC(self.display, window, 0, None)
+        try:
+            # Fill explicitly: a GL window may have no X11 background to clear.
+            self.x11.XSetForeground(self.display, gc, 0)
+            self.x11.XFillRectangle(self.display, window, gc, 8, height - 28, 48, 20)
+            self.x11.XClearArea(self.display, window, 8, height - 28, 48, 20, True)
+            self.x11.XSync(self.display, False)
+        finally:
+            self.x11.XFreeGC(self.display, gc)
+        wait_for(lambda: footer(height) == previous, "reader status label repainted after resizing")
+
+    def input_position(self, bounds):
+        """Find a text field's filled band in a region covering its right end and margin."""
+        left, top, width, height = bounds
+        probe = left + width - 20
+        with self.frame(bounds) as frame:
+            background = frame.pixel((left + width - 1, top))
+            bands = frame.bands([probe], lambda color: color != background,
+                                min_height=14, max_height=28)
+            if bands:
+                first, end = bands[0]
+                return probe, (first + end - 1) // 2
+        return None
+
+    def focus_input(self, bounds, description):
+        point = wait_for(lambda: self.input_position(bounds), description)
+        self.click(point)
+
+        def focused():
+            with self.frame(bounds) as frame:
+                x, y = point
+                for row in range(max(bounds[1], y - 14), min(bounds[1] + bounds[3], y + 15)):
+                    red, green, blue = frame.pixel((x, row))
+                    if green > red + 8 and green > blue + 6:
+                        return True
+            return False
+
+        wait_for(focused, f"{description} receives keyboard focus")
+        return point
 
     def clipboard(self):
         x11 = self.x11
