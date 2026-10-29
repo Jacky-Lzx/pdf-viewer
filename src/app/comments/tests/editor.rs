@@ -1,5 +1,21 @@
 use super::*;
 
+fn document_boundary(context: &Context, end: bool) -> Vec<Event> {
+    // egui reserves Ctrl on macOS for Emacs-style movement, so Ctrl+Home/End
+    // does not move the caret there. Simulate each desktop's native shortcut.
+    if context.os() == egui::os::OperatingSystem::Mac {
+        key(
+            if end { Key::ArrowDown } else { Key::ArrowUp },
+            Modifiers::MAC_CMD | Modifiers::COMMAND,
+        )
+    } else {
+        key(
+            if end { Key::End } else { Key::Home },
+            Modifiers::CTRL | Modifiers::COMMAND,
+        )
+    }
+}
+
 fn native_frame(app: &mut Pagewing, context: &Context, events: Vec<Event>) {
     let mut input = RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -24,7 +40,7 @@ fn typing_before_clicking_the_filter_in_one_native_batch_stays_in_the_draft() {
     ] {
         let (_root, context, mut app) = saved_comment_editor();
         let original = std::fs::read(&app.reading.path).unwrap();
-        frame(&mut app, &context, key(Key::End, Modifiers::CTRL));
+        frame(&mut app, &context, document_boundary(&context, true));
         let point = context
             .read_response(egui::Id::new("pagewing-comment-filter"))
             .unwrap()
@@ -77,7 +93,7 @@ fn long_comment_caret_scrolls_without_hiding_filters_or_status_controls() {
     let original = std::fs::read(&app.reading.path).unwrap();
     let body = format!("{}TAIL", "Long comment Straße 中文 line\n".repeat(400));
     app.comments.editor.as_mut().unwrap().contents = body.clone();
-    frame(&mut app, &context, key(Key::End, Modifiers::CTRL));
+    frame(&mut app, &context, document_boundary(&context, true));
     let mut output = egui::FullOutput::default();
     for _ in 0..5 {
         output = frame(&mut app, &context, Vec::new());
@@ -133,7 +149,17 @@ fn long_comment_caret_scrolls_without_hiding_filters_or_status_controls() {
 
 #[test]
 fn long_comment_caret_remains_visible_after_resizing_to_minimum_windows() {
+    for os in [
+        egui::os::OperatingSystem::Nix,
+        egui::os::OperatingSystem::Mac,
+    ] {
+        check_caret_after_resizing(os);
+    }
+}
+
+fn check_caret_after_resizing(os: egui::os::OperatingSystem) {
     let (_root, context, mut app) = saved_comment_editor();
+    context.set_os(os);
     let body = format!("{}TAIL", "Long comment Straße 中文 line\n".repeat(400));
     app.comments.editor.as_mut().unwrap().contents = body.clone();
     for size in [
@@ -145,7 +171,12 @@ fn long_comment_caret_remains_visible_after_resizing_to_minimum_windows() {
             context.memory_mut(|memory| {
                 memory.request_focus(egui::Id::new("pagewing-comment-input"));
             });
-            frame_size(&mut app, &context, self::key(key, Modifiers::CTRL), size);
+            frame_size(
+                &mut app,
+                &context,
+                document_boundary(&context, key == Key::End),
+                size,
+            );
             let mut output = egui::FullOutput::default();
             for _ in 0..5 {
                 output = frame_size(&mut app, &context, Vec::new(), size);
@@ -155,9 +186,16 @@ fn long_comment_caret_remains_visible_after_resizing_to_minimum_windows() {
             } else {
                 0
             };
+            let cursor =
+                egui::TextEdit::load_state(&context, egui::Id::new("pagewing-comment-input"))
+                    .unwrap()
+                    .cursor
+                    .char_range()
+                    .unwrap();
+            assert_eq!(cursor.primary.index, index, "{os:?}: {key:?} at {size:?}");
             assert!(
                 body_cursor_visible(&output, &body, index),
-                "{key:?} at {size:?}: {:?}; {:?}",
+                "{os:?}: {key:?} at {size:?}: {:?}; {:?}",
                 context.read_response(egui::Id::new("pagewing-comment-input")),
                 output
                     .shapes
@@ -187,7 +225,7 @@ fn manually_scrolling_a_long_comment_stays_put_until_caret_navigation() {
     let (_root, context, mut app) = saved_comment_editor();
     let body = format!("{}TAIL", "Long comment Straße 中文 line\n".repeat(400));
     app.comments.editor.as_mut().unwrap().contents = body.clone();
-    frame(&mut app, &context, key(Key::End, Modifiers::CTRL));
+    frame(&mut app, &context, document_boundary(&context, true));
     for _ in 0..5 {
         frame(&mut app, &context, Vec::new());
     }
@@ -213,7 +251,11 @@ fn manually_scrolling_a_long_comment_stays_put_until_caret_navigation() {
         assert!(!body_cursor_visible(&output, &body, body.chars().count()));
     }
     for navigation in [Key::Home, Key::End] {
-        frame(&mut app, &context, key(navigation, Modifiers::CTRL));
+        frame(
+            &mut app,
+            &context,
+            document_boundary(&context, navigation == Key::End),
+        );
         let mut output = egui::FullOutput::default();
         for _ in 0..5 {
             output = frame(&mut app, &context, Vec::new());
