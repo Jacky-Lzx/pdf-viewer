@@ -54,8 +54,9 @@ def run(binary):
 
             def history(activation, narrow=False):
                 keyboard.key("f", ctrl=True)
-                # Bookmark, Find, Theme, Help, then the sole enabled history button.
-                for _ in range(5):
+                # Bookmark, Find, Theme, Help, Hide controls, then the sole
+                # enabled history button. Enter must not activate Hide controls.
+                for _ in range(6):
                     keyboard.key(0xFF09, shift=True)
                 if narrow:
                     for size in [(240, 240), (1180, 820), (240, 240)]:

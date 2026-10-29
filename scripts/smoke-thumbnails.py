@@ -54,6 +54,24 @@ def run(binary):
                             return True
                 return False
 
+            def selected_bottom(height):
+                # The outer sidebar may scroll when a clicked card gains focus.
+                # Locate its actual accent fill instead of assuming a row y.
+                rows = []
+                for y in range(64, height - 36, 2):
+                    red, green, blue = keyboard.pixel((16, y))
+                    if green > red + 8 and green > blue + 6:
+                        rows.append(y)
+                return rows[-1] if rows else None
+
+            def following_preview():
+                bottom = selected_bottom(540)
+                if bottom is not None:
+                    for y in range(bottom + 4, 504, 2):
+                        if keyboard.pixel((90, y)) == (251, 250, 246):
+                            return 90, y
+                return None
+
             try:
                 application = launch()
                 expect(0, "initial reading state")
@@ -99,7 +117,10 @@ def run(binary):
                 time.sleep(0.4)
                 keyboard.click((90, 300))
                 expect(78, "preceding preview remains clickable in minimum window")
-                keyboard.click((90, 475))
+                # Expose the next card after focus has revealed the preceding
+                # one, then click rendered paper below the selected card.
+                keyboard.wheel((90, 350), down=True, steps=2)
+                keyboard.click(wait_for(following_preview, "visible last preview below the selected card"))
                 expect(79, "last preview remains clickable in minimum window")
                 application.terminate(); application.wait(timeout=5)
                 assert preferences_path.read_text() == preferences, "temporary appearance changes must not rewrite TOML"
@@ -123,8 +144,8 @@ def run(binary):
                 keyboard.wheel((90, 390), down=True, steps=9)
                 time.sleep(0.4)
                 keyboard.key("g"); keyboard.key("g")
-                time.sleep(0.2)
-                keyboard.click((90, 310))
+                bottom = wait_for(lambda: selected_bottom(820), "gg reveals the selected first compact row")
+                keyboard.click((90, bottom + 10))
                 expect(1, "gg reveals current page after manually scrolling the compact list")
                 keyboard.key("g", shift=True)
                 expect(79, "last page in compact list mode")
