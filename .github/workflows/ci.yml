@@ -34,6 +34,8 @@ jobs:
       - run: cargo build --locked --release
       - name: Headless document information
         run: python3 scripts/smoke-info.py target/release/pagewing
+      - name: Focus plugin protocol
+        run: python3 scripts/smoke-plugins.py
       - name: Exercise renderer and text extraction
         shell: bash
         run: |

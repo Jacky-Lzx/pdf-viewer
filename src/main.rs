@@ -38,6 +38,7 @@ mod page_labels;
 mod pdf_objects;
 mod pdf_string;
 mod query_history;
+mod plugins;
 mod recent;
 mod render_plan;
 mod search_highlights;

@@ -1,0 +1,6 @@
+api_version = 1
+name = "Copy reading reference"
+# Enable after reviewing plugin.py. Programs run with your user permissions.
+enabled = false
+command = ["python3", "plugin.py"]
+timeout_seconds = 5
