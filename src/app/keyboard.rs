@@ -263,6 +263,10 @@ impl Pagewing {
                 && self.mark_action.is_none()
                 && !self.nav.pending_z;
             let binding = crate::settings::Binding::from_event(key, modifiers, symbol);
+            if reader_ready && self.plugin_key(context, raw_key, raw_modifiers) {
+                shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
+                continue;
+            }
             let (key, modifiers, key_text) =
                 match self.library.shortcuts.resolve(&binding, !reader_ready) {
                     crate::settings::Resolution::Mapped(key, modifiers) => {

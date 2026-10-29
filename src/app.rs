@@ -16,6 +16,7 @@ mod lifecycle;
 mod list_focus;
 mod list_keyboard;
 mod menu_focus;
+mod plugins;
 mod properties;
 mod reading_controls;
 mod recent;
@@ -86,6 +87,7 @@ pub struct Pagewing {
     dimensions: Vec<[f32; 2]>,
     info: crate::document_info::DocumentInfo,
     properties_open: bool,
+    plugins: plugins::PluginUi,
     comments: comments::CommentUi,
     synctex: sync::SyncUi,
     outline: crate::outline_view::OutlineView,
@@ -264,6 +266,7 @@ impl Pagewing {
             dimensions: Vec::new(),
             info: crate::document_info::DocumentInfo::default(),
             properties_open: false,
+            plugins: plugins::PluginUi::new(preferences.with_file_name("plugins")),
             comments: comments::CommentUi::default(),
             synctex: sync::SyncUi::default(),
             outline: crate::outline_view::OutlineView::default(),
@@ -800,13 +803,14 @@ impl Pagewing {
                     self.file_changed = true;
                     self.auto_reload_pending = true;
                 }
-                Event::PageText { id, page, text }
-                    if id == self.id && page == self.selection_page && self.selection.active =>
-                {
-                    if text.spans.is_empty() {
-                        self.notify("This page has no selectable text");
+                Event::PageText { id, page, text } if id == self.id => {
+                    self.plugin_page_text(page, &text);
+                    if page == self.selection_page && self.selection.active {
+                        if text.spans.is_empty() {
+                            self.notify("This page has no selectable text");
+                        }
+                        self.selection.set_text(text);
                     }
-                    self.selection.set_text(text);
                 }
                 Event::Links { id, page, links } if id == self.id => {
                     if self.continuous_link_request == Some(page) {
@@ -1203,6 +1207,7 @@ impl Pagewing {
                         self.link_overlays(ui, self.nav.page, page_rect, dimensions);
                         self.comment_overlays(ui, self.nav.page, page_rect, dimensions);
                     }
+                    self.paint_plugin(&painter, self.nav.page, page_rect, dimensions);
                 } else {
                     painter.text(
                         page_rect.center(),
@@ -1466,6 +1471,7 @@ impl eframe::App for Pagewing {
         #[cfg(target_os = "macos")]
         self.macos_open_documents(context);
         self.synctex_events(context);
+        self.plugin_events(context);
         if context.input(|input| input.viewport().close_requested())
             && self.comment_change_blocked(context)
         {
@@ -1477,9 +1483,11 @@ impl eframe::App for Pagewing {
         self.status(context);
         self.dialogs(context);
         self.properties_window(context);
+        self.plugin_output(context);
         self.comments_sidebar(context);
         self.sidebar(context);
         self.canvas(context);
+        self.plugin_sync(context);
         if popup_view
             != (
                 self.id,
