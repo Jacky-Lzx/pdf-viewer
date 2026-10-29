@@ -211,3 +211,7 @@ harness = false
 [[bench]]
 name = "search_map_suffix"
 harness = false
+
+[[bench]]
+name = "search_index_ascii"
+harness = false

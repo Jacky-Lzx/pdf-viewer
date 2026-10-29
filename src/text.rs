@@ -1188,6 +1188,14 @@ mod tests {
                 ),
                 true,
             ),
+            (
+                format!(
+                    "前 ß {} İΣ ﬃ Ⱥ ſ K ΐ尾中文 {} 中",
+                    "ASCII PDF READER ".repeat(10),
+                    "Rust WORD boundary ".repeat(20),
+                ),
+                true,
+            ),
         ] {
             let optimized = PageText {
                 spans: value
@@ -1241,6 +1249,8 @@ mod tests {
                     "ⱥ",
                     "k",
                     "ΐ尾中文",
+                    "rust word",
+                    "pdf reader",
                     "missing",
                 ] {
                     let query = SearchQuery::new(

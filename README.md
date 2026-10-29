@@ -438,6 +438,8 @@ cargo bench --locked --bench word_boundaries -- 17
 cargo bench --locked --bench sparse_selection -- 9
 # 搜索索引构建，比较原映射与 ASCII 直接偏移的耗时及容量
 cargo bench --locked --bench search_index -- 9
+# 混合文本索引：比较逐字符处理与长 ASCII 片段批量转换，含范围及分配校验
+cargo bench --locked --bench search_index_ascii -- 17
 # 书签编辑：比较每次重建有序索引与单点增删
 cargo bench --locked --bench bookmark_edits -- 9
 # 阅读进度保存：比较深复制与共享记录的快照构造，含完整保存准备及分配计数

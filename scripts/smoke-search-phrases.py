@@ -105,7 +105,9 @@ def run(binary):
                 # ranges in a long direct Unicode suffix. Use one drawn glyph
                 # with a real ToUnicode text layer, not a mocked search index.
                 unicode_fixture = runpy.run_path(str(SCRIPTS / "make-selection-fixture.py"))
-                unicode_text = "ß İ ﬃ Ⱥ ſ K ΐ " + "中文 Σσς École 👩‍💻 Rust tailword\n" * 100 + "ff i"
+                unicode_text = ("RUST PDF READER " * 24 + "ß İ ﬃ Ⱥ ſ K ΐ "
+                                + "ASCII RUN " * 20 + "中 ASCIIBOUNDARY TARGETTOKEN\n"
+                                + "中文 Σσς École 👩‍💻 Rust tailword\n" * 100 + "ff i")
                 assert document.read_bytes() == original
                 document.write_bytes(unicode_fixture["make_pdf"](unicode_text))
                 keyboard.key("r", ctrl=True)
@@ -155,10 +157,12 @@ def run(binary):
                 # whole-word matching accepts the literal i in the suffix.
                 exported = copied_results("i", 1)
                 assert "İ" not in exported and "ff i" in exported, exported
+                exported = copied_results("asciiboundary targettoken", 1)
+                assert "ASCIIBOUNDARY TARGETTOKEN" in exported, exported
                 keyboard.key("q", ctrl=True)
                 assert application.wait(timeout=8) == 0
                 assert document.read_bytes() == unicode_fixture["make_pdf"](unicode_text)
-                print("PASS: three-line phrases, repeated spaces, case folding, whole words, ordered results, reverse wrap, minimum window, reload, direct Unicode suffixes, partial expansions, source snippets and unchanged PDF")
+                print("PASS: three-line phrases, repeated spaces, case folding, whole words, ordered results, reverse wrap, minimum window, reload, long ASCII runs, direct Unicode suffixes, partial expansions, original-case source snippets and unchanged PDF")
             except Exception:
                 log.flush(); log.seek(0)
                 print(log.read(), file=sys.stderr)

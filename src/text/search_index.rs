@@ -26,10 +26,46 @@ impl SearchIndex {
                 source: None,
             };
         }
+        // A cheap block scan selects a constructor with no per-character bulk
+        // checks for short or densely mixed Unicode text. Missing an unaligned
+        // short run only loses an optimization; it never changes the folding.
+        if text
+            .as_bytes()
+            .as_chunks::<64>()
+            .0
+            .iter()
+            .any(|block| block.is_ascii())
+        {
+            Self::mixed::<true>(text)
+        } else {
+            Self::mixed::<false>(text)
+        }
+    }
+
+    fn mixed<const BULK_ASCII: bool>(text: &str) -> Self {
         let mut folded = String::with_capacity(text.len());
         let mut source: Option<SourceMap> = None;
-        for (offset, ch) in text.char_indices() {
+        let mut chars = text.char_indices();
+        let mut base = 0;
+        let mut check_from = 0;
+        while let Some((index, ch)) = chars.next() {
+            let offset = base + index;
             if ch.is_ascii() {
+                // Avoid probing every byte in short mixed-language runs.
+                if BULK_ASCII && offset >= check_from {
+                    check_from = offset + 64;
+                    let remaining = &text[offset..];
+                    if remaining.as_bytes().get(..64).is_some_and(<[u8]>::is_ascii) {
+                        let bytes = 64 + ascii_prefix_len(&remaining.as_bytes()[64..]);
+                        let start = folded.len();
+                        folded.push_str(&remaining[..bytes]);
+                        folded[start..].make_ascii_lowercase();
+                        base = offset + bytes;
+                        chars = text[base..].char_indices();
+                        check_from = base;
+                        continue;
+                    }
+                }
                 folded.push(ch.to_ascii_lowercase());
                 continue;
             }
@@ -120,6 +156,20 @@ impl SearchIndex {
     }
 }
 
+/// Scan full ASCII blocks before locating the next UTF-8 lead byte. ASCII
+/// boundaries are always UTF-8 boundaries, so the returned prefix can be copied
+/// and lowercased together without a temporary string or source-map entries.
+fn ascii_prefix_len(bytes: &[u8]) -> usize {
+    let mut length = 0;
+    for block in bytes.chunks(64) {
+        if !block.is_ascii() {
+            return length + block.iter().position(|byte| !byte.is_ascii()).unwrap();
+        }
+        length += block.len();
+    }
+    length
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +222,17 @@ mod tests {
                         assert_reference_ranges(&format!("前 É {first}{gap}{second}{suffix}"));
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_run_boundaries_keep_unicode_expansions_and_source_ranges() {
+        for length in [0, 1, 31, 32, 63, 64, 65, 127, 128, 129] {
+            let ascii = "Az_09".repeat(length / 5) + &"Az_09"[..length % 5];
+            for unicode in ["ß", "İ", "ﬃ", "Ⱥ", "K", "中", "👩‍💻", "É"] {
+                assert_reference_ranges(&format!("{ascii}{unicode}{ascii}ß尾"));
+                assert_reference_ranges(&format!("İ{ascii}{unicode}{ascii}"));
             }
         }
     }
