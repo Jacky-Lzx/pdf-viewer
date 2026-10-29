@@ -33,13 +33,15 @@ def stop(process):
 def display():
     # Xvfb reserves the display itself before publishing its number. Scanning
     # /tmp/.X*-lock in a wrapper can assign the same display to concurrent tests.
+    # Keep it live across a test's last-client disconnect/reconnect. The wrapper
+    # owns the lifetime and tears down this isolated server after the command.
     read_fd, write_fd = os.pipe()
     server = None
     with tempfile.TemporaryFile(mode="w+") as log:
         try:
             server = subprocess.Popen(
                 ["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1280x1024x24",
-                 "-nolisten", "tcp"],
+                 "-noreset", "-nolisten", "tcp"],
                 pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=log,
                 start_new_session=True,
             )

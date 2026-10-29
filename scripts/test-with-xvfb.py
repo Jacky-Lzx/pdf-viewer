@@ -68,6 +68,21 @@ sys.exit(7)
             self.assertIn("deliberate Xvfb failure", result.stderr)
             self.assertFalse(marker.exists())
 
+    def test_sequential_clients_can_reconnect_after_the_last_client_closes(self):
+        probe = """
+import ctypes
+x11 = ctypes.CDLL('libX11.so.6')
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+for index in range(50):
+    display = x11.XOpenDisplay(None)
+    assert display, f'the owned display must survive client reconnection {index}'
+    x11.XCloseDisplay(display)
+"""
+        result = self.invoke(sys.executable, "-c", probe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_parallel_clients_have_distinct_live_displays(self):
         with tempfile.TemporaryDirectory(prefix="pagewing-xvfb-parallel-") as directory:
             root = Path(directory)
