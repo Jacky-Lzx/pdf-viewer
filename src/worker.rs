@@ -2012,6 +2012,10 @@ mod tests {
         worker.open(12, path.clone(), String::new());
         assert!(matches!(receive(&worker), Event::Opened { id: 12, .. }));
         std::fs::write(&path, b"incomplete update").unwrap();
+        // File notifications are independent of explicit reloads. Consume each
+        // write's notification so a slow runner cannot leave it queued ahead
+        // of the reload result. This also exercises the watcher-triggered path.
+        assert!(matches!(receive(&worker), Event::FileChanged { id: 12 }));
         worker.reload(12, path.clone(), String::new());
         assert!(matches!(
             receive(&worker),
@@ -2041,6 +2045,7 @@ mod tests {
         }
         assert!(replacements > 0);
         std::fs::write(&path, bytes).unwrap();
+        assert!(matches!(receive(&worker), Event::FileChanged { id: 12 }));
         worker.reload(12, path, String::new());
         assert!(matches!(receive(&worker), Event::Opened { id: 12, .. }));
         worker.copy(0);
