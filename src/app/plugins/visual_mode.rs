@@ -12,6 +12,7 @@ struct View {
 
 pub(super) struct Visual {
     pub name: String,
+    pub id: String,
     document: u64,
     session: session::Session,
     revision: u64,
@@ -35,6 +36,7 @@ impl Pagewing {
             Ok(session) => {
                 self.plugins.visual = Some(Visual {
                     name: plugin.name.clone(),
+                    id: plugin.id.clone(),
                     document: self.id,
                     session,
                     revision: 0,
@@ -77,7 +79,7 @@ impl Pagewing {
             return false;
         }
         if key == egui::Key::Escape {
-            self.cancel_plugins();
+            self.stop_visual_plugin();
             self.notify("Visual plugin stopped");
             return true;
         }
@@ -94,7 +96,7 @@ impl Pagewing {
             return false;
         }
         if active.pending_keys.len() >= 16 {
-            self.cancel_plugins();
+            self.stop_visual_plugin();
             self.error = Some("Visual plugin cannot keep up with keyboard input".into());
             return true;
         }
@@ -123,6 +125,7 @@ impl Pagewing {
                         return;
                     }
                     if reply.deactivate {
+                        self.stop_visual_plugin();
                         self.notify("Visual plugin stopped");
                         return;
                     }
@@ -245,6 +248,14 @@ impl Pagewing {
                     scroll: view.scroll,
                     viewport: view.viewport,
                     selected_text: view.selection.clone(),
+                    settings: self
+                        .plugins
+                        .registry
+                        .plugins
+                        .iter()
+                        .find(|plugin| plugin.id == active.id)
+                        .map(|plugin| plugin.settings.clone())
+                        .unwrap_or_default(),
                     lines: matches!(event, "activate" | "page").then(|| Arc::clone(lines)),
                     lines_truncated: *truncated,
                 },

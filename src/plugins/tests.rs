@@ -87,6 +87,12 @@ fn response_rejects_unknown_fields_and_out_of_range_pages() {
 fn shell(root: &Path, script: &str) -> Plugin {
     fs::write(root.join("run.sh"), script).unwrap();
     Plugin {
+        id: "test".into(),
+        description: String::new(),
+        version: String::new(),
+        author: String::new(),
+        settings_schema: Vec::new(),
+        settings: Default::default(),
         api_version: 1,
         name: "Test".into(),
         enabled: true,
@@ -114,10 +120,13 @@ fn process_roundtrip_passes_json_and_literal_arguments() {
     let root = tempfile::tempdir().unwrap();
     let mut plugin = shell(
         root.path(),
-        "cat > request.json\nprintf '%s' \"$1\" > argument.txt\nprintf '%s' '{\"message\":\"done\",\"copy_text\":\"中文\",\"goto_page\":3}'",
+        "cat > request.json\nprintf '%s' \"$PAGEWING_PLUGIN_SETTINGS\" > settings.json\nprintf '%s' \"$1\" > argument.txt\nprintf '%s' '{\"message\":\"done\",\"copy_text\":\"中文\",\"goto_page\":3}'",
     );
     let literal = "space ' ; $(touch nope)";
     plugin.command.push(literal.into());
+    plugin
+        .settings
+        .insert("prefix".into(), "中文 ' quoted".into());
     let response = finish(&plugin.start(request()).unwrap()).unwrap();
     assert_eq!(response.goto_page, Some(3));
     assert_eq!(response.copy_text.as_deref(), Some("中文"));
@@ -132,6 +141,9 @@ fn process_roundtrip_passes_json_and_literal_arguments() {
         literal
     );
     assert!(!root.path().join("nope").exists());
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["prefix"], "中文 ' quoted");
 }
 
 #[cfg(unix)]

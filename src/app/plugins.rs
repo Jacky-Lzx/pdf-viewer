@@ -1,5 +1,5 @@
 use super::Pagewing;
-use crate::plugins::{Job, Registry, Request, session, visual};
+use crate::plugins::{Job, Registry, Request, management, session, visual};
 use eframe::egui;
 use std::{
     collections::VecDeque,
@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod manager;
 mod visual_mode;
 
 pub(super) struct PluginUi {
@@ -16,46 +17,122 @@ pub(super) struct PluginUi {
     running: Option<(u64, Job)>,
     output: Option<String>,
     visual: Option<visual_mode::Visual>,
+    preferences: management::Preferences,
+    preferences_error: bool,
+    restore_attempted: bool,
+    tool_id: Option<String>,
+    manager: manager::Manager,
 }
 
 impl PluginUi {
-    fn busy(&self) -> bool {
-        self.running.is_some() || self.visual.is_some()
+    fn reload(&mut self) {
+        self.registry = Registry::discover(&self.root);
+        match management::Preferences::load(&self.root) {
+            Ok(preferences) => {
+                self.preferences = preferences;
+                self.preferences_error = false;
+            }
+            Err(error) => {
+                self.registry
+                    .errors
+                    .push(format!("Cannot load plugin preferences: {error}"));
+                self.preferences_error = true;
+            }
+        }
+        self.preferences.apply(&mut self.registry);
+        self.manager.runtime = self
+            .registry
+            .plugins
+            .iter()
+            .map(|p| (p.id.clone(), p.executable()))
+            .collect();
     }
+
+    fn change_preferences(
+        &mut self,
+        change: impl FnOnce(&mut management::Preferences),
+    ) -> Result<(), String> {
+        if self.preferences_error {
+            return Err("Cannot save while plugins.json is invalid. Open the plugins folder and repair the preferences file in its parent folder.".into());
+        }
+        let mut next = management::Preferences::load(&self.root)?;
+        change(&mut next);
+        next.save(&self.root)?;
+        self.preferences = next;
+        self.reload();
+        Ok(())
+    }
+
     pub fn new(root: PathBuf) -> Self {
-        let registry = Registry::discover(&root);
-        Self {
+        let mut state = Self {
             root,
-            registry,
+            registry: Registry::default(),
             running: None,
             output: None,
             visual: None,
-        }
+            preferences: management::Preferences::default(),
+            preferences_error: false,
+            restore_attempted: false,
+            tool_id: None,
+            manager: manager::Manager::default(),
+        };
+        state.reload();
+        state
     }
 }
 
 impl Pagewing {
-    pub(super) fn cancel_plugins(&mut self) {
+    pub(super) fn suspend_plugins(&mut self) {
         self.plugins.running = None;
+        self.plugins.tool_id = None;
         self.plugins.visual = None;
+        self.plugins.restore_attempted = false;
+        self.plugins.reload();
+    }
+
+    fn stop_visual_plugin(&mut self) {
+        self.plugins.visual = None;
+        self.plugins.restore_attempted = true;
+        if let Err(error) = self
+            .plugins
+            .change_preferences(|prefs| prefs.last_visual = None)
+        {
+            self.error = Some(error.into());
+        }
+    }
+
+    fn can_run_plugin(&self, plugin: &crate::plugins::Plugin) -> bool {
+        plugin.enabled
+            && self
+                .plugins
+                .manager
+                .runtime
+                .get(&plugin.id)
+                .is_some_and(Result::is_ok)
+            && self.nav.count > 0
+            && !self.loading
+            && !self.reloading
+            && if plugin.api_version == 2 {
+                self.plugins.visual.is_none()
+            } else {
+                self.plugins.running.is_none()
+            }
     }
 
     pub(super) fn plugin_menu(&mut self, ui: &mut egui::Ui) {
         let mut selected = None;
+        let mut stop_visual = false;
+        let mut stop_tool = false;
         ui.menu_button("Plugins", |ui| {
             ui.set_max_width(340.0);
-            if self.plugins.busy() {
-                ui.label(
-                    self.plugins
-                        .visual
-                        .as_ref()
-                        .map_or("Plugin running…", |v| v.name.as_str()),
-                );
-                if ui.button("Cancel plugin").clicked() {
-                    self.cancel_plugins();
-                    self.notify("Plugin cancelled");
-                    ui.close();
-                }
+            if let Some(active) = &self.plugins.visual {
+                ui.label(format!("Active: {}", active.name));
+                stop_visual = ui.button("Stop visual mode · Esc").clicked();
+                ui.separator();
+            }
+            if self.plugins.running.is_some() {
+                ui.label("Tool running…");
+                stop_tool = ui.button("Cancel tool").clicked();
                 ui.separator();
             }
             if self.plugins.registry.plugins.is_empty() {
@@ -65,41 +142,41 @@ impl Pagewing {
                 .max_height(240.0)
                 .show(ui, |ui| {
                     for (index, plugin) in self.plugins.registry.plugins.iter().enumerate() {
-                        let enabled = plugin.enabled
-                            && !self.plugins.busy()
-                            && self.nav.count > 0
-                            && !self.loading
-                            && !self.reloading;
-                        let label = if plugin.enabled {
-                            plugin.name.clone()
-                        } else {
-                            format!("{} (disabled)", plugin.name)
-                        };
-                        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        if plugin.enabled
+                            && ui
+                                .add_enabled(
+                                    self.can_run_plugin(plugin),
+                                    egui::Button::new(&plugin.name),
+                                )
+                                .clicked()
+                        {
                             selected = Some(index);
                             ui.close();
                         }
                     }
-                    for error in &self.plugins.registry.errors {
-                        ui.colored_label(ui.visuals().error_fg_color, error);
-                    }
                 });
             ui.separator();
-            if ui
-                .add_enabled(!self.plugins.busy(), egui::Button::new("Reload plugins"))
-                .clicked()
-            {
-                self.plugins.registry = Registry::discover(&self.plugins.root);
-                ui.close();
-            }
-            if ui.button("Copy plugins folder").clicked() {
-                ui.ctx().copy_text(self.plugins.root.display().to_string());
+            if ui.button("Manage plugins…").clicked() {
+                self.plugins.manager.open = true;
                 ui.close();
             }
         });
+        if stop_visual {
+            self.stop_visual_plugin();
+        }
+        if stop_tool {
+            self.plugins.running = None;
+            self.plugins.tool_id = None;
+        }
         if let Some(index) = selected {
             self.start_plugin_with_context(index, ui.ctx());
             ui.ctx().request_repaint();
+        }
+        if let Some(active) = &self.plugins.visual {
+            ui.weak(format!("{} · Esc to exit", active.name));
+        }
+        if self.plugins.running.is_some() {
+            ui.spinner();
         }
     }
 
@@ -109,11 +186,21 @@ impl Pagewing {
     }
 
     fn start_plugin_with_context(&mut self, index: usize, context: &egui::Context) {
-        if self.plugins.busy() {
+        let plugin = &self.plugins.registry.plugins[index];
+        if !self.can_run_plugin(plugin) {
             return;
         }
-        if self.plugins.registry.plugins[index].api_version == 2 {
+        if plugin.api_version == 2 {
+            let id = plugin.id.clone();
             self.start_visual_plugin(index, context);
+            self.plugins.restore_attempted = true;
+            if self.plugins.visual.is_some()
+                && let Err(error) = self.plugins.change_preferences(|prefs| {
+                    prefs.last_visual = prefs.remember_visual.then_some(id)
+                })
+            {
+                self.error = Some(error.into());
+            }
             return;
         }
         let request = Request {
@@ -128,19 +215,25 @@ impl Pagewing {
                 .to_owned(),
         };
         match self.plugins.registry.plugins[index].start(request) {
-            Ok(job) => self.plugins.running = Some((self.id, job)),
+            Ok(job) => {
+                self.plugins.tool_id = Some(self.plugins.registry.plugins[index].id.clone());
+                self.plugins.running = Some((self.id, job));
+            }
             Err(error) => self.error = Some(error.into()),
         }
     }
 
     pub(super) fn plugin_events(&mut self, context: &egui::Context) {
+        self.plugin_manager_events(context);
         self.visual_plugin_events(context);
+        self.restore_visual_plugin(context);
         let Some((document_id, job)) = &self.plugins.running else {
             return;
         };
         // A response from a closed/replaced/reloaded document must have no effects.
         if *document_id != self.id || self.loading || self.reloading {
             self.plugins.running = None;
+            self.plugins.tool_id = None;
             return;
         }
         let Some(result) = job.poll() else {
@@ -148,6 +241,7 @@ impl Pagewing {
             return;
         };
         self.plugins.running = None;
+        self.plugins.tool_id = None;
         match result {
             Ok(response) => {
                 // Validate all actions before applying any of them.
@@ -171,6 +265,7 @@ impl Pagewing {
     }
 
     pub(super) fn plugin_output(&mut self, context: &egui::Context) {
+        self.plugin_manager_window(context);
         let Some(text) = &self.plugins.output else {
             return;
         };

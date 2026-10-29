@@ -39,6 +39,7 @@ pub struct Context {
     pub viewport: [f32; 2],
     pub scroll: [f32; 2],
     pub selected_text: String,
+    pub settings: std::collections::BTreeMap<String, serde_json::Value>,
     /// Included for activate/page events, omitted for small view/key updates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lines: Option<Arc<Vec<Line>>>,

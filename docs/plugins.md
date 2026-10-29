@@ -10,30 +10,40 @@ Pagewing 不嵌入脚本引擎，也不增加 Cargo 依赖。插件是系统上�
 页面始终由阅读器渲染，插件描述效果，不逐帧生成或传输页面图片。
 覆盖层只影响显示，不写入 PDF，也不改变导出图片、搜索或文字选择的数据。
 
-## 安装与示例
+## 安装、管理与示例
 
-目录在配置文件旁：`~/.config/pagewing/plugins/`；绝对路径的
-`XDG_CONFIG_HOME` 设置会将其改为 `$XDG_CONFIG_HOME/pagewing/plugins/`。
-**Plugins → Copy plugins folder** 可复制实际目录。
+打开 **Plugins → Manage plugins…**，无需编辑配置文件：
 
-```text
-plugins/
-├── focus-reader/
-│   ├── plugin.toml
-│   └── plugin.py
-└── copy-reference/
-    ├── plugin.toml
-    └── plugin.py
-```
+- **Add focus reader / Add reference tool**：安装内置示例，不需要下载。
+- **Install from folder…**：选择包含 `plugin.toml` 的插件目录；压缩包请先解压。
+- **Enabled**：保存启用状态。新安装的插件始终先禁用，即使包内清单声明启用。
+- **Run / Stop / Cancel**：分别运行和停止视觉模式或一次性工具。
+- **Settings…**：调整插件声明的参数；缺少运行程序时可选择解释器或可执行程序的位置。
+- **Remove / Undo removal**：卸载会先移到可恢复目录，撤销后保持禁用。
+- **Open plugins folder / Refresh**：查看文件，或读取手工修改的插件。安装、启停及设置保存自动刷新。
 
-将仓库 `examples/plugins/focus-reader/` 整个目录复制到插件目录，检查代码后将清单的
-`enabled` 改成 `true`。选择 **Plugins → Reload plugins**，打开 PDF 后运行
-**Focus reader · j/k**。示例需要 Python 3，仅使用标准库。
+每个窗口可以同时运行**一个视觉插件和一个工具插件**。
+工具栏持续显示活动视觉模式和 Esc 退出提示；工具运行时显示进度指示。
+管理窗口内的输入和按键不触发阅读器或视觉插件快捷键。点击 Run 会返回阅读界面。
 
-默认保留三行明亮，其余页面变暗。`j/k` 或上下箭头移动一行；到达边界时进入下一页或上一页。
-`Esc` 或 **Cancel plugin** 退出。扫描件没有文字行时改用可移动亮带，不需要 OCR。
-清单的命令参数 `--lines 3` 可设为 1–20 行，`--opacity 0.72` 可设为 0–1。
-文字顺序与 PDF 的文字层一致；复杂多栏、竖排或缺少准确文字层的文档不保证自然阅读顺序。
+默认勾选 **Remember visual mode across documents and reloads**：从菜单选择过的视觉模式
+会在下次打开或重载文档后恢复，也可跨应用重启恢复。未手动运行过的插件不会因安装或启用而自动启动。
+Esc、Stop、禁用或卸载会清除记忆；异常退出后不会在当前文档中无限重试。
+取消勾选后，文档切换或重载会停止视觉模式，需要手动运行。
+
+内置 focus 示例默认保留三行明亮，其余变暗。`j/k` 或上下箭头移动一行，到达页边界继续翻页。
+Settings 中可调整 **Visible lines**（1–20）及 **Dim strength**（0–1）。修改运行中的视觉插件设置
+会重新启动该模式以应用新值。扫描件没有文字行时使用可移动亮带，不需要 OCR。
+文字顺序依赖 PDF 的文字层，复杂多栏、竖排等文档不保证自然阅读顺序。
+
+插件默认目录是 `~/.config/pagewing/plugins/`；绝对路径的 `XDG_CONFIG_HOME` 会改为
+`$XDG_CONFIG_HOME/pagewing/plugins/`。用户设置保存到旁边的 `plugins.json`，不修改插件清单或阅读进度。
+卸载的文件保存在旁边的 `removed-plugins/`，本次窗口内可撤销最近一次卸载，之后仍可从该目录恢复文件。
+这些设置在当前窗口立即生效；其他窗口在 Refresh、文档切换或重启时读取。
+
+运行环境检查会定位清单指定的程序，并搜索常见的系统及包管理器目录；不会自动安装 Python、
+下载依赖或检查所有第三方模块。缺失模块等运行错误仍通过阅读器提示显示。
+文件夹安装最多 64 MiB、2048 个条目、16 层目录，不接受符号链接或特殊文件；安装到已有目录时不覆盖。
 
 ## 清单
 
@@ -50,14 +60,44 @@ timeout_seconds = 5
 简单程序名从 Pagewing 进程的 `PATH` 查找；包含路径分隔符的相对程序路径按插件目录解析。
 工作目录为插件目录。Finder 启动的 `PATH` 可能与终端不同，必要时指定解释器绝对路径。
 
-`enabled` 默认 `false`，必须明确启用。`timeout_seconds` 默认 10，范围 1–120。
+`enabled` 默认 `false`；管理界面的用户设置优先于清单。新安装后必须在界面明确启用。`timeout_seconds` 默认 10，范围 1–120。
 在 v2 中限制**每个事件**的响应时间，不限制会话的空闲时间或总时长。
 清单上限 16 KiB，根目录最多 128 个条目，不递归扫描。错误清单独立显示，不影响其他插件。
-停用可修改清单后 Reload，卸载可移走插件目录。插件不会自动运行。
+手工编辑后可在管理界面 Refresh。插件只在用户运行或恢复已选择的视觉模式时启动。
+
+## 插件参数声明
+
+可选的 `description`、`version`、`author` 在管理界面显示。插件可以声明最多 32 个设置项：
+
+```toml
+[[settings]]
+key = "lines"
+label = "Visible lines"
+type = "integer"
+default = 3
+min = 1
+max = 20
+
+[[settings]]
+key = "opacity"
+label = "Dim strength"
+type = "number"
+default = 0.72
+min = 0.0
+max = 1.0
+```
+
+`type` 支持 `integer`、`number`、`boolean`、`text`，数字可指定 min/max。
+每项 key 必须唯一，default 必须符合类型和范围。参数未设置时使用清单默认值；
+旧设置在插件更新后不再有效时，回退到默认值并在管理界面报告原因。
+
+v2 每个事件通过 `context.settings` 接收当前参数；v1 通过 `PAGEWING_PLUGIN_SETTINGS`
+环境变量读取同样的 JSON 对象。插件程序需要使用这些值，声明参数本身不会自动修改启动参数。
+未声明参数的旧插件仍可运行，其 Settings 只提供运行程序路径配置。
 
 ## API v2：事件与状态
 
-每个窗口最多运行一个插件。启动视觉插件后，其进程持续运行直到退出模式。
+每个窗口最多一个视觉会话；一次性工具可同时运行。启动视觉插件后，其进程持续运行直到退出模式。
 每个事件以一行 UTF-8 JSON 写入 stdin。插件必须为该事件返回**恰好一行** stdout JSON，
 带相同的 `id`，并立即 flush。日志写 stderr；不支持主动发送未请求的回复。
 
@@ -76,6 +116,7 @@ timeout_seconds = 5
     "viewport": [1000, 700],
     "scroll": [0, 0],
     "selected_text": "",
+    "settings": {"lines": 3, "opacity": 0.72},
     "lines": [{"text": "A line of text", "rect": [60, 100, 450, 115]}],
     "lines_truncated": false
   }
@@ -153,8 +194,9 @@ timeout_seconds = 5
 管道写满也可以超时取消，不会阻塞阅读界面。
 
 翻页立即移除旧场景、更新文档页次，并丢弃过期回复；新页几何就绪后继续同一个进程。
-取消、关闭/替换/重新加载文档、异常退出、超时、非法协议或退出窗口时清除效果和按键，
-结束插件进程组。宿主取消不承诺发送最后一条清理事件；插件不应脱离进程组或启动常驻服务。
+停止、关闭/替换/重新加载文档、异常退出、超时、非法协议或退出窗口时清除效果和按键，
+结束插件进程组。启用记住视觉模式时，新文档准备好后会创建新会话恢复模式；进程内部状态不会跨重载保留。
+宿主停止不承诺发送最后一条清理事件；插件不应脱离进程组或启动常驻服务。
 
 **插件以当前用户身份运行，没有安全沙箱。** 只启用检查过且可信的插件。
 它们拥有用户的文件与网络权限。协议及队列限制用于控制异常任务，不是 CPU、内存或磁盘硬配额。

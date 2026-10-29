@@ -49,7 +49,7 @@ impl Pagewing {
     }
 
     pub(super) fn clear_document(&mut self, context: &egui::Context) {
-        self.cancel_plugins();
+        self.suspend_plugins();
         self.synctex.clear_document();
         egui::Popup::close_all(context);
         super::copy_menu::clear(context);
@@ -165,7 +165,7 @@ impl Pagewing {
         if self.reading.path.as_os_str().is_empty() || self.loading {
             return;
         }
-        self.cancel_plugins();
+        self.suspend_plugins();
         self.auto_reload_pending = false;
         self.automatic_reload = false;
         self.remember();

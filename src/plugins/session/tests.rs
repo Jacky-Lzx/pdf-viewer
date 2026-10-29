@@ -18,6 +18,7 @@ pub(super) fn request(id: u64) -> Request {
             viewport: [600., 800.],
             scroll: [0., 0.],
             selected_text: String::new(),
+            settings: Default::default(),
             lines: None,
             lines_truncated: false,
         },
@@ -27,6 +28,12 @@ pub(super) fn request(id: u64) -> Request {
 fn plugin(root: &std::path::Path, script: &str) -> Plugin {
     fs::write(root.join("run.sh"), script).unwrap();
     Plugin {
+        id: "test".into(),
+        description: String::new(),
+        version: String::new(),
+        author: String::new(),
+        settings_schema: Vec::new(),
+        settings: Default::default(),
         api_version: 2,
         name: "Session test".into(),
         enabled: true,

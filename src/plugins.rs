@@ -1,4 +1,5 @@
 //! On-demand process plugins. No code is loaded into the reader process.
+pub mod management;
 pub mod session;
 #[cfg(test)]
 mod tests;
@@ -31,6 +32,14 @@ struct Manifest {
     enabled: bool,
     #[serde(default = "default_timeout")]
     timeout_seconds: u64,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    author: String,
+    #[serde(default)]
+    settings: Vec<management::Setting>,
 }
 
 fn default_timeout() -> u64 {
@@ -42,6 +51,12 @@ pub struct Plugin {
     pub api_version: u32,
     pub name: String,
     pub enabled: bool,
+    pub id: String,
+    pub description: String,
+    pub version: String,
+    pub author: String,
+    pub settings_schema: Vec<management::Setting>,
+    pub settings: std::collections::BTreeMap<String, serde_json::Value>,
     directory: PathBuf,
     command: Vec<String>,
     timeout: Duration,
@@ -79,43 +94,14 @@ impl Registry {
             return registry;
         }
         paths.sort();
-        for directory in paths.into_iter().filter(|path| path.is_dir()) {
+        for directory in paths.into_iter().filter(|path| {
+            path.is_dir()
+                && !path
+                    .file_name()
+                    .is_some_and(|s| s.to_string_lossy().starts_with('.'))
+        }) {
             let path = directory.join("plugin.toml");
-            let loaded = (|| -> Result<Plugin, String> {
-                let mut text = String::new();
-                fs::File::open(&path)
-                    .map_err(|error| error.to_string())?
-                    .take(MAX_MANIFEST + 1)
-                    .read_to_string(&mut text)
-                    .map_err(|error| error.to_string())?;
-                if text.len() as u64 > MAX_MANIFEST {
-                    return Err("Manifest exceeds 16 KiB".into());
-                }
-                let manifest: Manifest = toml::from_str(&text).map_err(|e| e.to_string())?;
-                if !matches!(manifest.api_version, 1 | 2) {
-                    return Err("Unsupported plugin api_version (expected 1 or 2)".into());
-                }
-                if manifest.name.trim().is_empty() || manifest.name.len() > 128 {
-                    return Err("Plugin name must contain 1–128 bytes".into());
-                }
-                if manifest.command.is_empty() || manifest.command[0].trim().is_empty() {
-                    return Err("Plugin command must contain an executable".into());
-                }
-                if manifest.command.iter().any(|arg| arg.contains('\0')) {
-                    return Err("Plugin command cannot contain NUL bytes".into());
-                }
-                if !(1..=120).contains(&manifest.timeout_seconds) {
-                    return Err("timeout_seconds must be between 1 and 120".into());
-                }
-                Ok(Plugin {
-                    api_version: manifest.api_version,
-                    name: manifest.name,
-                    enabled: manifest.enabled,
-                    directory,
-                    command: manifest.command,
-                    timeout: Duration::from_secs(manifest.timeout_seconds),
-                })
-            })();
+            let loaded = Plugin::load(directory);
             match loaded {
                 Ok(plugin) => registry.plugins.push(plugin),
                 Err(error) => registry.errors.push(format!("{}: {error}", path.display())),
@@ -183,6 +169,65 @@ impl Drop for Job {
 }
 
 impl Plugin {
+    pub fn load(directory: PathBuf) -> Result<Self, String> {
+        let path = directory.join("plugin.toml");
+        let mut text = String::new();
+        fs::File::open(&path)
+            .map_err(|error| error.to_string())?
+            .take(MAX_MANIFEST + 1)
+            .read_to_string(&mut text)
+            .map_err(|error| error.to_string())?;
+        if text.len() as u64 > MAX_MANIFEST {
+            return Err("Manifest exceeds 16 KiB".into());
+        }
+        let manifest: Manifest = toml::from_str(&text).map_err(|e| e.to_string())?;
+        if !matches!(manifest.api_version, 1 | 2) {
+            return Err("Unsupported plugin api_version (expected 1 or 2)".into());
+        }
+        if manifest.name.trim().is_empty() || manifest.name.len() > 128 {
+            return Err("Plugin name must contain 1–128 bytes".into());
+        }
+        if manifest.description.len() > 4096
+            || manifest.version.len() > 64
+            || manifest.author.len() > 128
+        {
+            return Err("Plugin description, version or author is too long".into());
+        }
+        if manifest.command.is_empty() || manifest.command[0].trim().is_empty() {
+            return Err("Plugin command must contain an executable".into());
+        }
+        if manifest.command.iter().any(|arg| arg.contains('\0')) {
+            return Err("Plugin command cannot contain NUL bytes".into());
+        }
+        if !(1..=120).contains(&manifest.timeout_seconds) {
+            return Err("timeout_seconds must be between 1 and 120".into());
+        }
+        management::validate_schema(&manifest.settings)?;
+        let settings = manifest
+            .settings
+            .iter()
+            .map(|setting| (setting.key.clone(), setting.default.clone()))
+            .collect();
+        Ok(Plugin {
+            id: directory
+                .file_name()
+                .ok_or("Plugin folder has no name")?
+                .to_string_lossy()
+                .into_owned(),
+            description: manifest.description,
+            version: manifest.version,
+            author: manifest.author,
+            settings_schema: manifest.settings,
+            settings,
+            api_version: manifest.api_version,
+            name: manifest.name,
+            enabled: manifest.enabled,
+            directory,
+            command: manifest.command,
+            timeout: Duration::from_secs(manifest.timeout_seconds),
+        })
+    }
+
     fn command(&self) -> Command {
         let executable = Path::new(&self.command[0]);
         let executable = if executable.is_relative() && executable.components().count() > 1 {
@@ -190,7 +235,12 @@ impl Plugin {
         } else {
             executable.to_path_buf()
         };
+        let executable = self.executable().unwrap_or(executable);
         let mut command = Command::new(executable);
+        command.env(
+            "PAGEWING_PLUGIN_SETTINGS",
+            serde_json::to_string(&self.settings).unwrap_or_default(),
+        );
         command
             .args(&self.command[1..])
             .current_dir(&self.directory);
