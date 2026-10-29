@@ -54,6 +54,7 @@ impl Pagewing {
         super::copy_menu::clear(context);
         self.list_keyboard.begin_frame(context);
         self.list_keyboard = super::list_keyboard::ListKeyboard::default();
+        self.removal_focus = super::removal_focus::RemovalFocus::default();
         self.id += 1;
         self.nav = Navigation::default();
         self.history = crate::history::ViewHistory::default();

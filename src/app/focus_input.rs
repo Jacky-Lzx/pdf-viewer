@@ -60,6 +60,13 @@ impl Pagewing {
         for event in std::mem::take(&mut self.deferred_input).into_iter().rev() {
             events.push_front(event);
         }
+        if self.removal_focus_waiting(context) {
+            // The deleted widget can no longer receive the queued suffix.
+            // Lay out its stable-key successor before Tab/Enter or new input.
+            self.focus_input = events;
+            context.request_repaint();
+            return;
+        }
         // Each detector can shorten the current prefix. Later detectors never
         // inspect input already held behind an earlier focus transition.
         let mut split = tab_split(&events);
@@ -75,6 +82,9 @@ impl Pagewing {
             .or(split);
         split = self
             .list_keyboard_input_split(context, &events, split.unwrap_or(events.len()))
+            .or(split);
+        split = self
+            .removal_input_split(context, &events, split.unwrap_or(events.len()))
             .or(split);
         // A bar can disappear before a later activation in the same native
         // batch. Establish its new focus before reading old button responses.

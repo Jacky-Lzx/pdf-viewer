@@ -15,6 +15,9 @@ enum RowAction {
 struct RowResponse {
     action: Option<RowAction>,
     focused: Option<egui::Id>,
+    jump: egui::Response,
+    remove: egui::Response,
+    keyboard_removal: Option<egui::Id>,
 }
 
 fn removable_row(
@@ -24,8 +27,6 @@ fn removable_row(
     delete_tooltip: &str,
     tooltip: impl FnOnce(&mut egui::Ui),
 ) -> RowResponse {
-    let mut action = None;
-    let mut focused = None;
     let row_height = Pagewing::sidebar_row_height(ui);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -39,22 +40,37 @@ fn removable_row(
                     ui.set_max_width(ui.spacing().tooltip_width);
                     tooltip(ui);
                 });
-            focused = list_focus::row_focus(&jump).or_else(|| list_focus::row_focus(&remove));
-            if jump.clicked() {
-                action = Some(RowAction::Jump);
+            let focused = list_focus::row_focus(&jump).or_else(|| list_focus::row_focus(&remove));
+            let action = if jump.clicked() {
+                Some(RowAction::Jump)
             } else if remove.clicked() {
-                action = Some(RowAction::Remove);
+                Some(RowAction::Remove)
+            } else {
+                None
+            };
+            let keyboard_removal = (remove.clicked()
+                && remove.has_focus()
+                && !ui.input(|input| input.pointer.any_click()))
+            .then_some(remove.id);
+            RowResponse {
+                action,
+                focused,
+                jump,
+                remove,
+                keyboard_removal,
             }
-        });
-    });
-    RowResponse { action, focused }
+        })
+        .inner
+    })
+    .inner
 }
 
 impl Pagewing {
     pub(super) fn sidebar_control_focused(&self, context: &egui::Context) -> bool {
         self.library.sidebar
             && self.nav.count > 0
-            && super::shortcuts::focused_in_region(context, self.sidebar_region)
+            && (self.removal_focus.control_focused(context)
+                || super::shortcuts::focused_in_region(context, self.sidebar_region))
     }
 
     fn sidebar_row_height(ui: &egui::Ui) -> f32 {
@@ -73,6 +89,7 @@ impl Pagewing {
             || (self.comments.open && context.available_rect().width() < 220.0)
         {
             self.list_keyboard.clear();
+            self.removal_focus.clear();
             if !self.loading
                 && let Some(keys) = self.thumbnails.requests()
             {

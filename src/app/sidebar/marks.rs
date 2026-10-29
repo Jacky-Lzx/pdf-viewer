@@ -4,29 +4,54 @@ use eframe::egui;
 
 impl Pagewing {
     pub(super) fn mark_list(&mut self, ui: &mut egui::Ui) -> bool {
+        let requested =
+            self.removal_focus
+                .target(ui.ctx(), self.id, crate::app::removal_focus::List::Marks);
+        let focus_name = requested
+            .and_then(|key| char::from_u32(key as u32))
+            .and_then(|name| {
+                self.reading
+                    .marks
+                    .range(name..)
+                    .next()
+                    .or_else(|| self.reading.marks.last_key_value())
+                    .map(|(&name, _)| name)
+            });
         ui.add_space(20.0);
         appearance::section(ui, "MARKS");
         let mut target = None;
         let mut remove = None;
+        let mut removal_origin = None;
         for (&name, mark) in &self.reading.marks {
             // Names keep their button IDs when earlier marks are edited.
             ui.scope_builder(
                 egui::UiBuilder::new().id(("sidebar-mark", self.id, name)),
-                |ui| match removable_row(
-                    ui,
-                    mark.page == self.nav.page,
-                    format!("'{name}   {}", self.labels.sidebar_caption(mark.page)),
-                    "Delete mark",
-                    |ui| {
-                        ui.label(self.labels.sidebar_tooltip(mark.page));
-                        ui.label("Restore page, zoom, rotation and scroll position");
-                    },
-                )
-                .action
-                {
-                    Some(RowAction::Jump) => target = Some(name),
-                    Some(RowAction::Remove) => remove = Some(name),
-                    None => {}
+                |ui| {
+                    let response = removable_row(
+                        ui,
+                        mark.page == self.nav.page,
+                        format!("'{name}   {}", self.labels.sidebar_caption(mark.page)),
+                        "Delete mark",
+                        |ui| {
+                            ui.label(self.labels.sidebar_tooltip(mark.page));
+                            ui.label("Restore page, zoom, rotation and scroll position");
+                        },
+                    );
+                    self.removal_focus.register(&response.remove);
+                    if focus_name == Some(name) {
+                        self.removal_focus.apply(ui, &response.jump);
+                        response
+                            .jump
+                            .scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
+                    }
+                    match response.action {
+                        Some(RowAction::Jump) => target = Some(name),
+                        Some(RowAction::Remove) => {
+                            remove = Some(name);
+                            removal_origin = response.keyboard_removal;
+                        }
+                        None => {}
+                    }
                 },
             );
         }
@@ -34,6 +59,24 @@ impl Pagewing {
             self.mark(name, MarkAction::Jump);
         }
         if let Some(name) = remove {
+            if let Some(origin) = removal_origin {
+                let neighbor = self
+                    .reading
+                    .marks
+                    .range((std::ops::Bound::Excluded(name), std::ops::Bound::Unbounded))
+                    .next()
+                    .or_else(|| self.reading.marks.range(..name).next_back())
+                    .map(|(&name, _)| name as usize);
+                self.removal_focus.request(
+                    self.id,
+                    crate::app::removal_focus::List::Marks,
+                    neighbor,
+                    origin,
+                );
+                if neighbor.is_none() {
+                    ui.memory_mut(|memory| memory.surrender_focus(origin));
+                }
+            }
             self.remove_mark(name);
         }
         target.is_some()
@@ -54,21 +97,20 @@ mod tests {
         size: egui::Vec2,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
-        context.run(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                time: Some(context.input(|input| input.time) + 0.25),
-                events,
-                ..Default::default()
-            },
-            |context| {
-                app.keys(context);
-                app.toolbar(context);
-                app.status(context);
-                app.sidebar(context);
-                egui::CentralPanel::default().show(context, |_| {});
-            },
-        )
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            time: Some(context.input(|input| input.time) + 0.25),
+            events,
+            ..Default::default()
+        };
+        app.prepare_native_input(context, &mut input);
+        context.run(input, |context| {
+            app.keys(context);
+            app.toolbar(context);
+            app.status(context);
+            app.sidebar(context);
+            egui::CentralPanel::default().show(context, |_| {});
+        })
     }
 
     fn settle(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2) -> egui::FullOutput {
@@ -109,6 +151,112 @@ mod tests {
                     },
                 ],
             );
+        }
+    }
+
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        [true, false]
+            .map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .into()
+    }
+
+    #[test]
+    fn keyboard_deletion_restores_neighbor_focus_before_following_its_saved_view() {
+        let size = egui::vec2(1180.0, 820.0);
+        for (removed, neighbor, batch) in [
+            ('a', 'm', false),
+            ('m', 'z', false),
+            ('z', 'm', false),
+            ('m', 'z', true),
+            ('z', 'm', true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let context = egui::Context::default();
+            let mut app =
+                Pagewing::with_context(&context, None, None, directory.path().join("library.json"));
+            app.nav = Navigation::new(80, 0);
+            app.dimensions = vec![[600.0, 800.0]; 80];
+            app.library.sidebar = true;
+            app.reading.bookmarks = [0, 4].into_iter().collect();
+            app.refresh_bookmarks();
+            let mark = ReadingMark {
+                page: 40,
+                fit: Fit::Custom(1.75),
+                rotation: 1,
+                continuous: true,
+                facing: false,
+                offset: [0.4, 0.6],
+            };
+            for name in ['a', 'm', 'z'] {
+                app.reading.marks.insert(name, mark.clone());
+            }
+            app.outline.set_entries(vec![crate::outline::OutlineEntry {
+                title: "Keyboard chapter".into(),
+                destination: Some(crate::destination::Destination::page(0)),
+                depth: 0,
+            }]);
+            app.focus_contents();
+            settle(&mut app, &context, size);
+            let mut reached = false;
+            for _ in 0..24 {
+                frame(&mut app, &context, size, key(egui::Key::Tab));
+                let output = settle(&mut app, &context, size);
+                let (label, _) = text_bounds(&output, &format!("'{removed}"));
+                if context.memory(|memory| memory.focused()).is_some_and(|id| {
+                    context.read_response(id).is_some_and(|response| {
+                        response.rect.y_range().intersects(label.y_range())
+                            && response.rect.left() > label.right()
+                    })
+                }) {
+                    reached = true;
+                    break;
+                }
+            }
+            assert!(reached, "Tab must reach mark {removed}'s delete button");
+            app.pan = egui::vec2(37.0, 53.0);
+            let mut events = key(egui::Key::Space);
+            if batch {
+                events.extend(key(egui::Key::Enter));
+            }
+            let size = if batch {
+                egui::vec2(240.0, 240.0)
+            } else {
+                size
+            };
+            // A resize can have its own native prefix before the activation.
+            // Its previous response may then be clipped until the next layout.
+            if batch {
+                frame(&mut app, &context, size, Vec::new());
+            }
+            frame(&mut app, &context, size, events);
+            let output = settle(&mut app, &context, size);
+            assert!(!app.reading.marks.contains_key(&removed));
+            assert_eq!(app.reading.marks.len(), 2);
+            let id = context
+                .memory(|memory| memory.focused())
+                .expect("neighbor must gain focus");
+            let response = context.read_response(id).unwrap();
+            let (label, _) = text_bounds(&output, &format!("'{neighbor}"));
+            assert!(response.rect.contains_rect(label));
+            if !batch {
+                assert_eq!(app.nav.page, 0);
+                assert_eq!(app.pan, egui::vec2(37.0, 53.0));
+                assert_eq!(app.reading.rotation, 0);
+                frame(&mut app, &context, size, key(egui::Key::Enter));
+            }
+            assert_eq!(app.nav.page, mark.page);
+            assert_eq!(app.reading.fit, mark.fit);
+            assert_eq!(app.reading.rotation, mark.rotation);
+            assert_eq!(app.reading.continuous, mark.continuous);
+            assert_eq!(app.reading.facing, mark.facing);
+            assert_eq!(app.pending_offset, Some(mark.offset));
+            assert!(app.focus_input.is_empty());
         }
     }
 

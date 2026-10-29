@@ -20,6 +20,7 @@ mod properties;
 mod reading_controls;
 mod recent;
 mod reload;
+mod removal_focus;
 mod search;
 mod selection_scroll;
 mod shortcuts;
@@ -146,6 +147,7 @@ pub struct Pagewing {
     reveal_hit: Option<usize>,
     result_focus_origin: Option<egui::Id>,
     list_keyboard: list_keyboard::ListKeyboard,
+    removal_focus: removal_focus::RemovalFocus,
     search_navigation: crate::search_navigation::SearchNavigation,
     scanned: usize,
     scan_total: usize,
@@ -323,6 +325,7 @@ impl Pagewing {
             reveal_hit: None,
             result_focus_origin: None,
             list_keyboard: list_keyboard::ListKeyboard::default(),
+            removal_focus: removal_focus::RemovalFocus::default(),
             search_navigation: Default::default(),
             scanned: 0,
             scan_total: 0,

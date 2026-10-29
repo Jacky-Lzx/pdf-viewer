@@ -4,14 +4,32 @@ use eframe::egui;
 
 impl Pagewing {
     pub(super) fn bookmark_list(&mut self, ui: &mut egui::Ui) -> bool {
+        let requested = self.removal_focus.target(
+            ui.ctx(),
+            self.id,
+            crate::app::removal_focus::List::Bookmarks,
+        );
+        let focus_row = requested.map(|page| {
+            self.bookmark_pages
+                .binary_search(&page)
+                .unwrap_or_else(|row| row.min(self.bookmark_pages.len().saturating_sub(1)))
+        });
+        let focus_page = focus_row.and_then(|row| self.bookmark_pages.get(row).copied());
         let row_height = Self::sidebar_row_height(ui);
-        let height = 140.0;
+        let height = (ui.clip_rect().height() - 2.0 * ui.spacing().item_spacing.y)
+            .clamp(row_height, 140.0_f32.max(row_height));
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("bookmarks")
-            .max_height(height);
-        if self.reveal_page.is_some()
-            && let Ok(row) = self.bookmark_pages.binary_search(&self.nav.page)
-        {
+            // Keep virtualization consistent when the outer sidebar clips the
+            // list during a resize; reveal its viewport after choosing a row.
+            .min_scrolled_height(height)
+            .max_height(height)
+            .animated(false);
+        let reveal = focus_row.or_else(|| {
+            self.reveal_page
+                .and_then(|_| self.bookmark_pages.binary_search(&self.nav.page).ok())
+        });
+        if let Some(row) = reveal {
             let id = ui.make_persistent_id(egui::Id::new("bookmarks"));
             let offset =
                 egui::scroll_area::State::load(ui.ctx(), id).map_or(0.0, |state| state.offset.y);
@@ -22,9 +40,15 @@ impl Pagewing {
         }
         let mut target = None;
         let mut remove = None;
+        let mut removal_origin = None;
         let mut focus = ListFocus::new(ui, "bookmarks", row_height, height);
         focus.remap(|page| self.bookmark_pages.binary_search(&page).ok());
-        let scroll = focus.scroll(ui, scroll);
+        let scroll = if focus_row.is_some() {
+            scroll
+        } else {
+            focus.scroll(ui, scroll)
+        };
+        let top = ui.next_widget_position();
         scroll.show_rows(ui, row_height, self.bookmark_pages.len(), |ui, range| {
             for row in range {
                 let page = self.bookmark_pages[row];
@@ -41,21 +65,55 @@ impl Pagewing {
                                 ui.label(self.labels.sidebar_tooltip(page));
                             },
                         );
-                        focus.observe_id(response.focused, row, page);
+                        self.removal_focus.register(&response.remove);
+                        if focus_page == Some(page) {
+                            self.removal_focus.apply(ui, &response.jump);
+                        }
+                        focus.observe_id(
+                            crate::app::list_focus::row_focus(&response.jump).or(response.focused),
+                            row,
+                            page,
+                        );
                         match response.action {
                             Some(RowAction::Jump) => target = Some(page),
-                            Some(RowAction::Remove) => remove = Some(page),
+                            Some(RowAction::Remove) => {
+                                remove = Some(page);
+                                removal_origin = response.keyboard_removal;
+                            }
                             None => {}
                         }
                     },
                 );
             }
         });
+        if focus_row.is_some() {
+            ui.scroll_to_rect(egui::Rect::from_min_max(top, ui.min_rect().max), None);
+        }
         focus.finish(ui);
         if let Some(page) = target {
             self.jump(page);
         }
         if let Some(page) = remove {
+            if let Some(origin) = removal_origin {
+                let row = self.bookmark_pages.binary_search(&page).unwrap();
+                let neighbor = self
+                    .bookmark_pages
+                    .get(row + 1)
+                    .or_else(|| {
+                        row.checked_sub(1)
+                            .and_then(|row| self.bookmark_pages.get(row))
+                    })
+                    .copied();
+                self.removal_focus.request(
+                    self.id,
+                    crate::app::removal_focus::List::Bookmarks,
+                    neighbor,
+                    origin,
+                );
+                if neighbor.is_none() {
+                    ui.memory_mut(|memory| memory.surrender_focus(origin));
+                }
+            }
             self.remove_bookmark(page);
         }
         target.is_some()
@@ -131,21 +189,20 @@ mod tests {
         size: egui::Vec2,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
-        context.run(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                time: Some(context.input(|input| input.time) + 0.25),
-                events,
-                ..Default::default()
-            },
-            |context| {
-                app.keys(context);
-                app.toolbar(context);
-                app.status(context);
-                app.sidebar(context);
-                egui::CentralPanel::default().show(context, |_| {});
-            },
-        )
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            time: Some(context.input(|input| input.time) + 0.25),
+            events,
+            ..Default::default()
+        };
+        app.prepare_native_input(context, &mut input);
+        context.run(input, |context| {
+            app.keys(context);
+            app.toolbar(context);
+            app.status(context);
+            app.sidebar(context);
+            egui::CentralPanel::default().show(context, |_| {});
+        })
     }
 
     fn settle_sidebar(
@@ -158,6 +215,202 @@ mod tests {
             output = sidebar_frame(app, context, size, Vec::new());
         }
         output
+    }
+
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        [true, false]
+            .map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .into()
+    }
+
+    fn focus_delete(app: &mut Pagewing, context: &egui::Context, size: egui::Vec2, page: usize) {
+        app.outline.set_entries(vec![crate::outline::OutlineEntry {
+            title: "Keyboard chapter".into(),
+            destination: Some(crate::destination::Destination::page(0)),
+            depth: 0,
+        }]);
+        app.focus_contents();
+        settle_sidebar(app, context, size);
+        for _ in 0..180 {
+            sidebar_frame(app, context, size, key(egui::Key::Tab));
+            let output = settle_sidebar(app, context, size);
+            let Some(label) = row(&output, page) else {
+                continue;
+            };
+            // A page-list caption can be visible while its bookmark is not.
+            if !output.shapes.iter().any(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "×" => label
+                    .y_range()
+                    .intersects(egui::Rect::from_min_size(text.pos, text.galley.size()).y_range()),
+                _ => false,
+            }) {
+                continue;
+            }
+            let delete = delete_button(&output, page);
+            if context.memory(|memory| memory.focused()).is_some_and(|id| {
+                context
+                    .read_response(id)
+                    .is_some_and(|response| response.rect.contains_rect(delete))
+            }) {
+                return;
+            }
+        }
+        panic!("Tab must reach bookmark {page}'s delete button");
+    }
+
+    fn assert_jump_focus(context: &egui::Context, output: &egui::FullOutput, page: usize) {
+        let id = context
+            .memory(|memory| memory.focused())
+            .expect("deletion must retain a useful focus");
+        let response = context.read_response(id).unwrap();
+        assert!(
+            row(output, page).is_some_and(|label| response.rect.contains_rect(label)),
+            "focus must reach bookmark {page}'s jump control: {:?}",
+            response.rect
+        );
+        assert!(
+            response
+                .interact_rect
+                .contains_rect(response.rect.shrink(1.0)),
+            "replacement focus must be visible: {:?} clipped to {:?}",
+            response.rect,
+            response.interact_rect
+        );
+    }
+
+    #[test]
+    fn keyboard_deletion_focuses_a_neighbor_without_navigating() {
+        let size = egui::vec2(1180.0, 820.0);
+        for (removed, neighbor) in [(0, 2), (2, 4), (4, 2)] {
+            let (_directory, context, mut app) = app();
+            app.reading.bookmarks = [0, 2, 4].into_iter().collect();
+            app.refresh_bookmarks();
+            focus_delete(&mut app, &context, size, removed);
+            app.pan = egui::vec2(37.0, 53.0);
+            sidebar_frame(&mut app, &context, size, key(egui::Key::Enter));
+            let output = settle_sidebar(&mut app, &context, size);
+            assert!(!app.reading.bookmarks.contains(&removed));
+            assert_eq!(app.nav.page, 0);
+            assert_eq!(app.pan, egui::vec2(37.0, 53.0));
+            assert_jump_focus(&context, &output, neighbor);
+            sidebar_frame(&mut app, &context, size, key(egui::Key::Enter));
+            assert_eq!(app.nav.page, neighbor);
+            assert_eq!(app.bookmark_pages.len(), 2);
+        }
+    }
+
+    #[test]
+    fn deletion_replays_native_activation_and_tab_on_replacement_controls() {
+        let size = egui::vec2(1180.0, 820.0);
+        for activation in [egui::Key::Enter, egui::Key::Space] {
+            for tab in [false, true] {
+                let (_directory, context, mut app) = app();
+                app.reading.bookmarks = [0, 2, 4, 6].into_iter().collect();
+                app.refresh_bookmarks();
+                focus_delete(&mut app, &context, size, 2);
+                let mut events = key(activation);
+                if tab {
+                    events.extend(key(egui::Key::Tab));
+                }
+                events.extend(key(egui::Key::Enter));
+                sidebar_frame(&mut app, &context, size, events);
+                let output = settle_sidebar(&mut app, &context, size);
+                if tab {
+                    assert_eq!(
+                        app.bookmark_pages,
+                        [0, 4],
+                        "Tab from jump 4 reaches delete 6"
+                    );
+                    assert_eq!(app.nav.page, 0);
+                    assert_jump_focus(&context, &output, 4);
+                } else {
+                    assert_eq!(app.bookmark_pages, [0, 4, 6]);
+                    assert_eq!(app.nav.page, 4, "queued Enter follows replacement jump");
+                }
+                assert!(app.focus_input.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn deletion_reveals_a_virtual_successor_after_resizing() {
+        let (_directory, context, mut app) = app();
+        let size = egui::vec2(1180.0, 820.0);
+        focus_delete(&mut app, &context, size, 5);
+        sidebar_frame(&mut app, &context, size, key(egui::Key::Enter));
+        let small = egui::vec2(240.0, 240.0);
+        let output = settle_sidebar(&mut app, &context, small);
+        assert_eq!(app.nav.page, 0);
+        assert_eq!(app.bookmark_pages.len(), 79);
+        assert_jump_focus(&context, &output, 6);
+        sidebar_frame(&mut app, &context, small, key(egui::Key::Enter));
+        assert_eq!(app.nav.page, 6);
+    }
+
+    #[test]
+    fn empty_or_hidden_lists_and_new_focus_do_not_hold_later_input() {
+        let size = egui::vec2(1180.0, 820.0);
+        for cancel in ["empty", "hidden", "focus", "close", "last"] {
+            let (_directory, context, mut app) = app();
+            app.reading.bookmarks = if cancel == "last" {
+                [0].into_iter().collect()
+            } else {
+                [0, 2].into_iter().collect()
+            };
+            app.refresh_bookmarks();
+            focus_delete(&mut app, &context, size, 0);
+            sidebar_frame(&mut app, &context, size, key(egui::Key::Enter));
+            match cancel {
+                "empty" => {
+                    app.remove_bookmark(2);
+                }
+                "hidden" => {
+                    app.library.sidebar = false;
+                }
+                "focus" => {
+                    context
+                        .memory_mut(|memory| memory.request_focus(egui::Id::new("another-input")));
+                }
+                "close" => {
+                    app.clear_document(&context);
+                }
+                "last" => {
+                    assert!(context.memory(|memory| memory.focused()).is_none());
+                    app.restore_deleted();
+                    assert!(app.reading.bookmarks.contains(&0));
+                    app.remove_bookmark(0);
+                }
+                _ => unreachable!(),
+            }
+            let mut input = egui::RawInput {
+                events: key(egui::Key::J),
+                ..Default::default()
+            };
+            app.prepare_native_input(&context, &mut input);
+            assert!(!input.events.is_empty(), "{cancel} must release new input");
+            assert!(app.focus_input.is_empty(), "{cancel}");
+            assert_eq!(app.nav.page, 0);
+        }
+    }
+
+    #[test]
+    fn replacement_focus_uses_the_nearest_surviving_key() {
+        let (_directory, context, mut app) = app();
+        let size = egui::vec2(1180.0, 820.0);
+        app.reading.bookmarks = [0, 2, 4, 6].into_iter().collect();
+        app.refresh_bookmarks();
+        focus_delete(&mut app, &context, size, 2);
+        sidebar_frame(&mut app, &context, size, key(egui::Key::Enter));
+        app.remove_bookmark(4);
+        let output = settle_sidebar(&mut app, &context, size);
+        assert_jump_focus(&context, &output, 6);
+        assert_eq!(app.nav.page, 0);
     }
 
     fn click_sidebar(
@@ -372,6 +625,7 @@ mod tests {
             size,
             key_events(egui::Key::Tab, egui::Modifiers::NONE),
         );
+        settle_sidebar(&mut app, &context, size);
         assert!(!app.library.sidebar, "Escape returns Tab to the reader");
     }
 
