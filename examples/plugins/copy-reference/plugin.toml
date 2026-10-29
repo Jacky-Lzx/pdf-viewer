@@ -4,3 +4,7 @@ name = "Copy reading reference"
 enabled = false
 command = ["python3", "plugin.py"]
 timeout_seconds = 5
+
+description = "Copy the selected text with the document name and current page."
+version = "1.0.0"
+author = "Pagewing"

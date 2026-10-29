@@ -54,6 +54,15 @@ def main():
     assert hole(replies[6])[1] > hole(replies[0])[1], "backward page entry starts at bottom"
     assert replies[7]["goto_page"] == 2
     assert hole(replies[9])[1] > hole(replies[8])[1], "scanned-page band moves"
+    configured = event(1, "activate", include_lines=True)
+    configured["context"]["settings"] = {"lines": 1, "opacity": 0.2}
+    output = subprocess.run(
+        [sys.executable, "-u", str(ROOT / "examples/plugins/focus-reader/plugin.py")],
+        input=json.dumps(configured) + "\n", text=True, capture_output=True, check=True, timeout=5,
+    )
+    reply = json.loads(output.stdout)
+    assert reply["scene"]["dim"][3] == 51
+    assert hole(reply)[3] - hole(reply)[1] < hole(replies[0])[3] - hole(replies[0])[1]
     print("PASS: focus session, j/k, view stability, forward/backward page boundaries and scanned fallback")
 
 
