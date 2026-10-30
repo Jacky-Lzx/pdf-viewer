@@ -122,6 +122,7 @@ impl Pagewing {
                         })
                         .id,
                     );
+                    self.plugin_menu(ui);
                     right_group(ui, if self.nav.count > 0 { 170.0 } else { 90.0 }, |ui| {
                         ui.add_space(12.0);
                         self.input_buttons.help = Some(

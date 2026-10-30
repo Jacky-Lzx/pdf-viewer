@@ -26,6 +26,7 @@ fn frame(app: &mut Pagewing, context: &Context, width: f32, events: Vec<Event>) 
         |context| {
             app.keys(context);
             app.toolbar(context);
+            app.search_bar(context);
             availability = enabled(app, context);
             egui::CentralPanel::default().show(context, |_| {});
         },
@@ -150,6 +151,54 @@ fn button_availability_does_not_consume_pending_geometry_and_dialogs_guard_histo
         frame(&mut app, &context, 1180.0, Vec::new()),
         [false, false]
     );
+}
+
+#[test]
+fn search_reverse_tab_reaches_history_past_the_plugins_menu() {
+    for activation in [Key::Enter, Key::Space] {
+        let (_root, context, mut app) = app();
+        app.jump(2);
+        app.query = "kept query".into();
+        app.find();
+        frame(&mut app, &context, 1180.0, Vec::new());
+        frame(&mut app, &context, 1180.0, Vec::new());
+        for forward in [false, true] {
+            for _ in 0..5 {
+                frame(&mut app, &context, 1180.0, Vec::new());
+            }
+            context
+                .memory_mut(|memory| memory.request_focus(egui::Id::new("pagewing-search-input")));
+            frame(&mut app, &context, 1180.0, Vec::new());
+            // Match smoke-toolbar-history.py: Bookmark, Find, Theme, Help,
+            // Plugins, Hide controls, then the enabled Back/Forward button.
+            for _ in 0..7 {
+                let events = key(Key::Tab)
+                    .into_iter()
+                    .map(|mut event| {
+                        if let Event::Key { modifiers, .. } = &mut event {
+                            *modifiers = Modifiers::SHIFT;
+                        }
+                        event
+                    })
+                    .collect();
+                frame(&mut app, &context, 1180.0, events);
+                frame(&mut app, &context, 1180.0, Vec::new());
+            }
+            let target = if forward {
+                app.input_buttons.history_forward
+            } else {
+                app.input_buttons.history_back
+            };
+            assert_eq!(context.memory(|memory| memory.focused()), target);
+            for width in [240.0, 1180.0, 240.0] {
+                frame(&mut app, &context, width, Vec::new());
+            }
+            assert_eq!(context.memory(|memory| memory.focused()), target);
+            frame(&mut app, &context, 240.0, key(activation));
+            assert_eq!(app.nav.page, if forward { 2 } else { 0 });
+            assert_eq!(app.query, "kept query");
+        }
+    }
 }
 
 #[test]

@@ -8,6 +8,19 @@ mod tests;
 
 impl Pagewing {
     pub(super) fn keys(&mut self, context: &egui::Context) {
+        if self.plugin_manager_open() {
+            if context.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Q))
+            {
+                context.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            if context.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    || input.consume_key(egui::Modifiers::COMMAND, egui::Key::W)
+            }) {
+                self.close_plugin_manager();
+            }
+            return;
+        }
         // Refresh a held Undo before dispatching its activation. A quiet window
         // may have spent longer than the notice timeout between input frames.
         self.update_notice_interaction(context);
@@ -263,6 +276,10 @@ impl Pagewing {
                 && self.mark_action.is_none()
                 && !self.nav.pending_z;
             let binding = crate::settings::Binding::from_event(key, modifiers, symbol);
+            if reader_ready && self.plugin_key(context, raw_key, raw_modifiers) {
+                shortcuts::consume_reader_shortcut(context, raw_key, raw_modifiers);
+                continue;
+            }
             let (key, modifiers, key_text) =
                 match self.library.shortcuts.resolve(&binding, !reader_ready) {
                     crate::settings::Resolution::Mapped(key, modifiers) => {
