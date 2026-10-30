@@ -13,7 +13,8 @@ import time
 SCRIPTS = Path(__file__).resolve().parent
 desktop = runpy.run_path(str(SCRIPTS / "smoke-desktop.py"))
 Keyboard, wait_for = desktop["Keyboard"], desktop["wait_for"]
-make_pdf = runpy.run_path(str(SCRIPTS / "make-sample.py"))["make_pdf"]
+sample = runpy.run_path(str(SCRIPTS / "make-sample.py"))
+make_pdf, pages = sample["make_pdf"], sample["PAGES"]
 
 
 def run(binary):
@@ -46,6 +47,15 @@ def run(binary):
                 finally:
                     application.send_signal(signal.SIGCONT)
 
+            def follow_chapter(page):
+                # Sidebar scrolling and focus reveal can move rows between
+                # frames. Select the title instead of clicking a fixed row y.
+                keyboard.key("c")
+                keyboard.key("a", ctrl=True)
+                for char in pages[page][0].lower():
+                    keyboard.key(char, delay=0.015)
+                keyboard.key(0xFF0D)
+
             try:
                 wait_for(keyboard.focus, "destination reader window")
                 expect(lambda book: book["page"] == 0, "initial page")
@@ -77,18 +87,18 @@ def run(binary):
                 keyboard.key(0xFF09); time.sleep(0.3)
                 keyboard.key("1"); keyboard.key("0"); keyboard.key("0"); keyboard.key("k")
                 expect(lambda book: book["page"] == 1 and book["offset"][1] == 0, "move away from the target on its own page")
-                keyboard.click((100, 277))
+                follow_chapter(1)
                 expect(lambda book: book["page"] == 1 and 0.6 < book["offset"][1] < 0.7, "same-page outline action repositions the viewport")
                 keyboard.key(0xFF51, alt=True)
                 expect(lambda book: book["page"] == 1 and custom(book) == 2 and book["offset"][1] == 0, "same-page back restores the exact reading position")
                 keyboard.key(0xFF53, alt=True)
                 expect(lambda book: book["page"] == 1 and custom(book) == 2 and 0.6 < book["offset"][1] < 0.7, "same-page forward restores the target view")
-                keyboard.key("r"); keyboard.click((100, 277))
+                keyboard.key("r"); follow_chapter(1)
                 expect(lambda book: book["page"] == 1 and book["rotation"] == 1 and 0.15 < book["offset"][1] < 0.25, "XYZ coordinates follow reading rotation")
                 keyboard.key("r", shift=True)
-                keyboard.click((100, 312))
+                follow_chapter(2)
                 expect(lambda book: book["page"] == 2 and 3 < custom(book) < 4 and 0.80 < book["offset"][1] < 0.87, "named rectangular destination fits and centers its region")
-                keyboard.click((100, 417))
+                follow_chapter(5)
                 expect(lambda book: book["page"] == 5 and 3 < custom(book) < 4 and 0.23 < book["offset"][1] < 0.27, "nullable XYZ destination preserves zoom and sets the requested top")
                 keyboard.key("r"); keyboard.key("p")
                 expect(lambda book: book["page"] == 5 and book["rotation"] == 1 and book["fit"] == "Page", "change the view before returning")
@@ -97,13 +107,13 @@ def run(binary):
                 keyboard.key(0xFF53, alt=True)
                 expect(lambda book: book["page"] == 5 and book["rotation"] == 1 and book["fit"] == "Page", "forward history restores the view where back was pressed")
                 keyboard.key("r", shift=True)
-                keyboard.click((100, 347))
+                follow_chapter(3)
                 expect(lambda book: book["page"] == 3 and book["fit"] == "Width" and 0.5 < book["offset"][1] < 0.65, "named FitH destination applies width fit and top coordinate")
-                keyboard.click((100, 382))
+                follow_chapter(4)
                 expect(lambda book: book["page"] == 4 and book["fit"] == "Height" and book["offset"][1] == 0, "FitV destination fits page height")
                 keyboard.key("g"); keyboard.key("g"); keyboard.key("p")
                 time.sleep(0.2)
-                keyboard.click((100, 417))
+                follow_chapter(5)
                 expect(lambda book: book["page"] == 5 and 0.8 < custom(book) < 0.9, "nullable target zoom retains the actual scale from an automatic fit mode")
                 keyboard.key("2"); keyboard.key(0xFF51, alt=True)
                 expect(lambda book: book["page"] == 4 and book["fit"] == "Height", "counted history back restores automatic height fit")
