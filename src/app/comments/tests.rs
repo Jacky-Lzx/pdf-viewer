@@ -1008,6 +1008,11 @@ fn resizing_keeps_the_selected_comment_visible_without_undoing_manual_scroll() {
         memory.request_focus(egui::Id::new("pagewing-comment-filter"));
     });
     frame(&mut app, &context, vec![Event::Paste("Row".into())]);
+    // Text filtering has a per-frame budget and can yield on a busy runner.
+    // A direct selection only applies once the replacement rows are ready.
+    wait(&mut app, &context, |app| {
+        app.comments.view.progress().is_none() && app.comments.view.rows().len() == 80
+    });
     app.comments.view.step(79);
     let mut output = egui::FullOutput::default();
     let size = Vec2::new(500.0, 400.0);
