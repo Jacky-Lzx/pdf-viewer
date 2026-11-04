@@ -15,6 +15,8 @@ mod keyboard;
 mod lifecycle;
 mod list_focus;
 mod list_keyboard;
+#[cfg(all(test, target_os = "macos"))]
+mod macos_open_tests;
 mod menu_focus;
 mod plugins;
 mod properties;
@@ -186,23 +188,33 @@ impl Pagewing {
             .as_ref()
             .map(|documents| documents.take_paths())
             .unwrap_or_default();
-        let mut paths = paths.into_iter();
-        if let Some(path) = paths.next() {
-            self.open(path, context);
-            context.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
-        // Each reader holds one document. Preserve every additional selection
-        // from a Finder batch in its own reader process/window.
+        self.open_macos_paths(paths, context, |path| {
+            let mut child = std::process::Command::new(std::env::current_exe()?)
+                .arg("--")
+                .arg(path)
+                .spawn()?;
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(())
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    fn open_macos_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        context: &egui::Context,
+        mut new_window: impl FnMut(&std::path::Path) -> std::io::Result<()>,
+    ) {
         for path in paths {
-            let result = std::env::current_exe()
-                .and_then(|exe| std::process::Command::new(exe).arg("--").arg(&path).spawn());
-            match result {
-                Ok(mut child) => {
-                    std::thread::spawn(move || {
-                        let _ = child.wait();
-                    });
-                }
-                Err(error) => self.notify(format!("Cannot open {}: {error}", path.display())),
+            // Only an empty reader can receive a Finder document in place.
+            // Keep loaded, loading and failed documents (and drafts) intact.
+            if self.reading.path.as_os_str().is_empty() {
+                self.open(path, context);
+                context.send_viewport_cmd(egui::ViewportCommand::Focus);
+            } else if let Err(error) = new_window(&path) {
+                self.notify(format!("Cannot open {}: {error}", path.display()));
             }
         }
     }

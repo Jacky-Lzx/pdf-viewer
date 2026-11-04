@@ -32,7 +32,7 @@ Linux 需要正常工作的桌面会话、OpenGL、X11 或 Wayland 及 libxkbcom
 sudo apt install build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libgl1-mesa-dev libx11-dev libxi-dev libxrandr-dev
 ```
 
-NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Pagewing.app`。将应用复制到 `/Applications` 后，可在 Finder 中通过 PDF 的“打开方式”选择 Pagewing，应用启动前后均支持。一次选择多个 PDF 时，额外文件会在独立窗口中打开；当前窗口有未保存的 comment 时会提示先保存或放弃。
+NixOS / Nix 用户可以在 `nix-shell` 中构建和运行。Linux 文件选择器使用 XDG Desktop Portal，需要桌面环境对应的 portal 服务。macOS 使用系统文件选择器；运行 `bash scripts/bundle-macos.sh` 可把 release 构建打包为 `target/Pagewing.app`。将应用复制到 `/Applications` 后，可在 Finder 中通过 PDF 的“打开方式”选择 Pagewing，应用启动前后均支持。Finder 打开的 PDF 会使用空白阅读器；当前窗口已有文档时，新文件会在独立窗口中打开，保留原窗口及未保存的 comment。一次选择多个 PDF 时，每份文档使用独立窗口。
 
 macOS 从终端或编辑器打开阅读器时，使用 app bundle 内的可执行文件，例如 `/Applications/Pagewing.app/Contents/MacOS/pagewing`；开发构建可使用仓库内的 `target/Pagewing.app/Contents/MacOS/pagewing`，每次重新构建 release 后需再次运行打包脚本。直接启动 `target/release/pagewing` 或 `cargo install` 安装的裸二进制没有 bundle ID，SwiftTileBar 等按应用身份读取图标的工具会显示通用图标，即使 Dock 图标正常。
 
