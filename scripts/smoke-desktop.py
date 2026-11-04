@@ -375,7 +375,26 @@ def run(binary):
 
         def launch():
             process = subprocess.Popen([str(binary), str(document)], env=environment, stdout=log, stderr=log)
-            wait_for(keyboard.focus, "reader window")
+            def ready():
+                status = process.poll()
+                if status is not None:
+                    raise AssertionError(f"Reader exited before its window appeared: {status}")
+                return keyboard.focus()
+
+            try:
+                # This is the shard's first GUI launch. Allow cold software-GL
+                # initialization on a busy runner more time than UI actions.
+                wait_for(ready, "reader window", timeout=60)
+            except BaseException:
+                # The caller cannot own the process until launch returns.
+                if process.poll() is None:
+                    process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise
             return process
 
         try:
