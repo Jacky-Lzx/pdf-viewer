@@ -197,8 +197,13 @@ impl<'a> RenderCache<'a> {
 
     /// Create a new render cache.
     pub fn new() -> Self {
+        Self::with_interpreter_cache(InterpreterCache::new())
+    }
+
+    /// Share parsed fonts and objects with text extraction for the same PDF.
+    pub fn with_interpreter_cache(interpreter_cache: InterpreterCache<'a>) -> Self {
         Self {
-            interpreter_cache: InterpreterCache::new(),
+            interpreter_cache,
             outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
         }
     }

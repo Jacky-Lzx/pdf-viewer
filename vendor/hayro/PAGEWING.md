@@ -16,6 +16,8 @@ Local changes are confined to `src/lib.rs` and `src/glyph.rs`:
 - Include weight in outline cache keys so caches can be reused across settings.
 - Expose `RenderCache::clear_text_weight_cache` to bound expanded-outline memory
   when the reader changes weight interactively, retaining original/font caches.
+- Add `RenderCache::with_interpreter_cache` so rendering and text extraction
+  share the same PDF's parsed fonts and objects instead of keeping two copies.
 - Leave stroke-only/invisible text, Type 3 glyphs, text clipping outlines, images,
   and ordinary vector graphics unchanged.
 

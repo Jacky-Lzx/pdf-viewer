@@ -1,5 +1,8 @@
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 pub fn install(context: egui::Context) {
     // Read large system font collections without delaying the first frame.
@@ -12,7 +15,7 @@ pub fn install(context: egui::Context) {
             let mut fonts = FontDefinitions::default();
             fonts.font_data.insert(
                 "system-fallback".into(),
-                Arc::new(FontData::from_owned(bytes)),
+                Arc::new(FontData::from_static(bytes)),
             );
             for family in [FontFamily::Proportional, FontFamily::Monospace] {
                 fonts
@@ -38,7 +41,16 @@ fn read_font(path: &Path, require_cjk: bool) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn system_font() -> Option<Vec<u8>> {
+fn system_font() -> Option<&'static [u8]> {
+    // egui clones owned font bytes when constructing its font parser. Keep the
+    // fallback once for the UI's process lifetime so both can borrow it instead
+    // of retaining two copies of a large CJK collection. Initialization still
+    // runs on the font thread, and rebuilding a context reuses the same bytes.
+    static FONT: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    FONT.get_or_init(load_system_font).as_deref()
+}
+
+fn load_system_font() -> Option<Vec<u8>> {
     if let Some(path) = std::env::var_os("PAGEWING_FONT")
         && let Some(bytes) = read_font(Path::new(&path), false)
     {

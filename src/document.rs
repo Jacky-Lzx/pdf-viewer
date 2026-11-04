@@ -699,6 +699,36 @@ mod tests {
     }
 
     #[test]
+    fn sharing_interpreter_cache_preserves_pixels_text_and_selection_geometry() {
+        // Exercise both consumers first: text extraction can populate the font
+        // cache before a render, and selection can follow a render on another page.
+        for extract_first in [false, true] {
+            let pdf = sample();
+            let interpreter = hayro::hayro_interpret::InterpreterCache::new();
+            let cache = RenderCache::with_interpreter_cache(interpreter.clone());
+            for page in [0, 1, 0] {
+                let expected_text = crate::text::extract(
+                    &pdf.pages()[page],
+                    &hayro::hayro_interpret::InterpreterCache::new(),
+                );
+                let expected_image =
+                    rasterize_pixels(&pdf, &RenderCache::new(), page, 300).unwrap();
+                if extract_first {
+                    let _ = crate::text::extract(&pdf.pages()[page], &interpreter);
+                }
+                let image = rasterize_pixels(&pdf, &cache, page, 300).unwrap();
+                assert_eq!(image, expected_image);
+                let text = crate::text::extract(&pdf.pages()[page], &interpreter);
+                assert_eq!(text.text, expected_text.text);
+                assert_eq!(
+                    text.rects_for_range(0..text.text.len()),
+                    expected_text.rects_for_range(0..expected_text.text.len())
+                );
+            }
+        }
+    }
+
+    #[test]
     fn encrypted_pdf_rejects_bad_passwords_and_decodes_real_text() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("encrypted.pdf");

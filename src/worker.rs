@@ -557,9 +557,11 @@ fn session(
     context: &egui::Context,
     appearance: RenderAppearance,
 ) {
-    let render_cache = RenderCache::new();
-    let mut rendered_weight = appearance.settings.text_embolden;
     let interpreter_cache = InterpreterCache::new();
+    // Both consumers interpret the same PDF on this worker. Cloning the cache
+    // shares its fonts/objects, avoiding a second decoded copy for selection.
+    let render_cache = RenderCache::with_interpreter_cache(interpreter_cache.clone());
+    let mut rendered_weight = appearance.settings.text_embolden;
     let link_reader = crate::links::LinkReader::new(pdf);
     let mut texts = crate::text_cache::TextCache::default();
     let mut search: Option<SearchProgress> = None;

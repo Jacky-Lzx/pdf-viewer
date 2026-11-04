@@ -2257,3 +2257,20 @@ python3 scripts/with-xvfb.py python3 scripts/smoke-removal-focus.py target/relea
 ```sh
 cargo bench --locked --bench search_index_ascii -- 17
 ```
+
+## 共享界面字体与 PDF 解析缓存
+
+2026-11-04，基线为 `cabd6b1`，在本机 macOS arm64 上分别构建 release 二进制，通过独立应用窗口验证。egui 0.33.3 的 owned 字体路径会为解析器克隆整份字体数据；本机回退字体 `STHeiti Light.ttc` 为 55,783,456 字节，原实现因此保留两份。现在用进程级 `OnceLock` 持有一份字体，让 egui 及其解析器借用同一份静态切片；字体仍在后台线程加载，`PAGEWING_FONT` 和字体候选顺序保持。字体按界面生命周期保留到进程退出，不随 PDF 关闭而释放。
+
+PDF worker 原先分别为渲染和文字提取创建 interpreter 缓存，现在通过 `RenderCache::with_interpreter_cache` 共享同一文档的解析字体和对象。每个新文档仍创建自己的缓存，关闭或替换 session 时释放；不共享不同 PDF 的解析对象。没有调整渲染分辨率、预渲染策略或页面纹理预算。
+
+原生对照使用同一份 14 页周报 PDF、同尺寸 Retina 窗口和适合整页模式，浏览到末页并缩放两次后复位。下表为 `vmmap -summary` 中 **MALLOC_LARGE 的 resident**，排除 `MALLOC_LARGE (empty)`、其他堆分配和 GPU；这是组件内存，不是整个进程占用。
+
+| 状态 | 基线 | 当前 | 减少 |
+| --- | ---: | ---: | ---: |
+| 浏览后 | 110.4 MiB | 57.2 MiB | 53.2 MiB |
+| 关闭 PDF 后 | 114.4 MiB | 61.2 MiB | 53.2 MiB |
+
+这个差额与一份系统字体大小一致。共享 PDF 解析缓存的额外收益取决于文档字体，未在此单独量化。整进程 physical footprint 还受分配器空闲区、窗口和图形驱动缓存影响，不能将单次总量差当作稳定收益，也不能据此证明不存在泄漏。优化版关闭后的 footprint 为 232.9 MiB，连续三轮关闭重开后为 238.8 MiB；这是有限轮次的生命周期检查。
+
+完整 Rust 测试 670 项通过、2 项沿用忽略设置；格式检查、全部目标严格 Clippy、release 构建和 macOS 应用签名验证通过。新增回归交替执行共享缓存下的文字提取与渲染，逐像素比较图像并核对文字和选择矩形。原生窗口另验证中文输入、全文搜索高亮、翻页、缩放及关闭重开；测试结束后恢复原有阅读记录。
